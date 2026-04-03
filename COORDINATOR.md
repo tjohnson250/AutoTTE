@@ -178,6 +178,12 @@ consider it a credible starting point.
 - [ ] Temp tables built stepwise: #eligible → #treatment → #outcomes → #analytic_cohort
 - [ ] Grace period defined for treatment assignment around time zero
 - [ ] R code uses DBI + odbc for connection, not RODBC or custom connectors
+- [ ] CONSORT flow diagram included (print_consort_table + render_consort_diagram)
+- [ ] Confounders SQL uses dbExecute() then separate dbGetQuery() — NOT combined
+- [ ] names(cohort) <- tolower(names(cohort)) called after dbGetQuery()
+- [ ] PNG paths use file.path(output_dir, ...) — no hardcoded relative paths
+- [ ] Empty cohort guard: main() renders CONSORT and stops if nrow(cohort) == 0
+- [ ] Factor columns use distinct names (sex_cat, race_cat) not raw column names
 
 **Red flags requiring revision:**
 - Time zero not explicitly defined
@@ -187,6 +193,10 @@ consider it a credible starting point.
 - SQL references tables or columns not in the schema files
 - Using `dbo.TABLE` instead of `CDW.dbo.TABLE`
 - Using generic drug names instead of RXNORM_CUI or NDC codes
+- `SELECT * FROM #analytic_cohort` inside the confounders SQL batch (ODBC bug)
+- Hardcoded relative paths in png() calls
+- No CONSORT flow diagram
+- No empty-cohort guard in main()
 
 ### Protocol Review Acceptance Criteria
 - [ ] Reviewer checked each protocol against the TTE checklist in REVIEW.md

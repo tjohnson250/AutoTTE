@@ -101,6 +101,26 @@ Structure your review with:
 - Are balance diagnostics checking the right thing?
 - Does the E-value computation use the right effect measure?
 
+**CDW-Specific Code Review (required for all CDW protocols):**
+- Are ALL table references fully qualified as `CDW.dbo.TABLE_NAME`? Flag any
+  bare `dbo.TABLE_NAME`.
+- Does `pull_analytic_cohort()` call `names(cohort) <- tolower(names(cohort))`
+  immediately after `dbGetQuery()`?
+- Are `dbExecute()` and `dbGetQuery()` used correctly? The confounders SQL
+  must NOT include `SELECT * FROM #analytic_cohort` in the same batch as the
+  `SELECT INTO`. They must be separate calls: `dbExecute()` for the INSERT,
+  then `dbGetQuery("SELECT * FROM #analytic_cohort")`. This is a known ODBC
+  driver issue that returns wrong results silently.
+- Does the code use `file.path(output_dir, ...)` for ALL `png()` paths?
+  Hardcoded relative paths like `png("results/.../plot.png")` will break.
+- Is there an empty-cohort guard in `main()` that renders the CONSORT diagram
+  and stops before `prepare_cohort()` when `nrow(cohort) == 0`?
+- Does the code include a CONSORT flow diagram (`print_consort_table()` and
+  `render_consort_diagram()`) that tracks patient counts at every SQL step?
+- Do derived factor columns use distinct names (e.g., `sex_cat` not `sex`)
+  to avoid overwriting the raw column in `mutate()`?
+- If Quarto (.qmd): is `build_cohort_sql()` in a single code chunk?
+
 **Per-protocol verdict in your markdown review:**
 - **ACCEPT** — Ready to execute, no major issues
 - **REVISE** — Fixable issues, list specific changes needed

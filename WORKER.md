@@ -159,3 +159,86 @@ debugging empty cohorts and for transparency in reporting.
 The CDW analysis template (`analysis_plan_template_cdw.R`) already includes
 these functions. Adapt the step labels and exclusion reasons to match your
 protocol's specific cohort-building logic.
+
+### ODBC Multi-Statement Batching (critical)
+
+**NEVER combine `SELECT ... INTO #temp_table` and `SELECT * FROM #temp_table`
+in the same SQL batch passed to `dbGetQuery()`.** Some ODBC drivers return the
+row-affected count from the `SELECT INTO` instead of the actual query result,
+giving you a 0-row data frame with wrong/missing columns.
+
+Instead, split them:
+
+```r
+# Step 1: Create the temp table (no result set needed)
+dbExecute(con, sql_that_creates_analytic_cohort)
+
+# Step 2: Pull the data in a separate call
+cohort <- dbGetQuery(con, "SELECT * FROM #analytic_cohort")
+```
+
+This applies to the confounders step and any other step where you need data
+back in R. Steps that only create temp tables (eligibility, treatment, outcomes)
+should always use `dbExecute()`.
+
+### Column Naming in R
+
+After `names(cohort) <- tolower(names(cohort))`, raw columns from SQL like
+`SEX`, `RACE`, `HISPANIC` become `sex`, `race`, `hispanic`. When creating
+derived factor variables in `mutate()`, use a **different name** to avoid
+overwriting the source column before it's fully evaluated:
+
+```r
+mutate(
+  sex_cat = factor(sex, levels = c("F", "M"), labels = c("Female", "Male")),
+  race_cat = case_when(race == "03" ~ "Black", ...),
+  hispanic_cat = factor(if_else(hispanic == "Y", "Hispanic", "Non-Hispanic"))
+)
+```
+
+Then use `sex_cat`, `race_cat`, `hispanic_cat` in the propensity score formula,
+subgroup filters, and Table 1 summaries.
+
+### PNG Output Paths
+
+Never use hardcoded relative paths like `png("results/.../plot.png")`. The
+working directory is unpredictable across RStudio, Quarto render, and batch
+execution. Instead, define `output_dir` once in the config section:
+
+```r
+output_dir <- if (requireNamespace("here", quietly = TRUE)) {
+  here::here("results", "<therapeutic_area>", "protocols")
+} else {
+  normalizePath(file.path(getwd(), "results", "<therapeutic_area>", "protocols"),
+                mustWork = FALSE)
+}
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+```
+
+Then use `file.path(output_dir, "protocol_01_love_plot.png")` for all `png()` calls.
+
+### Empty Cohort Guard
+
+`main()` must render the CONSORT diagram and bail out **before** calling
+`prepare_cohort()` when the cohort has 0 rows. Otherwise R will error on
+missing columns. Pattern:
+
+```r
+if (nrow(cohort) == 0) {
+  message("*** STOPPING: Analytic cohort has 0 patients. ***")
+  message("Review the CONSORT diagram to identify where patients were lost.")
+  return(list(results = NULL, consort = consort))
+}
+```
+
+### Quarto-Specific Rules
+
+When generating `.qmd` files:
+
+- The **entire `build_cohort_sql()` function must be in a single code chunk**.
+  Do NOT split it across multiple chunks — variables defined in one chunk are
+  not in scope in another.
+- Use labeled chunks (`#| label: cohort-sql`) for readability, but keep all
+  code that shares function scope in one chunk.
+- Set `#| eval: false` on the `main` chunk so the report can render without
+  a live DB connection.
