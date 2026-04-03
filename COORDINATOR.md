@@ -53,6 +53,23 @@ echo "──── Reviewer complete ────" >&2
 - Always print a banner before and after so the user knows which agent
   is running.
 
+## Protocol Targets
+
+Your initial prompt will specify the protocol target:
+
+- **`public`** (default): Protocols target public datasets (MIMIC-IV, NHANES, etc.)
+  The feasibility phase uses the dataset registry MCP tools.
+- **`cdw`**: Protocols target the institutional PCORnet CDW on MS SQL Server.
+  The feasibility phase checks against the CDW schema files instead of the
+  registry. R scripts must include T-SQL that queries the PCORnet CDM directly.
+- **`both`**: Generate protocols for both public data and the CDW where feasible.
+
+When targeting the CDW, tell workers to:
+1. Read `CDW_DBO_database_schema.txt` and `MasterPatientIndex_DBO_database_schema.txt`
+2. Use `analysis_plan_template_cdw.R` as their structural reference
+3. Write T-SQL (MS SQL Server syntax) using actual PCORnet CDM table/column names
+4. Use RXNORM_CUI for medications, LOINC for labs, ICD codes with DX_TYPE
+
 ## The Research Phases
 
 There are three main phases of work. You decide when to advance, when to
@@ -64,8 +81,11 @@ loop, and when to backtrack based on your assessment of the deliverables.
 - **Worker produces:** `01_literature_scan.md`, `02_evidence_gaps.md`
 
 ### Phase 2: Dataset Feasibility
-- **Goal:** Match approved questions to public datasets
+- **Goal:** Match approved questions to available data
 - **Worker reads:** WORKER.md + approved questions from Phase 1
+- For public target: worker uses `query_dataset_registry` / `get_dataset_details`
+- For CDW target: worker reads `CDW_DBO_database_schema.txt` and maps
+  protocol elements to specific PCORnet tables and columns
 - **Worker produces:** `03_feasibility.md`
 
 ### Phase 3: Protocol Generation
@@ -127,6 +147,7 @@ consider it a credible starting point.
 
 ### Feasibility Acceptance Criteria
 - [ ] Every approved question was assessed against the dataset registry
+      AND/OR against the PCORnet CDW schema (if CDW mode is enabled)
 - [ ] For feasible matches: specific variables identified for exposure,
       outcome, and key confounders
 - [ ] Positivity concerns discussed for each match
@@ -136,7 +157,7 @@ consider it a credible starting point.
 **Red flags requiring revision:**
 - Dataset claims that are vague ("MIMIC probably has this")
 - No discussion of time-zero feasibility
-- Claiming variables exist without checking get_dataset_details
+- Claiming variables exist without checking get_dataset_details or the schema files
 
 ### Protocol Acceptance Criteria
 - [ ] Target trial specification complete (all 7 elements from WORKER.md)
@@ -147,11 +168,23 @@ consider it a credible starting point.
 - [ ] Limitations section acknowledges key threats to validity
 - [ ] No immortal time bias in the design
 
+**Additional criteria for CDW-targeted protocols:**
+- [ ] SQL is valid T-SQL (MS SQL Server syntax, not PostgreSQL/MySQL)
+- [ ] SQL references actual PCORnet CDM tables and columns from the schema
+- [ ] ICD codes use the correct DX_TYPE ('09' or '10')
+- [ ] Medications use RXNORM_CUI (PRESCRIBING) or NDC (DISPENSING), not drug names
+- [ ] Labs use LOINC codes in LAB_RESULT_CM, not lab names
+- [ ] Temp tables built stepwise: #eligible → #treatment → #outcomes → #analytic_cohort
+- [ ] Grace period defined for treatment assignment around time zero
+- [ ] R code uses DBI + odbc for connection, not RODBC or custom connectors
+
 **Red flags requiring revision:**
 - Time zero not explicitly defined
 - Estimand not justified
 - R code is a skeleton with TODO placeholders
 - Claiming to adjust for confounders the dataset doesn't have
+- SQL references tables or columns not in the schema files
+- Using generic drug names instead of RXNORM_CUI or NDC codes
 
 ### Protocol Review Acceptance Criteria
 - [ ] Reviewer checked each protocol against the TTE checklist in REVIEW.md

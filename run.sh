@@ -8,7 +8,9 @@
 #
 # Usage:
 #   ./run.sh "atrial fibrillation"
-#   ./run.sh "type 2 diabetes" 75        # custom max turns for sub-agents
+#   ./run.sh "atrial fibrillation" --cdw        # target PCORnet CDW
+#   ./run.sh "atrial fibrillation" --both       # target public data + CDW
+#   ./run.sh "type 2 diabetes" --cdw 75         # custom max turns
 #
 # Prerequisites:
 #   - Claude Code CLI installed (npm install -g @anthropic-ai/claude-code)
@@ -18,8 +20,18 @@
 
 set -euo pipefail
 
-THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [max_turns_per_sub_agent]}"
-MAX_TURNS="${2:-50}"
+THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--cdw|--both] [max_turns]}"
+
+# Parse optional flags
+TARGET="public"
+MAX_TURNS="50"
+for arg in "${@:2}"; do
+  case "$arg" in
+    --cdw)  TARGET="cdw" ;;
+    --both) TARGET="both" ;;
+    *)      MAX_TURNS="$arg" ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -30,6 +42,7 @@ mkdir -p "$RESULTS_DIR/protocols"
 echo "============================================="
 echo " Auto-Protocol Designer"
 echo " Therapeutic area: $THERAPEUTIC_AREA"
+echo " Protocol target:  $TARGET"
 echo " Max turns/sub-agent: $MAX_TURNS"
 echo " Results: $RESULTS_DIR/"
 echo "============================================="
@@ -51,8 +64,16 @@ Read COORDINATOR.md now for your full instructions.
 
 Your configuration:
 - Therapeutic area: "$THERAPEUTIC_AREA"
+- Protocol target: $TARGET
 - Results directory: $RESULTS_DIR
 - Max turns per sub-agent: $MAX_TURNS (pass this as --max-turns to sub-agents)
+
+Protocol target "$TARGET" means:
+- "public": generate protocols targeting public datasets (MIMIC-IV, NHANES, etc.)
+- "cdw": generate protocols targeting the PCORnet CDW (MS SQL Server). Workers
+  must read CDW_DBO_database_schema.txt and write T-SQL in their R scripts.
+  Use analysis_plan_template_cdw.R as the structural reference.
+- "both": generate protocols for both public data and the CDW where feasible.
 
 Begin by reading COORDINATOR.md, then initialize your state files and launch
 the first sub-agent (literature discovery).

@@ -84,3 +84,46 @@ Each target trial emulation protocol should include:
   particular treatment in some subgroup, note this
 - The R code should use modern tidyverse style and established causal
   inference packages (WeightIt, cobalt, survival, EValue)
+
+## Protocol Targets: Public Data vs CDW
+
+Protocols may target either **public datasets** (MIMIC-IV, NHANES, etc.) or
+the **PCORnet CDW** (our institutional Clinical Data Warehouse on MS SQL Server).
+The coordinator will tell you which target to use.
+
+### When targeting the PCORnet CDW:
+
+Use `analysis_plan_template_cdw.R` as your structural reference. The schema
+files are in the project root:
+- `CDW_DBO_database_schema.txt` — full PCORnet CDM schema
+- `MasterPatientIndex_DBO_database_schema.txt` — MPI schema
+
+**Key PCORnet CDM tables and how to use them:**
+
+| Protocol Element | PCORnet Table | Key Columns |
+|-----------------|---------------|-------------|
+| Demographics | DEMOGRAPHIC | PATID, BIRTH_DATE, SEX, RACE, HISPANIC |
+| Encounters | ENCOUNTER | ENCOUNTERID, PATID, ADMIT_DATE, DISCHARGE_DATE, ENC_TYPE |
+| Diagnoses (ICD) | DIAGNOSIS | DX, DX_TYPE ('09'=ICD-9, '10'=ICD-10), ADMIT_DATE |
+| Conditions | CONDITION | CONDITION, CONDITION_TYPE, ONSET_DATE |
+| Prescribed meds | PRESCRIBING | RXNORM_CUI, RX_ORDER_DATE, RX_START_DATE |
+| Administered meds | MED_ADMIN | MEDADMIN_CODE, MEDADMIN_START_DATE |
+| Dispensed meds | DISPENSING | NDC, DISPENSE_DATE |
+| Lab results | LAB_RESULT_CM | LAB_LOINC, RESULT_NUM, RESULT_DATE |
+| Vitals | VITAL | SYSTOLIC, DIASTOLIC, HT, WT, ORIGINAL_BMI, SMOKING |
+| Procedures | PROCEDURES | PX, PX_TYPE, PX_DATE |
+| Death | DEATH | DEATH_DATE, DEATH_SOURCE |
+| Death cause | DEATH_CAUSE | DEATH_CAUSE, DEATH_CAUSE_CODE |
+| Enrollment | ENROLLMENT | ENR_START_DATE, ENR_END_DATE, ENR_BASIS |
+
+**SQL conventions for CDW protocols:**
+- Write T-SQL (MS SQL Server syntax) — use DATEADD, DATEDIFF, temp tables (#)
+- All tables are in `dbo` schema
+- PATID is the universal patient key (varchar)
+- ENCOUNTERID links encounters across tables
+- Use ICD-10 codes (DX_TYPE = '10') unless the study period requires ICD-9
+- Medications: use RXNORM_CUI in PRESCRIBING, NDC in DISPENSING
+- Labs: use LOINC codes in LAB_RESULT_CM
+- Build temp tables step by step: #eligible → #treatment → #outcomes → #analytic_cohort
+- Always include a grace period around time zero for treatment assignment
+- The R script should use DBI + odbc to connect and execute the SQL
