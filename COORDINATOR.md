@@ -21,23 +21,37 @@ files you point it to, not your reasoning.
 ### Worker agents (do the research):
 
 ```bash
+echo "──── Launching worker: [description] ────" >&2
 cat <<'PROMPT' | claude -p --verbose --max-turns $MAX_TURNS \
-  --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,Bash,Read,Write,Edit,WebSearch,WebFetch"
+  --output-format stream-json \
+  --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,Bash,Read,Write,Edit,WebSearch,WebFetch" \
+  2>&1 | python3 tools/stream_viewer.py --label "Worker"
 [your prompt here]
 PROMPT
+echo "──── Worker complete ────" >&2
 ```
 
 ### Reviewer agents (verify the work):
 
 ```bash
+echo "──── Launching reviewer: [description] ────" >&2
 cat <<'PROMPT' | claude -p --verbose --max-turns $MAX_TURNS \
-  --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,Bash,Read,Write,Edit,WebSearch,WebFetch"
+  --output-format stream-json \
+  --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,Bash,Read,Write,Edit,WebSearch,WebFetch" \
+  2>&1 | python3 tools/stream_viewer.py --label "Reviewer"
 [your review prompt here]
 PROMPT
+echo "──── Reviewer complete ────" >&2
 ```
 
-**Critical:** Always use `cat <<'PROMPT'` (with quotes around the delimiter)
-to prevent variable expansion in the sub-agent's prompt.
+**Critical rules for launching sub-agents:**
+- Always use `cat <<'PROMPT'` (with quotes around the delimiter)
+  to prevent variable expansion in the sub-agent's prompt.
+- Always pipe through `python3 tools/stream_viewer.py --label "Worker"` or
+  `--label "Reviewer"` so the user can see real-time progress and tell
+  which agent is active.
+- Always print a banner before and after so the user knows which agent
+  is running.
 
 ## The Research Phases
 

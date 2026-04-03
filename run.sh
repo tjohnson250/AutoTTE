@@ -44,7 +44,7 @@ cat <<PROMPT | claude -p \
   --max-turns 200 \
   --output-format stream-json \
   --allowedTools "Bash,Read,Write,Edit" \
-  2>&1 | python3 tools/stream_viewer.py
+  2>&1 | python3 tools/stream_viewer.py --label "Coordinator"
 You are the coordinator agent for the Auto-Protocol Designer.
 
 Read COORDINATOR.md now for your full instructions.
@@ -57,11 +57,15 @@ Your configuration:
 Begin by reading COORDINATOR.md, then initialize your state files and launch
 the first sub-agent (literature discovery).
 
-When launching sub-agents, always use this pattern:
+When launching sub-agents, always pipe through stream_viewer.py with a label:
 cat <<'SUBPROMPT' | claude -p --verbose --max-turns $MAX_TURNS \\
-  --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,Bash,Read,Write,Edit,WebSearch,WebFetch"
+  --output-format stream-json \\
+  --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,Bash,Read,Write,Edit,WebSearch,WebFetch" \\
+  2>&1 | python3 tools/stream_viewer.py --label "Worker"
 [prompt for sub-agent]
 SUBPROMPT
+
+Use --label "Worker" for work agents, --label "Reviewer" for review agents.
 
 Note: The sub-agents have access to PubMed MCP tools. You (the coordinator)
 do not need those tools — you work through sub-agents.

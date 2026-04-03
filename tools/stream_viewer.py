@@ -3,8 +3,17 @@ Stream Viewer — Pretty-prints Claude Code stream-json output
 =============================================================
 Reads streaming JSON events from stdin and displays a clean,
 readable progress log. Pairs with `claude -p --output-format stream-json`.
+
+Supports nesting: when the coordinator launches sub-agents that also
+pipe through stream_viewer.py, the sub-agent output appears indented
+and labeled so you can tell which agent is active.
+
+Usage:
+    claude -p --output-format stream-json ... 2>&1 | python3 tools/stream_viewer.py
+    claude -p --output-format stream-json ... 2>&1 | python3 tools/stream_viewer.py --label "Worker"
 """
 
+import argparse
 import json
 import sys
 import textwrap
@@ -16,26 +25,35 @@ CYAN = "\033[36m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
+MAGENTA = "\033[35m"
 RESET = "\033[0m"
 
-def format_tool_use(tool_name: str, tool_input: dict) -> str:
+
+def format_tool_use(tool_name: str) -> str:
     """Format a tool call for display."""
-    # Shorten MCP tool names for readability
     short_name = tool_name.replace("mcp__pubmed__", "pubmed:")
     return f"{CYAN}🔧 {short_name}{RESET}"
 
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--label", default="", help="Label prefix for this agent level")
+    args = parser.parse_args()
+
+    prefix = f"{MAGENTA}[{args.label}]{RESET} " if args.label else ""
     turn_count = 0
+
     for line in sys.stdin:
         line = line.strip()
         if not line:
             continue
 
+        # Pass through non-JSON lines (e.g., banners from sub-agents)
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
-            # Not JSON — just print it
-            print(line)
+            print(f"{prefix}{line}")
+            sys.stdout.flush()
             continue
 
         event_type = event.get("type", "")
@@ -50,63 +68,73 @@ def main():
                 if block_type == "text":
                     text = block.get("text", "")
                     if text.strip():
-                        print(f"\n{BOLD}[Turn {turn_count}]{RESET}")
-                        # Wrap long text for readability
+                        print(f"\n{prefix}{BOLD}[Turn {turn_count}]{RESET}")
                         for para in text.split("\n"):
                             if para.strip():
-                                print(textwrap.fill(para.strip(), width=88,
-                                                     initial_indent="  ",
-                                                     subsequent_indent="  "))
+                                wrapped = textwrap.fill(
+                                    para.strip(), width=88,
+                                    initial_indent=f"{prefix}  ",
+                                    subsequent_indent=f"{prefix}  ",
+                                )
+                                print(wrapped)
 
                 elif block_type == "tool_use":
                     tool_name = block.get("name", "unknown")
                     tool_input = block.get("input", {})
-                    label = format_tool_use(tool_name, tool_input)
+                    label = format_tool_use(tool_name)
 
-                    # Show key details for known tools
                     if "search_pubmed" in tool_name:
                         query = tool_input.get("query", "")
-                        print(f"  {label} query={DIM}{query[:80]}{RESET}")
+                        print(f"{prefix}  {label} query={DIM}{query[:80]}{RESET}")
                     elif "fetch_abstracts" in tool_name:
                         pmids = tool_input.get("pmids", [])
-                        print(f"  {label} {len(pmids)} PMIDs")
+                        print(f"{prefix}  {label} {len(pmids)} PMIDs")
                     elif "query_dataset_registry" in tool_name:
                         domain = tool_input.get("domain", "")
                         kw = tool_input.get("keyword", "")
-                        print(f"  {label} domain={domain} keyword={kw}")
+                        print(f"{prefix}  {label} domain={domain} keyword={kw}")
                     elif "get_dataset_details" in tool_name:
                         name = tool_input.get("name", "")
-                        print(f"  {label} {name}")
+                        print(f"{prefix}  {label} {name}")
                     elif tool_name == "Write":
                         path = tool_input.get("file_path", "")
-                        print(f"  {label} {GREEN}→ {path}{RESET}")
+                        print(f"{prefix}  {label} {GREEN}→ {path}{RESET}")
                     elif tool_name == "Read":
                         path = tool_input.get("file_path", "")
-                        print(f"  {label} ← {path}")
+                        print(f"{prefix}  {label} ← {path}")
+                    elif tool_name == "Edit":
+                        path = tool_input.get("file_path", "")
+                        print(f"{prefix}  {label} ✏️  {path}")
                     elif tool_name == "Bash":
                         cmd = tool_input.get("command", "")
-                        print(f"  {label} $ {DIM}{cmd[:80]}{RESET}")
+                        # Detect sub-agent launches
+                        if "claude -p" in cmd:
+                            print(f"\n{prefix}  {YELLOW}{BOLD}▶ Launching sub-agent...{RESET}")
+                        else:
+                            print(f"{prefix}  {label} $ {DIM}{cmd[:100]}{RESET}")
                     else:
-                        print(f"  {label}")
+                        print(f"{prefix}  {label}")
 
         # ── Tool results ──
         elif event_type == "result":
-            # Final result
             result_text = event.get("result", "")
             if result_text:
-                print(f"\n{GREEN}{BOLD}═══ COMPLETE ═══{RESET}")
-                print(result_text[:500])
-                if len(result_text) > 500:
-                    print(f"{DIM}  ... ({len(result_text)} chars total){RESET}")
+                print(f"\n{prefix}{GREEN}{BOLD}═══ AGENT COMPLETE ═══{RESET}")
+                # Show a brief summary, not the full output
+                lines = result_text.strip().split("\n")
+                for l in lines[:10]:
+                    print(f"{prefix}  {l}")
+                if len(lines) > 10:
+                    print(f"{prefix}  {DIM}... ({len(lines)} lines total){RESET}")
 
         # ── System / error events ──
         elif event_type == "error":
             error = event.get("error", {})
             msg = error.get("message", str(error))
-            print(f"  {RED}✗ Error: {msg}{RESET}")
+            print(f"{prefix}  {RED}✗ Error: {msg}{RESET}")
 
-        # Flush after each event so output appears immediately
         sys.stdout.flush()
+
 
 if __name__ == "__main__":
     main()
