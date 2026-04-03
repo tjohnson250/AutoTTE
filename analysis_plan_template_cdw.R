@@ -278,18 +278,33 @@ build_cohort_sql <- function(config) {
 
 # ─── 3. Execute SQL and Pull Data ───────────────────────────────────────────
 
+# Helper: count rows in a temp table
+count_temp <- function(con, tbl) {
+  res <- dbGetQuery(con, paste("SELECT COUNT(*) AS n FROM", tbl))
+  res$n[1]
+}
+
+
 pull_analytic_cohort <- function(con, config) {
   sql_parts <- build_cohort_sql(config)
+  consort <- list()   # accumulates step-by-step counts
 
-  message("Executing cohort SQL...")
+  message("=== Executing Cohort SQL ===")
+
   message("  Step 1: Building eligible population...")
   dbExecute(con, sql_parts$eligibility)
+  consort$eligible <- count_temp(con, "#eligible")
+  message(sprintf("    -> #eligible: %d patients", consort$eligible))
 
   message("  Step 2: Assigning treatment...")
   dbExecute(con, sql_parts$treatment)
+  consort$treatment <- count_temp(con, "#treatment")
+  message(sprintf("    -> #treatment: %d patients", consort$treatment))
 
   message("  Step 3: Ascertaining outcomes...")
   dbExecute(con, sql_parts$outcome)
+  consort$outcomes <- count_temp(con, "#outcomes")
+  message(sprintf("    -> #outcomes: %d patients", consort$outcomes))
 
   message("  Step 4: Extracting confounders and building analytic cohort...")
   cohort <- dbGetQuery(con, sql_parts$confounders)
@@ -298,10 +313,12 @@ pull_analytic_cohort <- function(con, config) {
   # Force all to lowercase so R code can reference them predictably.
   names(cohort) <- tolower(names(cohort))
 
-  message(sprintf("Analytic cohort: %d patients (%d treated, %d control)",
-                  nrow(cohort),
-                  sum(cohort$treatment == 1, na.rm = TRUE),
-                  sum(cohort$treatment == 0, na.rm = TRUE)))
+  consort$analytic   <- nrow(cohort)
+  consort$n_treated  <- sum(cohort$treatment == 1, na.rm = TRUE)
+  consort$n_control  <- sum(cohort$treatment == 0, na.rm = TRUE)
+
+  message(sprintf("  Analytic cohort: %d patients (%d treated, %d control)",
+                  consort$analytic, consort$n_treated, consort$n_control))
 
   # Clean up temp tables
   try(dbExecute(con, "DROP TABLE IF EXISTS #eligible"), silent = TRUE)
@@ -309,7 +326,141 @@ pull_analytic_cohort <- function(con, config) {
   try(dbExecute(con, "DROP TABLE IF EXISTS #outcomes"), silent = TRUE)
   try(dbExecute(con, "DROP TABLE IF EXISTS #analytic_cohort"), silent = TRUE)
 
+  attr(cohort, "consort") <- consort
   return(cohort)
+}
+
+
+# ─── 3a. CONSORT Flow Diagram ─────────────────────────────────────────────
+# Generates a text table + visual flow diagram showing patient attrition
+# at each step of the cohort-building pipeline.
+
+print_consort_table <- function(consort) {
+  steps <- tibble::tibble(
+    Step = c("1. Eligible population",
+             "2. Treatment assigned",
+             "3. Outcomes ascertained",
+             "4. Analytic cohort"),
+    N    = c(consort$eligible,
+             consort$treatment,
+             consort$outcomes,
+             consort$analytic),
+    Excluded = c(NA_integer_,
+                 consort$eligible  - consort$treatment,
+                 consort$treatment - consort$outcomes,
+                 consort$outcomes  - consort$analytic)
+  )
+  message("\n=== CONSORT Flow (text) ===")
+  print(steps, n = Inf)
+  invisible(steps)
+}
+
+
+render_consort_diagram <- function(consort, output_path = NULL) {
+  # Uses grid graphics to draw a simple CONSORT-style flow diagram.
+  # No external packages required beyond base R grid.
+
+  if (!is.null(output_path)) {
+    png(output_path, width = 8, height = 10, units = "in", res = 150)
+    on.exit(dev.off())
+  }
+
+  grid::grid.newpage()
+
+  # ---- layout parameters ----
+  box_w  <- grid::unit(0.55, "npc")
+  box_h  <- grid::unit(0.07, "npc")
+  excl_w <- grid::unit(0.30, "npc")
+  excl_h <- grid::unit(0.05, "npc")
+
+  y_positions <- c(0.90, 0.72, 0.54, 0.36, 0.18)
+  x_main  <- 0.40
+  x_excl  <- 0.82
+
+  # ---- helper: draw a box with text ----
+  draw_box <- function(x, y, w, h, label, fill = "white") {
+    grid::grid.rect(x = grid::unit(x, "npc"), y = grid::unit(y, "npc"),
+                    width = w, height = h,
+                    gp = grid::gpar(fill = fill, col = "grey30", lwd = 1.5))
+    grid::grid.text(label, x = grid::unit(x, "npc"), y = grid::unit(y, "npc"),
+                    gp = grid::gpar(fontsize = 10, fontface = "bold"))
+  }
+
+  # ---- helper: draw an arrow ----
+  draw_arrow <- function(x1, y1, x2, y2) {
+    grid::grid.lines(x = grid::unit(c(x1, x2), "npc"),
+                     y = grid::unit(c(y1, y2), "npc"),
+                     arrow = grid::arrow(length = grid::unit(0.02, "npc"),
+                                         type = "closed"),
+                     gp = grid::gpar(fill = "grey30", col = "grey30"))
+  }
+
+  # ---- title ----
+  grid::grid.text("CONSORT Flow Diagram", x = 0.5, y = 0.97,
+                  gp = grid::gpar(fontsize = 14, fontface = "bold"))
+
+  # ---- Step 1: Eligible ----
+  draw_box(x_main, y_positions[1], box_w, box_h,
+           sprintf("Step 1: Eligible Population\nn = %s", format(consort$eligible, big.mark = ",")))
+
+  # ---- Arrow 1→2 + exclusion box ----
+  excl_12 <- consort$eligible - consort$treatment
+  draw_arrow(x_main, y_positions[1] - 0.035, x_main, y_positions[2] + 0.035)
+  if (excl_12 > 0) {
+    mid_y <- mean(c(y_positions[1] - 0.035, y_positions[2] + 0.035))
+    draw_arrow(x_main + 0.275, mid_y, x_excl - 0.15, mid_y)
+    draw_box(x_excl, mid_y, excl_w, excl_h,
+             sprintf("Excluded: %s\n(no treatment assigned)", format(excl_12, big.mark = ",")),
+             fill = "#FFF3F3")
+  }
+
+  # ---- Step 2: Treatment ----
+  draw_box(x_main, y_positions[2], box_w, box_h,
+           sprintf("Step 2: Treatment Assigned\nn = %s", format(consort$treatment, big.mark = ",")))
+
+  # ---- Arrow 2→3 + exclusion box ----
+  excl_23 <- consort$treatment - consort$outcomes
+  draw_arrow(x_main, y_positions[2] - 0.035, x_main, y_positions[3] + 0.035)
+  if (excl_23 > 0) {
+    mid_y <- mean(c(y_positions[2] - 0.035, y_positions[3] + 0.035))
+    draw_arrow(x_main + 0.275, mid_y, x_excl - 0.15, mid_y)
+    draw_box(x_excl, mid_y, excl_w, excl_h,
+             sprintf("Excluded: %s\n(outcome step)", format(excl_23, big.mark = ",")),
+             fill = "#FFF3F3")
+  }
+
+  # ---- Step 3: Outcomes ----
+  draw_box(x_main, y_positions[3], box_w, box_h,
+           sprintf("Step 3: Outcomes Ascertained\nn = %s", format(consort$outcomes, big.mark = ",")))
+
+  # ---- Arrow 3→4 + exclusion box ----
+  excl_34 <- consort$outcomes - consort$analytic
+  draw_arrow(x_main, y_positions[3] - 0.035, x_main, y_positions[4] + 0.035)
+  if (excl_34 > 0) {
+    mid_y <- mean(c(y_positions[3] - 0.035, y_positions[4] + 0.035))
+    draw_arrow(x_main + 0.275, mid_y, x_excl - 0.15, mid_y)
+    draw_box(x_excl, mid_y, excl_w, excl_h,
+             sprintf("Excluded: %s\n(confounder join)", format(excl_34, big.mark = ",")),
+             fill = "#FFF3F3")
+  }
+
+  # ---- Step 4: Analytic cohort ----
+  draw_box(x_main, y_positions[4], box_w, box_h,
+           sprintf("Step 4: Analytic Cohort\nn = %s", format(consort$analytic, big.mark = ",")),
+           fill = "#F0FFF0")
+
+  # ---- Split into treatment arms ----
+  draw_arrow(x_main - 0.12, y_positions[4] - 0.035, x_main - 0.20, y_positions[5] + 0.025)
+  draw_arrow(x_main + 0.12, y_positions[4] - 0.035, x_main + 0.20, y_positions[5] + 0.025)
+
+  draw_box(x_main - 0.22, y_positions[5], grid::unit(0.28, "npc"), box_h,
+           sprintf("Treated\nn = %s", format(consort$n_treated, big.mark = ",")),
+           fill = "#F0F0FF")
+  draw_box(x_main + 0.22, y_positions[5], grid::unit(0.28, "npc"), box_h,
+           sprintf("Control\nn = %s", format(consort$n_control, big.mark = ",")),
+           fill = "#F0F0FF")
+
+  invisible(NULL)
 }
 
 
@@ -439,7 +590,15 @@ main <- function() {
   con    <- connect_cdw()
   on.exit(dbDisconnect(con))
 
-  cohort <- pull_analytic_cohort(con, config)
+  cohort  <- pull_analytic_cohort(con, config)
+  consort <- attr(cohort, "consort")
+
+  # ── CONSORT flow diagram ──
+  print_consort_table(consort)
+  render_consort_diagram(consort, output_path = "consort_flow.png")
+  message("CONSORT flow diagram saved to consort_flow.png")
+
+  # ── Continue analysis ──
   cohort <- prepare_cohort(cohort)
 
   results <- switch(config$analysis_method,
@@ -450,7 +609,7 @@ main <- function() {
 
   run_sensitivity(results, config)
   message("Analysis complete.")
-  return(results)
+  return(list(results = results, consort = consort))
 }
 
 # Uncomment to run:

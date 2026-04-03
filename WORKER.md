@@ -133,3 +133,29 @@ files are in the project root:
   `dbGetQuery()`. Then use **lowercase column names everywhere** in R code
   (e.g., `sex` not `SEX`, `birth_date` not `BIRTH_DATE`). SQL aliases in
   your SELECT statements can be lowercase to keep things consistent.
+
+### CONSORT Flow Diagram (required for all protocols)
+
+Every protocol **must** include a CONSORT-style flow diagram showing patient
+attrition at each step of the cohort-building pipeline. This is critical for
+debugging empty cohorts and for transparency in reporting.
+
+**Implementation pattern:**
+
+1. After each `dbExecute()` step, count the rows in the resulting temp table
+   using `SELECT COUNT(*) AS n FROM #table_name`.
+2. For complex eligibility steps with sub-steps (e.g., `#first_doac` →
+   `#af_patients` → `#eligible`), store counts in a `#consort_counts` temp
+   table inside the SQL batch itself (see `protocol_01_analysis.qmd` for an
+   example).
+3. Attach the counts to the cohort as an attribute:
+   `attr(cohort, "consort") <- consort`
+4. Include two functions:
+   - `print_consort_table(consort)` — prints a text table to the console
+   - `render_consort_diagram(consort, output_path)` — draws a visual flow
+     diagram using `grid` graphics (no extra packages needed)
+5. Call both in `main()` immediately after `pull_analytic_cohort()`.
+
+The CDW analysis template (`analysis_plan_template_cdw.R`) already includes
+these functions. Adapt the step labels and exclusion reasons to match your
+protocol's specific cohort-building logic.
