@@ -12,6 +12,10 @@
 #   ./run.sh "atrial fibrillation" --both       # target public data + CDW
 #   ./run.sh "type 2 diabetes" --cdw 75         # custom max turns
 #
+#   # With a custom DB connection string:
+#   ./run.sh "atrial fibrillation" --cdw \
+#     --db-connect 'con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")'
+#
 # Prerequisites:
 #   - Claude Code CLI installed (npm install -g @anthropic-ai/claude-code)
 #   - Python 3.11+ with: pip install mcp httpx lxml
@@ -20,18 +24,42 @@
 
 set -euo pipefail
 
-THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--cdw|--both] [max_turns]}"
+THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--cdw|--both] [--db-connect 'R code'] [max_turns]}"
 
 # Parse optional flags
 TARGET="public"
 MAX_TURNS="50"
-for arg in "${@:2}"; do
+DB_CONNECT=""
+SKIP_NEXT=false
+for i in $(seq 2 $#); do
+  if $SKIP_NEXT; then
+    SKIP_NEXT=false
+    continue
+  fi
+  arg="${!i}"
   case "$arg" in
     --cdw)  TARGET="cdw" ;;
     --both) TARGET="both" ;;
-    *)      MAX_TURNS="$arg" ;;
+    --db-connect)
+      next_i=$((i + 1))
+      DB_CONNECT="${!next_i}"
+      SKIP_NEXT=true
+      ;;
+    *)
+      if [[ "$arg" =~ ^[0-9]+$ ]]; then
+        MAX_TURNS="$arg"
+      fi
+      ;;
   esac
 done
+
+# Default DB connection if --cdw or --both but no --db-connect provided
+if [[ ("$TARGET" == "cdw" || "$TARGET" == "both") && -z "$DB_CONNECT" ]]; then
+  DB_CONNECT='con <- DBI::dbConnect(odbc::odbc(), Driver = "ODBC Driver 17 for SQL Server", Server = "YOUR_SERVER", Database = "CDW", Trusted_Connection = "yes")'
+  echo "⚠  No --db-connect provided. Using placeholder. Pass your connection code:"
+  echo "   ./run.sh \"$THERAPEUTIC_AREA\" --cdw --db-connect 'con <- DBI::dbConnect(...)'"
+  echo ""
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -43,10 +71,27 @@ echo "============================================="
 echo " Auto-Protocol Designer"
 echo " Therapeutic area: $THERAPEUTIC_AREA"
 echo " Protocol target:  $TARGET"
+if [[ -n "$DB_CONNECT" ]]; then
+echo " DB connection:    $DB_CONNECT"
+fi
 echo " Max turns/sub-agent: $MAX_TURNS"
 echo " Results: $RESULTS_DIR/"
 echo "============================================="
 echo ""
+
+# Build the DB connection context block for the coordinator prompt
+DB_CONTEXT=""
+if [[ -n "$DB_CONNECT" ]]; then
+  DB_CONTEXT="
+Database connection: Workers generating CDW protocols MUST use this exact
+R code to connect to the database (do NOT use the placeholder in the template):
+
+  $DB_CONNECT
+
+Pass this connection code verbatim to any worker generating CDW R scripts.
+The worker should replace the connect_cdw() function body in their R output
+with this exact line."
+fi
 
 # The coordinator is a long-running Claude Code session.
 # It reads COORDINATOR.md for its instructions and launches sub-agents
@@ -67,6 +112,7 @@ Your configuration:
 - Protocol target: $TARGET
 - Results directory: $RESULTS_DIR
 - Max turns per sub-agent: $MAX_TURNS (pass this as --max-turns to sub-agents)
+$DB_CONTEXT
 
 Protocol target "$TARGET" means:
 - "public": generate protocols targeting public datasets (MIMIC-IV, NHANES, etc.)
@@ -79,7 +125,7 @@ Begin by reading COORDINATOR.md, then initialize your state files and launch
 the first sub-agent (literature discovery).
 
 When launching sub-agents, always pipe through stream_viewer.py with a label:
-cat <<'SUBPROMPT' | claude -p --verbose --max-turns $MAX_TURNS \\
+cat <<'SUBPROMPT' | claude -p --verbose --max-turns \$MAX_TURNS \\
   --output-format stream-json \\
   --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,Bash,Read,Write,Edit,WebSearch,WebFetch" \\
   2>&1 | python3 tools/stream_viewer.py --label "Worker"

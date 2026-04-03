@@ -25,11 +25,6 @@ library(EValue)       # sensitivity analysis
 # ─── 0. Configuration (filled by agent) ─────────────────────────────────────
 
 config <- list(
-  # Database connection
-  server       = "{{SQL_SERVER}}",
-  database     = "{{DATABASE_NAME}}",       # e.g., "CDW"
-  driver       = "ODBC Driver 17 for SQL Server",
-
   # Study parameters
   question         = "{{CAUSAL_QUESTION}}",
   exposure_var     = "{{EXPOSURE_VAR}}",
@@ -46,17 +41,13 @@ config <- list(
 
 
 # ─── 1. Database Connection ─────────────────────────────────────────────────
+# The coordinator passes the exact connection code via the --db-connect flag.
+# Replace this placeholder with the connection code provided at runtime.
 
-connect_cdw <- function(config) {
-  con <- dbConnect(
-    odbc::odbc(),
-    Driver   = config$driver,
-    Server   = config$server,
-    Database = config$database,
-    Trusted_Connection = "yes"   # Windows integrated auth
-  )
-  message(sprintf("Connected to %s.%s", config$server, config$database))
-  return(con)
+connect_cdw <- function() {
+  # {{DB_CONNECT}} — replaced by agent with the connection code from the coordinator
+  # Example: con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+  stop("DB connection not configured. The agent should replace this with the provided connection code.")
 }
 
 
@@ -86,15 +77,15 @@ build_cohort_sql <- function(config) {
       d.HISPANIC,
       DATEDIFF(year, d.BIRTH_DATE, e.ADMIT_DATE) AS age_at_index
     INTO #eligible
-    FROM dbo.ENCOUNTER e
-    INNER JOIN dbo.DEMOGRAPHIC d
+    FROM CDW.dbo.ENCOUNTER e
+    INNER JOIN CDW.dbo.DEMOGRAPHIC d
       ON e.PATID = d.PATID
     WHERE e.ADMIT_DATE BETWEEN {config$study_start} AND {config$study_end}
       AND e.ENC_TYPE IN ({{ENC_TYPES}})        -- e.g., ('IP', 'EI') for inpatient
       -- {{ADDITIONAL_ELIGIBILITY_CRITERIA}}
       -- Example: patient must have a diagnosis of atrial fibrillation
       AND EXISTS (
-        SELECT 1 FROM dbo.DIAGNOSIS dx
+        SELECT 1 FROM CDW.dbo.DIAGNOSIS dx
         WHERE dx.PATID = e.PATID
           AND dx.DX LIKE {{DX_PATTERN}}         -- e.g., 'I48%' for afib
           AND dx.DX_TYPE = '10'                  -- ICD-10-CM
@@ -130,7 +121,7 @@ build_cohort_sql <- function(config) {
     LEFT JOIN (
       -- Treatment arm: {{TREATMENT_ARM_DESCRIPTION}}
       SELECT DISTINCT p.PATID
-      FROM dbo.PRESCRIBING p
+      FROM CDW.dbo.PRESCRIBING p
       WHERE p.RXNORM_CUI IN ({{TREATMENT_RXNORM_CUIS}})
         AND p.RX_ORDER_DATE BETWEEN DATEADD(day, -{{GRACE_PERIOD}}, elig.index_date)
                                 AND DATEADD(day, {{GRACE_PERIOD}}, elig.index_date)
@@ -138,7 +129,7 @@ build_cohort_sql <- function(config) {
     LEFT JOIN (
       -- Comparator arm: {{COMPARATOR_ARM_DESCRIPTION}}
       SELECT DISTINCT p.PATID
-      FROM dbo.PRESCRIBING p
+      FROM CDW.dbo.PRESCRIBING p
       WHERE p.RXNORM_CUI IN ({{COMPARATOR_RXNORM_CUIS}})
         AND p.RX_ORDER_DATE BETWEEN DATEADD(day, -{{GRACE_PERIOD}}, elig.index_date)
                                 AND DATEADD(day, {{GRACE_PERIOD}}, elig.index_date)
@@ -186,14 +177,14 @@ build_cohort_sql <- function(config) {
       SELECT
         dx.PATID,
         MIN(dx.ADMIT_DATE) AS first_outcome_date
-      FROM dbo.DIAGNOSIS dx
+      FROM CDW.dbo.DIAGNOSIS dx
       WHERE dx.DX LIKE {{OUTCOME_DX_PATTERN}}    -- e.g., 'I63%' for ischemic stroke
         AND dx.DX_TYPE = '10'
       GROUP BY dx.PATID
       HAVING MIN(dx.ADMIT_DATE) > t.index_date
          AND MIN(dx.ADMIT_DATE) <= DATEADD(day, {config$followup_days}, t.index_date)
     ) dx_out ON t.PATID = dx_out.PATID
-    LEFT JOIN dbo.DEATH death
+    LEFT JOIN CDW.dbo.DEATH death
       ON t.PATID = death.PATID
       AND death.DEATH_DATE > t.index_date
       AND death.DEATH_DATE <= DATEADD(day, {config$followup_days}, t.index_date)
@@ -248,15 +239,15 @@ build_cohort_sql <- function(config) {
     LEFT JOIN (
       -- Most recent vitals in 1-year lookback
       SELECT v1.*
-      FROM dbo.VITAL v1
+      FROM CDW.dbo.VITAL v1
       INNER JOIN (
         SELECT PATID, MAX(MEASURE_DATE) AS max_date
-        FROM dbo.VITAL
+        FROM CDW.dbo.VITAL
         GROUP BY PATID
       ) v2 ON v1.PATID = v2.PATID AND v1.MEASURE_DATE = v2.max_date
     ) v ON o.PATID = v.PATID AND v.MEASURE_DATE <= o.index_date
            AND v.MEASURE_DATE >= DATEADD(year, -1, o.index_date)
-    LEFT JOIN dbo.ENROLLMENT enr
+    LEFT JOIN CDW.dbo.ENROLLMENT enr
       ON o.PATID = enr.PATID
       AND o.index_date BETWEEN enr.ENR_START_DATE AND COALESCE(enr.ENR_END_DATE, '9999-12-31')
     -- {{COMORBIDITY_JOINS}}
@@ -303,6 +294,10 @@ pull_analytic_cohort <- function(con, config) {
   message("  Step 4: Extracting confounders and building analytic cohort...")
   cohort <- dbGetQuery(con, sql_parts$confounders)
 
+  # Normalize column names: SQL Server may return uppercase, mixed case, etc.
+  # Force all to lowercase so R code can reference them predictably.
+  names(cohort) <- tolower(names(cohort))
+
   message(sprintf("Analytic cohort: %d patients (%d treated, %d control)",
                   nrow(cohort),
                   sum(cohort$treatment == 1, na.rm = TRUE),
@@ -321,17 +316,19 @@ pull_analytic_cohort <- function(con, config) {
 # ─── 4. Data Preparation ────────────────────────────────────────────────────
 
 prepare_cohort <- function(cohort) {
+  # Column names are already lowercased by pull_analytic_cohort().
+  # All R code below uses lowercase column names to match.
   cohort <- cohort |>
     mutate(
       # Recode PCORnet categorical variables
-      sex = factor(SEX, levels = c("F", "M", "NI", "UN", "OT"),
+      sex = factor(sex, levels = c("F", "M", "NI", "UN", "OT"),
                    labels = c("Female", "Male", "No info", "Unknown", "Other")),
-      race = factor(RACE, levels = c("01", "02", "03", "04", "05", "06", "07", "NI", "UN", "OT"),
+      race = factor(race, levels = c("01", "02", "03", "04", "05", "06", "07", "NI", "UN", "OT"),
                     labels = c("AI/AN", "Asian", "Black", "NH/PI", "White",
                                "Multiple", "Other", "No info", "Unknown", "Refuse")),
-      hispanic = factor(HISPANIC, levels = c("Y", "N", "NI", "UN", "OT", "R"),
+      hispanic = factor(hispanic, levels = c("Y", "N", "NI", "UN", "OT", "R"),
                         labels = c("Yes", "No", "No info", "Unknown", "Other", "Refuse")),
-      smoking = factor(SMOKING, levels = c("01", "02", "03", "04", "05", "06", "07", "08", "NI", "UN", "OT"),
+      smoking = factor(smoking, levels = c("01", "02", "03", "04", "05", "06", "07", "08", "NI", "UN", "OT"),
                        labels = c("Current every day", "Current some day", "Former",
                                   "Never", "Smoker status unknown", "Unknown if ever",
                                   "Heavy tobacco", "Light tobacco",
@@ -439,7 +436,7 @@ run_sensitivity <- function(results, config) {
 # ─── 7. Run Pipeline ────────────────────────────────────────────────────────
 
 main <- function() {
-  con    <- connect_cdw(config)
+  con    <- connect_cdw()
   on.exit(dbDisconnect(con))
 
   cohort <- pull_analytic_cohort(con, config)

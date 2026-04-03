@@ -118,7 +118,8 @@ files are in the project root:
 
 **SQL conventions for CDW protocols:**
 - Write T-SQL (MS SQL Server syntax) — use DATEADD, DATEDIFF, temp tables (#)
-- All tables are in `dbo` schema
+- All tables must be fully qualified as `CDW.dbo.TABLE_NAME` (e.g., `CDW.dbo.PRESCRIBING`,
+  `CDW.dbo.DIAGNOSIS`, `CDW.dbo.ENCOUNTER`). Do NOT use bare `dbo.TABLE_NAME`.
 - PATID is the universal patient key (varchar)
 - ENCOUNTERID links encounters across tables
 - Use ICD-10 codes (DX_TYPE = '10') unless the study period requires ICD-9
@@ -127,3 +128,8 @@ files are in the project root:
 - Build temp tables step by step: #eligible → #treatment → #outcomes → #analytic_cohort
 - Always include a grace period around time zero for treatment assignment
 - The R script should use DBI + odbc to connect and execute the SQL
+- **Column name case:** SQL Server returns column names in unpredictable case.
+  Always call `names(cohort) <- tolower(names(cohort))` immediately after
+  `dbGetQuery()`. Then use **lowercase column names everywhere** in R code
+  (e.g., `sex` not `SEX`, `birth_date` not `BIRTH_DATE`). SQL aliases in
+  your SELECT statements can be lowercase to keep things consistent.

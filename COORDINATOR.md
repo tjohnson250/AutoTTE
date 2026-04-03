@@ -171,6 +171,7 @@ consider it a credible starting point.
 **Additional criteria for CDW-targeted protocols:**
 - [ ] SQL is valid T-SQL (MS SQL Server syntax, not PostgreSQL/MySQL)
 - [ ] SQL references actual PCORnet CDM tables and columns from the schema
+- [ ] Tables are fully qualified as CDW.dbo.TABLE_NAME (not bare dbo.TABLE_NAME)
 - [ ] ICD codes use the correct DX_TYPE ('09' or '10')
 - [ ] Medications use RXNORM_CUI (PRESCRIBING) or NDC (DISPENSING), not drug names
 - [ ] Labs use LOINC codes in LAB_RESULT_CM, not lab names
@@ -184,6 +185,7 @@ consider it a credible starting point.
 - R code is a skeleton with TODO placeholders
 - Claiming to adjust for confounders the dataset doesn't have
 - SQL references tables or columns not in the schema files
+- Using `dbo.TABLE` instead of `CDW.dbo.TABLE`
 - Using generic drug names instead of RXNORM_CUI or NDC codes
 
 ### Protocol Review Acceptance Criteria
