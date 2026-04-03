@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "pubmed": {
+      "command": "python",
+      "args": ["tools/pubmed_server.py"],
+      "env": {}
+    }
+  }
+}
