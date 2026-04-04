@@ -118,16 +118,23 @@ Structure your review with:
   paths in the code.
 - Is there an empty-cohort guard in `main()` that renders the CONSORT diagram
   and stops before `prepare_cohort()` when `nrow(cohort) == 0`?
+- Before every `weightit()` call, does the code check that the treatment
+  variable has at least 2 unique values? Small cohorts or PS trimming can
+  eliminate an entire arm. Sensitivity analyses should warn + skip (not crash).
 - Does the code include a CONSORT flow diagram (`print_consort_table()` and
   `render_consort_diagram()`) that tracks patient counts at every SQL step?
 - Do derived factor columns use distinct names (e.g., `sex_cat` not `sex`)
   to avoid overwriting the raw column in `mutate()`?
 - If Quarto (.qmd): is `build_cohort_sql()` in a single code chunk?
-- Do ALL confounder LEFT JOINs (vitals, labs, enrollment) use
+- Do ALL LEFT JOINs (vitals, labs, enrollment, **DEATH**) use
   `ROW_NUMBER() OVER (PARTITION BY PATID ...) ... WHERE rn = 1`
-  to guarantee exactly 1 row per patient? The `MAX(date)` + self-join
-  pattern causes row duplication. If the CONSORT shows MORE patients
-  after the confounder step than before, this is the cause.
+  to guarantee exactly 1 row per patient? This applies to **every step**,
+  not just confounders. The DEATH table commonly has multiple records per
+  patient and must be wrapped. The `MAX(date)` + self-join pattern also
+  causes duplication. If the CONSORT shows MORE patients after any step
+  than before, this is the cause.
+- Does `count_temp()` use `COUNT(DISTINCT PATID)` (not `COUNT(*)`)? Using
+  `COUNT(*)` hides row duplication from JOINs.
 
 **Per-protocol verdict in your markdown review:**
 - **ACCEPT** — Ready to execute, no major issues

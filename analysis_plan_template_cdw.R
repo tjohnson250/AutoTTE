@@ -184,8 +184,12 @@ build_cohort_sql <- function(config) {
       HAVING MIN(dx.ADMIT_DATE) > t.index_date
          AND MIN(dx.ADMIT_DATE) <= DATEADD(day, {config$followup_days}, t.index_date)
     ) dx_out ON t.PATID = dx_out.PATID
-    LEFT JOIN CDW.dbo.DEATH death
-      ON t.PATID = death.PATID
+    -- DEATH: use ROW_NUMBER to avoid duplication when multiple death records exist
+    LEFT JOIN (
+      SELECT d.PATID, d.DEATH_DATE,
+             ROW_NUMBER() OVER (PARTITION BY d.PATID ORDER BY d.DEATH_DATE) AS rn
+      FROM CDW.dbo.DEATH d
+    ) death ON t.PATID = death.PATID AND death.rn = 1
       AND death.DEATH_DATE > t.index_date
       AND death.DEATH_DATE <= DATEADD(day, {config$followup_days}, t.index_date)
     ;
@@ -276,7 +280,8 @@ build_cohort_sql <- function(config) {
 
 # Helper: count rows in a temp table
 count_temp <- function(con, tbl) {
-  res <- dbGetQuery(con, paste("SELECT COUNT(*) AS n FROM", tbl))
+  # Use COUNT(DISTINCT PATID) — COUNT(*) inflates if any JOIN duplicated rows
+  res <- dbGetQuery(con, paste("SELECT COUNT(DISTINCT PATID) AS n FROM", tbl))
   res$n[1]
 }
 
@@ -517,7 +522,18 @@ ps_formula <- as.formula(
 )
 
 
-run_ipw_analysis <- function(cohort, ps_formula, config) {
+run_ipw_analysis <- function(cohort, confounders, config) {
+  # Guard: treatment must have at least 2 arms
+  n_arms <- length(unique(cohort$treatment))
+  if (n_arms < 2) {
+    stop(sprintf(
+      "Cannot run IPW: treatment has only %d unique value(s) (%s). ",
+      n_arms, paste(unique(cohort$treatment), collapse = ", ")),
+      "One treatment arm may have been filtered out during eligibility.",
+      call. = FALSE)
+  }
+
+  ps_formula <- build_ps_formula(confounders, cohort)
   weights <- weightit(
     ps_formula,
     data     = cohort,

@@ -221,6 +221,20 @@ multiple records share the same max date. The medication subqueries are safe
 because they use `SELECT DISTINCT PATID`, and the comorbidity subquery is
 safe because it uses `GROUP BY PATID` with `MAX(CASE ...)`.
 
+**This applies to ALL JOINs, not just confounders.** In particular:
+
+- The **DEATH table** (`CDW.dbo.DEATH`) can have multiple records per patient.
+  Always wrap it in a `ROW_NUMBER()` subquery:
+  ```sql
+  LEFT JOIN (
+    SELECT d.PATID, d.DEATH_DATE,
+           ROW_NUMBER() OVER (PARTITION BY d.PATID ORDER BY d.DEATH_DATE) AS rn
+    FROM CDW.dbo.DEATH d
+  ) death ON t.PATID = death.PATID AND death.rn = 1
+  ```
+- The **`count_temp()` helper** must use `COUNT(DISTINCT PATID)`, not
+  `COUNT(*)`, so that any accidental duplication is invisible to the CONSORT.
+
 ### Column Naming in R
 
 After `names(cohort) <- tolower(names(cohort))`, raw columns from SQL like
@@ -324,6 +338,31 @@ if (nrow(cohort) == 0) {
   message("*** STOPPING: Analytic cohort has 0 patients. ***")
   message("Review the CONSORT diagram to identify where patients were lost.")
   return(list(results = NULL, consort = consort))
+}
+```
+
+### Treatment Arms Guard
+
+Before calling `weightit()`, always verify the treatment variable has at least
+2 unique values. Small cohorts or aggressive eligibility criteria can eliminate
+an entire arm. Pattern:
+
+```r
+n_arms <- length(unique(cohort$treatment))
+if (n_arms < 2) {
+  stop(sprintf("Cannot run IPW: treatment has only %d unique value(s).", n_arms),
+       call. = FALSE)
+}
+```
+
+For **sensitivity analyses** that trim the PS distribution, the same check
+applies to the trimmed cohort. Use a warning + `return(NULL)` instead of
+`stop()` so the rest of the analysis can still complete:
+
+```r
+if (length(unique(cohort_trimmed$treatment)) < 2) {
+  message("WARNING: After PS trimming, only 1 arm remains. Skipping trimmed analysis.")
+  return(NULL)
 }
 ```
 
