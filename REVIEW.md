@@ -51,6 +51,43 @@ Structure your review with:
 - Check if gap scores are inflated (agent may be biased toward finding gaps)
 - Verify that "observational interest" claims are supported by actual papers
 
+**Three-Pass Search Completeness Verification (NEW — required):**
+The worker is instructed to follow a three-pass search strategy (broad
+landscape → targeted per-question → citation chaining). You MUST verify
+that all three passes were actually performed:
+
+1. **Verify Pass 2 (targeted per-question searches):** For each of the top 3
+   questions, run your OWN narrow PICO-specific search using the exact drug
+   names, condition, and comparator. Compare your results against the worker's
+   cited papers. If you find relevant papers the worker missed, flag them and
+   downgrade the question's verdict.
+
+   Example: If the worker's top question is "apixaban vs rivaroxaban in CKD"
+   and they cite only 1-2 supporting papers, search:
+   ```
+   "apixaban" AND "rivaroxaban" AND ("chronic kidney disease" OR "CKD" OR "renal")
+   ```
+   If this returns papers the worker didn't cite, that's a red flag.
+
+2. **Verify Pass 3 (citation chaining):** Pick the single most important
+   supporting paper for the top question. Search for papers by the same first
+   author, and search for papers that cite it. If the worker missed a direct
+   predecessor or replication study, flag this.
+
+3. **Stress-test "only study" claims:** Any time the worker claims a paper is
+   "the only study" or "the first to examine" something, treat this as a
+   testable hypothesis. Run at least 2 different searches to verify. These
+   claims are frequently wrong — papers in specialty journals (nephrology,
+   hepatology, geriatrics) are routinely missed by broad cardiology-focused
+   searches.
+
+**Red flags for search completeness:**
+- Worker only ran broad MeSH searches with no targeted per-question follow-up
+- Top question has fewer than 3 supporting papers and no explanation of why
+- Worker claims "no prior studies" without evidence of targeted searching
+- All cited papers come from the same 2-3 high-impact journals (missing
+  specialty journal coverage)
+
 **Per-question verdict in your markdown review:**
 - VERIFIED — PMIDs check out, PICO is accurate, gap score is reasonable
 - REVISED — Mostly correct but needs adjustments (specify what)
@@ -126,6 +163,11 @@ Structure your review with:
 - Do derived factor columns use distinct names (e.g., `sex_cat` not `sex`)
   to avoid overwriting the raw column in `mutate()`?
 - If Quarto (.qmd): is `build_cohort_sql()` in a single code chunk?
+- Does the `.qmd` follow the two-part layout? Part 1 (function definitions)
+  should produce no output. Part 2 (execution sections) should call each
+  function and display results inline (CONSORT, Table 1, love plot, KM curves,
+  etc.) in the section where they belong. There should be **no monolithic
+  `main()` function** and no `eval: false` chunks that block downstream output.
 - Do ALL LEFT JOINs (vitals, labs, enrollment, **DEATH**) use
   `ROW_NUMBER() OVER (PARTITION BY PATID ...) ... WHERE rn = 1`
   to guarantee exactly 1 row per patient? This applies to **every step**,

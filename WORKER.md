@@ -32,6 +32,72 @@ and MeSH terms that are far more useful for this task.
 - **Save your work as you go.** Write intermediate results to files so nothing
   is lost if the session is interrupted.
 
+## Literature Search Protocol (Three-Pass Strategy)
+
+Literature discovery MUST follow this three-pass strategy. Broad thematic searches
+alone are insufficient — they miss papers in smaller journals and fail to
+exhaustively cover specific PICO elements.
+
+### Pass 1: Broad Landscape Searches (what you already do)
+Run 6-10 thematic PubMed searches using MeSH terms and keywords to map the
+evidence landscape. Sort by relevance, retrieve top 30-40 per search.
+This identifies major RCTs, landmark observational studies, and topic clusters.
+
+### Pass 2: Targeted Per-Question Verification Searches (NEW — required)
+After ranking your candidate questions in `02_evidence_gaps.md`, go back and
+run **narrow, PICO-specific searches** for each of the top 5 questions. These
+searches should use the exact drug names, exact condition, and exact comparator
+from the PICO — not broad MeSH categories.
+
+**Example:** If your top question is "apixaban vs rivaroxaban in AF with CKD":
+```
+"apixaban" AND "rivaroxaban" AND ("chronic kidney disease" OR "renal insufficiency" OR "CKD")
+```
+```
+"apixaban" AND "rivaroxaban" AND "atrial fibrillation" AND ("kidney" OR "renal")
+```
+
+These targeted searches catch papers that broad MeSH searches miss — especially
+papers in specialty journals (nephrology, hepatology, geriatrics) that PubMed's
+relevance ranking may bury below high-impact general journals.
+
+**For each top-5 question, you must:**
+1. Run at least 2 narrow searches using the specific PICO terms
+2. Fetch abstracts for ALL results (these searches should return <50 hits)
+3. Check whether any of these papers were already found in Pass 1
+4. Add any new relevant papers to the literature scan
+5. Re-assess the gap score if new evidence changes the picture
+
+### Pass 3: Citation Chaining (NEW — required for top 3 questions)
+For each of the top 3 questions, take the 2-3 most relevant papers found in
+Passes 1 and 2, and do **forward and backward citation searches**:
+
+**Backward (references):** Use WebFetch on the PubMed page for each key paper
+and look at "Similar articles" or the reference list to find papers the key
+study cited.
+
+**Forward (citing articles):** Search PubMed for papers that cite the key study.
+You can approximate this with a search like:
+```
+"[first author last name]"[Author] AND "[condition]" AND [year range after key paper]
+```
+Or use the "Cited by" links on PubMed.
+
+**Why this matters:** If your top question's supporting evidence rests on a
+single paper (e.g., "Fu et al. is the only study..."), citation chaining is
+the fastest way to verify or refute that claim. Missing a direct predecessor
+or competitor study undermines the entire gap analysis.
+
+### Search Completeness Checklist
+Before finalizing `02_evidence_gaps.md`, verify for each top-5 question:
+- [ ] At least one narrow PICO-specific search was run (not just broad thematic)
+- [ ] Abstracts were fetched for all results of targeted searches
+- [ ] Citation chaining was done for the top 3 questions
+- [ ] Any claim of "no studies exist" or "only one study" was stress-tested
+      with at least 2 different search strategies
+- [ ] Searches covered both the primary clinical literature AND relevant
+      specialty journals (search by condition terms that specialists would use)
+
 ## Output Structure
 
 Save all outputs under `results/[therapeutic_area]/`:
@@ -366,14 +432,36 @@ if (length(unique(cohort_trimmed$treatment)) < 2) {
 }
 ```
 
-### Quarto-Specific Rules
+### Quarto Document Structure
 
-When generating `.qmd` files:
+The `.qmd` file must follow a **two-part layout**:
 
-- The **entire `build_cohort_sql()` function must be in a single code chunk**.
-  Do NOT split it across multiple chunks — variables defined in one chunk are
-  not in scope in another.
-- Use labeled chunks (`#| label: cohort-sql`) for readability, but keep all
-  code that shares function scope in one chunk.
-- Set `#| eval: false` on the `main` chunk so the report can render without
-  a live DB connection.
+**Part 1 — Function definitions** (sections 0–8):
+Define all helper functions and SQL builders. These chunks execute to register
+the functions but produce no visible output. Keep `build_cohort_sql()` in a
+single chunk (variables defined in one chunk are not in scope in another).
+
+**Part 2 — Execution & results** (sections 9+):
+Each section calls its function and displays results **inline**. This means:
+
+- Section 9: Connect, pull cohort, render CONSORT (text + diagram) inline.
+  Include an empty-cohort guard with `knitr::knit_exit()`.
+- Section 10: Prepare data, show Table 1 inline with `knitr::kable()`.
+- Section 11: Run IPW, show love plot and PS distribution inline.
+- Section 12: Show Cox model summaries and KM curves inline.
+- Section 13: Run subgroup analyses, show table inline.
+- Section 14: Run sensitivity analyses, show E-values and trimmed results inline.
+- Section 15: Show summary.
+
+**Do NOT use a monolithic `main()` function.** The old pattern of wrapping
+everything in `main()`, setting `eval: false`, and appending figure chunks at
+the end produces a document where all results are clumped at the bottom and
+the figure chunks fail because `main()` never ran.
+
+Instead, each section should have its own execution chunk that runs the
+relevant function and stores the result in a top-level variable (e.g.,
+`ipw_results`, `subgroup_results`), followed immediately by figure/table
+chunks that display those results.
+
+The global YAML should use `execute: eval: true` and no individual chunks
+should set `eval: false` (unless truly optional/placeholder code).

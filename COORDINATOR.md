@@ -129,21 +129,40 @@ consider it a credible starting point.
 - [ ] Evidence gap scores are provided and the ranking is plausible
 - [ ] At least 3 candidate questions identified with gap scores >= 5
 - [ ] Study types (RCT vs observational) are distinguished
+- [ ] Three-pass search strategy was followed:
+      - [ ] Pass 1: Broad landscape searches (6-10 thematic queries)
+      - [ ] Pass 2: Targeted per-question searches for top 5 questions
+            (narrow PICO-specific queries with exact drug/condition names)
+      - [ ] Pass 3: Citation chaining for top 3 questions
+- [ ] Any "no studies exist" or "only one study" claims were stress-tested
+      with at least 2 different targeted search strategies
+- [ ] Top 3 questions each cite at least 3 supporting papers (or document
+      why fewer exist after exhaustive searching)
 
 **Red flags requiring revision:**
 - Fewer than 5 PMIDs total (insufficient search)
 - Questions that aren't framed as causal contrasts
 - Gap scores without justification
+- Only broad MeSH searches were run — no targeted per-question searches
+- Top question cites only 1-2 papers without evidence of exhaustive searching
+- All cited papers come from the same 2-3 high-impact journals (missing
+  specialty journal coverage — check nephrology, hepatology, geriatrics journals)
+- Claims of "the only study" or "no prior work" without targeted verification
 
 ### Discovery Review Acceptance Criteria
 - [ ] Reviewer verified at least a sample of PMIDs via fetch_abstracts
 - [ ] Each question has a clear verdict (verified / revised / rejected)
 - [ ] Reviewer did at least one supplemental search to check for missed studies
+- [ ] Reviewer ran independent PICO-specific searches for at least the top 3
+      questions to check for papers the worker missed
+- [ ] Reviewer stress-tested any "only study" / "no prior work" claims
 - [ ] An "approved questions" list is provided
 
 **Red flags requiring re-review:**
 - Reviewer accepted everything without verification (rubber stamp)
 - Reviewer rejected everything without constructive suggestions
+- Reviewer did not run any independent targeted searches (just verified
+  the worker's cited PMIDs without looking for missing papers)
 
 ### Feasibility Acceptance Criteria
 - [ ] Every approved question was assessed against the dataset registry
@@ -182,7 +201,9 @@ consider it a credible starting point.
 - [ ] Confounders SQL uses dbExecute() then separate dbGetQuery() — NOT combined
 - [ ] names(cohort) <- tolower(names(cohort)) called after dbGetQuery()
 - [ ] All plots render inline via Quarto figure chunks — no png()/dev.off() anywhere
-- [ ] Empty cohort guard: main() renders CONSORT and stops if nrow(cohort) == 0
+- [ ] Two-part .qmd layout: functions defined first, then execution sections with inline results
+- [ ] No monolithic main() — each section calls its function and displays output directly
+- [ ] Empty cohort guard uses knitr::knit_exit() after rendering CONSORT if nrow == 0
 - [ ] Factor columns use distinct names (sex_cat, race_cat) not raw column names
 
 **Red flags requiring revision:**
@@ -196,7 +217,8 @@ consider it a credible starting point.
 - `SELECT * FROM #analytic_cohort` inside the confounders SQL batch (ODBC bug)
 - Any use of `png()` / `dev.off()` instead of inline Quarto figure chunks
 - No CONSORT flow diagram
-- No empty-cohort guard in main()
+- No empty-cohort guard (should use knitr::knit_exit())
+- Monolithic main() with eval: false — results won't render inline
 - Confounder JOINs using MAX(date)+self-join instead of ROW_NUMBER() (causes row duplication)
 - CONSORT shows MORE patients after confounders than before (row duplication from JOINs)
 
