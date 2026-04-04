@@ -261,10 +261,6 @@ build_cohort_sql <- function(config) {
       -- {{ADDITIONAL_GROUP_BY}}
     ;
 
-    -- =========================================================
-    -- FINAL: Return the analytic cohort
-    -- =========================================================
-    SELECT * FROM #analytic_cohort;
   ", .con = DBI::ANSI())
 
   return(list(
@@ -307,7 +303,11 @@ pull_analytic_cohort <- function(con, config) {
   message(sprintf("    -> #outcomes: %d patients", consort$outcomes))
 
   message("  Step 4: Extracting confounders and building analytic cohort...")
-  cohort <- dbGetQuery(con, sql_parts$confounders)
+  # Run the SELECT INTO as DDL, then pull data separately.
+  # Combining both in one dbGetQuery can cause ODBC drivers to return the
+  # row-affected count from SELECT INTO instead of the actual result set.
+  dbExecute(con, sql_parts$confounders)
+  cohort <- dbGetQuery(con, "SELECT * FROM #analytic_cohort")
 
   # Normalize column names: SQL Server may return uppercase, mixed case, etc.
   # Force all to lowercase so R code can reference them predictably.
@@ -356,14 +356,22 @@ print_consort_table <- function(consort) {
 }
 
 
-render_consort_diagram <- function(consort, output_path = NULL) {
+render_consort_diagram <- function(consort) {
   # Uses grid graphics to draw a simple CONSORT-style flow diagram.
   # No external packages required beyond base R grid.
-
-  if (!is.null(output_path)) {
-    png(output_path, width = 8, height = 10, units = "in", res = 150)
-    on.exit(dev.off())
-  }
+  #
+  # NOTE: This function draws directly to the active graphics device.
+  # In Quarto, call it inside a figure chunk so the plot renders inline:
+  #
+  #   ```{r}
+  #   #| label: fig-consort
+  #   #| fig-cap: "CONSORT flow diagram ..."
+  #   #| fig-width: 10
+  #   #| fig-height: 12
+  #   render_consort_diagram(all_results$consort)
+  #   ```
+  #
+  # Do NOT use png()/dev.off() — all plots must render inline in Quarto.
 
   grid::grid.newpage()
 
@@ -593,22 +601,31 @@ main <- function() {
   cohort  <- pull_analytic_cohort(con, config)
   consort <- attr(cohort, "consort")
 
-  # ── CONSORT flow diagram ──
+  # ── CONSORT flow diagram (text summary) ──
   print_consort_table(consort)
-  render_consort_diagram(consort, output_path = "consort_flow.png")
-  message("CONSORT flow diagram saved to consort_flow.png")
+
+  # ── Bail out early if cohort is empty ──
+  if (nrow(cohort) == 0) {
+    message("\n*** STOPPING: Analytic cohort has 0 patients. ***")
+    message("Review the CONSORT diagram below to identify where patients were lost.")
+    return(list(results = NULL, consort = consort))
+  }
 
   # ── Continue analysis ──
   cohort <- prepare_cohort(cohort)
 
   results <- switch(config$analysis_method,
-    ipw   = run_ipw_analysis(cohort, ps_formula, config),
-    gcomp = run_gcomp_analysis(cohort, ps_formula, config),
+    ipw   = run_ipw_analysis(cohort, confounders, config),
+    gcomp = run_gcomp_analysis(cohort, confounders, config),
     stop(paste("Unknown method:", config$analysis_method))
   )
 
-  run_sensitivity(results, config)
+  run_sensitivity(results, confounders, config)
   message("Analysis complete.")
+
+  # Return all results — plots are stored in results$plots for
+
+  # Quarto figure chunks to render inline (no png()/dev.off()).
   return(list(results = results, consort = consort))
 }
 

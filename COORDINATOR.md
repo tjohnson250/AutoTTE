@@ -181,7 +181,7 @@ consider it a credible starting point.
 - [ ] CONSORT flow diagram included (print_consort_table + render_consort_diagram)
 - [ ] Confounders SQL uses dbExecute() then separate dbGetQuery() — NOT combined
 - [ ] names(cohort) <- tolower(names(cohort)) called after dbGetQuery()
-- [ ] PNG paths use file.path(output_dir, ...) — no hardcoded relative paths
+- [ ] All plots render inline via Quarto figure chunks — no png()/dev.off() anywhere
 - [ ] Empty cohort guard: main() renders CONSORT and stops if nrow(cohort) == 0
 - [ ] Factor columns use distinct names (sex_cat, race_cat) not raw column names
 
@@ -194,9 +194,11 @@ consider it a credible starting point.
 - Using `dbo.TABLE` instead of `CDW.dbo.TABLE`
 - Using generic drug names instead of RXNORM_CUI or NDC codes
 - `SELECT * FROM #analytic_cohort` inside the confounders SQL batch (ODBC bug)
-- Hardcoded relative paths in png() calls
+- Any use of `png()` / `dev.off()` instead of inline Quarto figure chunks
 - No CONSORT flow diagram
 - No empty-cohort guard in main()
+- Confounder JOINs using MAX(date)+self-join instead of ROW_NUMBER() (causes row duplication)
+- CONSORT shows MORE patients after confounders than before (row duplication from JOINs)
 
 ### Protocol Review Acceptance Criteria
 - [ ] Reviewer checked each protocol against the TTE checklist in REVIEW.md

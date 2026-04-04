@@ -270,23 +270,48 @@ Pass the `confounders` vector (not a pre-built formula) to `run_ipw_analysis`,
 for its specific data subset. Subgroups are especially prone to losing factor
 levels.
 
-### PNG Output Paths
+### Quarto Inline Rendering (no png files)
 
-Never use hardcoded relative paths like `png("results/.../plot.png")`. The
-working directory is unpredictable across RStudio, Quarto render, and batch
-execution. Instead, define `output_dir` once in the config section:
+**Never use `png()` / `dev.off()` in protocol code.** All plots must render
+inline in the Quarto HTML output. This means:
 
-```r
-output_dir <- if (requireNamespace("here", quietly = TRUE)) {
-  here::here("results", "<therapeutic_area>", "protocols")
-} else {
-  normalizePath(file.path(getwd(), "results", "<therapeutic_area>", "protocols"),
-                mustWork = FALSE)
-}
-if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
-```
+1. **Functions that create plots** (e.g., `render_consort_diagram`,
+   `run_ipw_analysis`) should either draw directly to the active device or
+   store `ggplot` objects in the return list (e.g., `results$plots$love`,
+   `results$plots$km_stroke`).
 
-Then use `file.path(output_dir, "protocol_01_love_plot.png")` for all `png()` calls.
+2. **`main()` returns everything** — results, consort, plots — but does NOT
+   write any files. Example:
+   ```r
+   return(list(results = results, consort = consort))
+   # where results$plots contains named ggplot objects
+   ```
+
+3. **Separate Quarto figure chunks** after `main()` render each plot:
+   ````
+   ```{r}
+   #| label: fig-consort
+   #| fig-cap: "CONSORT flow diagram showing patient attrition."
+   #| fig-width: 10
+   #| fig-height: 12
+   render_consort_diagram(all_results$consort)
+   ```
+
+   ```{r}
+   #| label: fig-love-plot
+   #| fig-cap: "Absolute standardized mean differences before and after IPW."
+   #| fig-width: 10
+   #| fig-height: 8
+   print(all_results$results$plots$love)
+   ```
+   ````
+
+4. **Grid-based plots** (like the CONSORT diagram) just draw directly —
+   Quarto captures the active device. **ggplot objects** should be stored
+   and then `print()`ed in the figure chunk.
+
+5. **Do NOT define `output_dir`** or use `file.path()` for plot output.
+   There should be zero `.png` file paths anywhere in the protocol code.
 
 ### Empty Cohort Guard
 

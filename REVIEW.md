@@ -111,8 +111,11 @@ Structure your review with:
   `SELECT INTO`. They must be separate calls: `dbExecute()` for the INSERT,
   then `dbGetQuery("SELECT * FROM #analytic_cohort")`. This is a known ODBC
   driver issue that returns wrong results silently.
-- Does the code use `file.path(output_dir, ...)` for ALL `png()` paths?
-  Hardcoded relative paths like `png("results/.../plot.png")` will break.
+- Are ALL plots rendered inline via Quarto figure chunks (no `png()`/`dev.off()`)?
+  Plot functions should draw to the active device or return ggplot objects
+  stored in `results$plots`, rendered via `print()` in separate figure chunks
+  with `#| fig-cap`, `#| fig-width`, etc. There should be zero `.png` file
+  paths in the code.
 - Is there an empty-cohort guard in `main()` that renders the CONSORT diagram
   and stops before `prepare_cohort()` when `nrow(cohort) == 0`?
 - Does the code include a CONSORT flow diagram (`print_consort_table()` and
@@ -120,6 +123,11 @@ Structure your review with:
 - Do derived factor columns use distinct names (e.g., `sex_cat` not `sex`)
   to avoid overwriting the raw column in `mutate()`?
 - If Quarto (.qmd): is `build_cohort_sql()` in a single code chunk?
+- Do ALL confounder LEFT JOINs (vitals, labs, enrollment) use
+  `ROW_NUMBER() OVER (PARTITION BY PATID ...) ... WHERE rn = 1`
+  to guarantee exactly 1 row per patient? The `MAX(date)` + self-join
+  pattern causes row duplication. If the CONSORT shows MORE patients
+  after the confounder step than before, this is the cause.
 
 **Per-protocol verdict in your markdown review:**
 - **ACCEPT** — Ready to execute, no major issues
