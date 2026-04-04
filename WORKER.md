@@ -181,6 +181,46 @@ This applies to the confounders step and any other step where you need data
 back in R. Steps that only create temp tables (eligibility, treatment, outcomes)
 should always use `dbExecute()`.
 
+### E-value Sensitivity Analysis
+
+When using `evalues.HR()` from the EValue package, you **must** specify the
+`rare` argument: `evalues.HR(hr, lo = ci_lo, hi = ci_hi, rare = TRUE)`.
+Set `rare = TRUE` when the outcome incidence is below ~15% within the
+follow-up window (typical for most TTE outcomes like stroke, bleeding,
+mortality). Set `rare = FALSE` otherwise. Omitting `rare` causes a runtime
+error.
+
+### Preventing Row Duplication in Confounder JOINs
+
+When building `#analytic_cohort` from `#outcomes` with LEFT JOINs to vitals,
+labs, and enrollment, you **must guarantee exactly 1 row per patient** from
+every joined subquery. Otherwise a patient with 2 vital records on the same
+date (or 2 overlapping enrollment spans, or 2 lab results on the same date)
+will duplicate rows via Cartesian product — turning 128 patients into 500+.
+
+**Always use `ROW_NUMBER() OVER (PARTITION BY PATID ORDER BY ... DESC)` and
+filter to `rn = 1`** in every subquery that returns patient-level data:
+
+```sql
+LEFT JOIN (
+  SELECT PATID, RESULT_NUM FROM (
+    SELECT l.PATID, l.RESULT_NUM,
+           ROW_NUMBER() OVER (PARTITION BY l.PATID ORDER BY l.RESULT_DATE DESC) AS rn
+    FROM CDW.dbo.LAB_RESULT_CM l
+    INNER JOIN #outcomes o4 ON l.PATID = o4.PATID
+    WHERE l.LAB_LOINC IN ('48642-3','62238-1')
+      AND l.RESULT_NUM IS NOT NULL
+      AND l.RESULT_DATE <= DATEADD(day, 7, o4.index_date)
+      AND l.RESULT_DATE >= DATEADD(day, -180, o4.index_date)
+  ) ranked WHERE rn = 1
+) lab_egfr ON o.PATID = lab_egfr.PATID
+```
+
+Do NOT use `MAX(date)` + self-join — that pattern returns duplicates when
+multiple records share the same max date. The medication subqueries are safe
+because they use `SELECT DISTINCT PATID`, and the comorbidity subquery is
+safe because it uses `GROUP BY PATID` with `MAX(CASE ...)`.
+
 ### Column Naming in R
 
 After `names(cohort) <- tolower(names(cohort))`, raw columns from SQL like
@@ -198,6 +238,37 @@ mutate(
 
 Then use `sex_cat`, `race_cat`, `hispanic_cat` in the propensity score formula,
 subgroup filters, and Table 1 summaries.
+
+### Handling Single-Level Factors in Propensity Score Models
+
+With small or specific cohorts, some factor variables may have only one level
+(e.g., all patients are the same race, or all smoking statuses are "Unknown").
+`weightit()` / `bal.tab()` will error with "contrasts can only be applied to
+factors with 2 or more levels."
+
+**Always build the PS formula dynamically** by inspecting the data and dropping
+single-level factors and zero-variance numeric columns before fitting:
+
+```r
+build_ps_formula <- function(confounders, cohort) {
+  keep <- character()
+  for (v in confounders) {
+    col <- cohort[[v]]
+    if (is.factor(col) || is.character(col)) {
+      if (length(unique(na.omit(col))) < 2) next
+    } else {
+      if (sd(col, na.rm = TRUE) == 0 || all(is.na(col))) next
+    }
+    keep <- c(keep, v)
+  }
+  as.formula(paste("treatment ~", paste(keep, collapse = " + ")))
+}
+```
+
+Pass the `confounders` vector (not a pre-built formula) to `run_ipw_analysis`,
+`run_subgroup_analyses`, and `run_sensitivity` so each can rebuild the formula
+for its specific data subset. Subgroups are especially prone to losing factor
+levels.
 
 ### PNG Output Paths
 
