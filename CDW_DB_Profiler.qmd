@@ -1,0 +1,1246 @@
+---
+title: "CDW_DB_Profiler"
+bibliography: references.bib
+format: html
+editor: visual
+params:
+  save_temp_tables: false
+---
+
+## Load R Libraries for DB access
+
+Among other things, this provides access to dbply and dbconnect, both needed to connect to an MS SQL DB. If this fails, you probably need to install the packages in your version of R.
+
+```{r load-libraries}
+library(tidyverse)
+library(DBI)
+library(dbplyr)
+library(pointblank)
+library(SqlRender)
+library(gtsummary)
+options(encoding = "UTF-8") # Needed since winterm Locale defaults to 1252 instead of UTF-8
+
+```
+
+This function:
+
+1.  **Extracts comprehensive schema information:**
+
+    -   All tables in the specified schema
+    -   Column names, data types, and nullability
+    -   Primary keys (marked with \[PRIMARY KEY\])
+    -   Foreign key relationships (marked with \[FK -\> table.column\])
+
+2.  **Optional sample data** to help understand content and values
+
+3.  **Machine-readable format** that's easy for Claude to parse when writing SQL
+
+4.  **Can write to a file** for easy uploading to Claude
+
+The output format looks like:
+
+## Table: DEMOGRAPHIC
+
+### Columns:
+
+-   PATID: varchar(50) (NOT NULL) \[PRIMARY KEY\]
+-   BIRTH_DATE: date (NULL)
+-   SEX: varchar(2) (NULL) ...
+
+## Table: ENCOUNTER
+
+### Columns:
+
+-   ENCOUNTERID: varchar(50) (NOT NULL) \[PRIMARY KEY\]
+-   PATID: varchar(50) (NOT NULL) \[FK -\> DEMOGRAPHIC.PATID\] ...
+
+```{r fn-extract-schema}
+#| eval: false
+#| code-fold: true
+extract_schema_for_claude <- function(con, 
+                                      schema_name = "dbo",
+                                      include_sample_values = FALSE,
+                                      sample_size = 5,
+                                      output_file = NULL) {
+  
+  library(DBI)
+  library(dplyr)
+  
+  # Get list of tables
+  tables <- dbGetQuery(con, sprintf("
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = '%s'
+      AND TABLE_TYPE = 'BASE TABLE'
+    ORDER BY TABLE_NAME
+  ", schema_name))
+  
+  schema_text <- paste0(
+    "# Database Schema Information\n",
+    "# Generated: ", Sys.time(), "\n",
+    "# Schema: ", schema_name, "\n\n"
+  )
+  
+  for (table_name in tables$TABLE_NAME) {
+    
+    # Get column information
+    columns <- dbGetQuery(con, sprintf("
+      SELECT 
+        COLUMN_NAME,
+        DATA_TYPE,
+        CHARACTER_MAXIMUM_LENGTH,
+        IS_NULLABLE,
+        COLUMN_DEFAULT
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = '%s'
+        AND TABLE_NAME = '%s'
+      ORDER BY ORDINAL_POSITION
+    ", schema_name, table_name))
+    
+    # Get primary keys
+    pks <- dbGetQuery(con, sprintf("
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+      WHERE TABLE_SCHEMA = '%s'
+        AND TABLE_NAME = '%s'
+        AND CONSTRAINT_NAME LIKE 'PK_%%'
+    ", schema_name, table_name))
+    
+    # Get foreign keys
+    fks <- dbGetQuery(con, sprintf("
+      SELECT 
+        fk.COLUMN_NAME,
+        pk.TABLE_NAME AS REFERENCES_TABLE,
+        pk.COLUMN_NAME AS REFERENCES_COLUMN
+      FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE fk 
+        ON rc.CONSTRAINT_NAME = fk.CONSTRAINT_NAME
+      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pk 
+        ON rc.UNIQUE_CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+      WHERE fk.TABLE_SCHEMA = '%s'
+        AND fk.TABLE_NAME = '%s'
+    ", schema_name, table_name))
+    
+    # Build table section
+    schema_text <- paste0(schema_text, "## Table: ", table_name, "\n\n")
+    
+    # Add columns
+    schema_text <- paste0(schema_text, "### Columns:\n")
+    for (i in 1:nrow(columns)) {
+      col <- columns[i, ]
+      type_info <- col$DATA_TYPE
+      if (!is.na(col$CHARACTER_MAXIMUM_LENGTH)) {
+        type_info <- paste0(type_info, "(", col$CHARACTER_MAXIMUM_LENGTH, ")")
+      }
+      
+      nullable <- ifelse(col$IS_NULLABLE == "YES", "NULL", "NOT NULL")
+      
+      pk_marker <- ifelse(col$COLUMN_NAME %in% pks$COLUMN_NAME, " [PRIMARY KEY]", "")
+      
+      fk_info <- ""
+      if (col$COLUMN_NAME %in% fks$COLUMN_NAME) {
+        fk_row <- fks[fks$COLUMN_NAME == col$COLUMN_NAME, ]
+        fk_info <- paste0(" [FK -> ", fk_row$REFERENCES_TABLE, ".", fk_row$REFERENCES_COLUMN, "]")
+      }
+      
+      schema_text <- paste0(
+        schema_text,
+        "- ", col$COLUMN_NAME, ": ", type_info, " (", nullable, ")", 
+        pk_marker, fk_info, "\n"
+      )
+    }
+    
+    # Add sample values if requested
+    if (include_sample_values) {
+      tryCatch({
+        sample_data <- dbGetQuery(con, sprintf(
+          "SELECT TOP %d * FROM %s.%s",
+          sample_size, schema_name, table_name
+        ))
+        
+        if (nrow(sample_data) > 0) {
+          schema_text <- paste0(schema_text, "\n### Sample Data:\n")
+          schema_text <- paste0(schema_text, "```\n")
+          schema_text <- paste0(schema_text, capture.output(print(sample_data)), collapse = "\n")
+          schema_text <- paste0(schema_text, "\n```\n")
+        }
+      }, error = function(e) {
+        schema_text <<- paste0(schema_text, "\n### Sample Data: [Error retrieving samples]\n")
+      })
+    }
+    
+    schema_text <- paste0(schema_text, "\n")
+  }
+  
+  # Add summary statistics
+  schema_text <- paste0(
+    schema_text,
+    "\n---\n",
+    "## Summary\n",
+    "Total tables: ", nrow(tables), "\n"
+  )
+  
+  # Write to file if requested
+  if (!is.null(output_file)) {
+    writeLines(schema_text, output_file)
+    message("Schema written to: ", output_file)
+  }
+  
+  return(schema_text)
+}
+
+# Usage examples:
+# Basic usage
+# schema_info <- extract_schema_for_claude(con)
+# cat(schema_info)
+
+# With sample data
+# schema_info <- extract_schema_for_claude(con, include_sample_values = TRUE, sample_size = 3)
+
+# Write to file
+# extract_schema_for_claude(con, output_file = "database_schema.txt")
+
+# For a different schema
+# extract_schema_for_claude(con, schema_name = "myschema", output_file = "schema.txt")
+```
+
+Get schemas for Claude
+
+```{r extract-schema-cdw}
+#| code-fold: true
+con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+DBI::dbExecute(con, "USE CDW")
+
+# Verify
+dbGetQuery(con, "SELECT DB_NAME() AS current_database")  # Should now show "CDW"
+
+# Now extract schema with the original function
+extract_schema_for_claude(con, schema_name = "dbo", output_file = "CDW_DBO_database_schema.txt")
+dbDisconnect(con)
+```
+
+## CDW Data Profile for AutoTTE
+
+The schema dump tells AutoTTE what columns exist but not what's actually *in*
+them. This profiler produces a machine-readable data profile with aggregate
+counts, coding system distributions, temporal coverage, and column completeness
+— everything the worker agent needs for realistic feasibility assessment and
+correct SQL generation, with no PHI.
+
+**PHI protection rules applied throughout:**
+
+- All outputs are aggregates — no individual rows or PATIDs
+- Small cell suppression: any count of distinct patients \< 11 is replaced with `<11`
+- Date ranges reported as year-month only
+- No free-text or high-cardinality ID values exported
+
+```{r fn-suppress-small-cells}
+#| code-fold: true
+
+# Small cell suppression helper — replaces counts < 11 with "<11"
+# Applied to all patient counts before they are written to the profile.
+suppress <- function(n, threshold = 11) {
+  ifelse(is.na(n), NA_character_,
+         ifelse(n < threshold, "<11", format(n, big.mark = ",")))
+}
+```
+
+```{r fn-profile-cdw}
+#| code-fold: true
+
+profile_cdw_for_autoTTE <- function(con,
+                                    schema_name = "dbo",
+                                    output_file = "CDW_data_profile.md",
+                                    suppress_threshold = 11) {
+
+  # ------------------------------------------------------------------
+  # Helper: run a query and return a data frame (or empty on error)
+  # ------------------------------------------------------------------
+  safe_query <- function(sql, label = "") {
+    tryCatch(
+      dbGetQuery(con, sql),
+      error = function(e) {
+        message("  [SKIP] ", label, ": ", conditionMessage(e))
+        data.frame()
+      }
+    )
+  }
+
+  # Helper: suppress small counts in a character vector
+  sup <- function(n) {
+    ifelse(is.na(n), NA_character_,
+           ifelse(n < suppress_threshold, "<11", format(n, big.mark = ",")))
+  }
+
+  out <- character()
+  ln  <- function(...) out <<- c(out, paste0(...))
+
+  ln("# CDW Data Profile for AutoTTE")
+  ln("# Generated: ", Sys.time())
+  ln("# Schema: ", schema_name)
+  ln("# NOTE: This file contains ONLY aggregate counts. No PHI (PATIDs, dates")
+  ln("#       of service, etc.) is included. Counts < ", suppress_threshold,
+     " are suppressed.")
+  ln("")
+
+  # ================================================================
+  # SECTION 1: Overall CDW size and temporal coverage
+  # ================================================================
+  ln("---")
+  ln("## 1. Overall CDW Size and Temporal Coverage")
+  ln("")
+
+  # Total patients
+  total_pts <- safe_query(sprintf(
+    "SELECT COUNT(DISTINCT PATID) AS n FROM %s.DEMOGRAPHIC", schema_name),
+    "DEMOGRAPHIC count")
+  if (nrow(total_pts) > 0) {
+    ln("Total distinct patients in DEMOGRAPHIC: ", sup(total_pts$n[1]))
+    ln("")
+  }
+
+  # Per-table patient counts and date ranges
+  # Define tables with their date column and patient ID column
+  table_dates <- list(
+    list(tbl = "ENCOUNTER",    date_col = "ADMIT_DATE"),
+    list(tbl = "DIAGNOSIS",    date_col = "ADMIT_DATE"),
+    list(tbl = "PROCEDURES",   date_col = "PX_DATE"),
+    list(tbl = "PRESCRIBING",  date_col = "RX_ORDER_DATE"),
+    list(tbl = "DISPENSING",   date_col = "DISPENSE_DATE"),
+    list(tbl = "LAB_RESULT_CM", date_col = "RESULT_DATE"),
+    list(tbl = "VITAL",        date_col = "MEASURE_DATE"),
+    list(tbl = "MED_ADMIN",    date_col = "MEDADMIN_START_DATE"),
+    list(tbl = "CONDITION",    date_col = "ONSET_DATE"),
+    list(tbl = "DEATH",        date_col = "DEATH_DATE"),
+    list(tbl = "ENROLLMENT",   date_col = "ENR_START_DATE")
+  )
+
+  ln("| Table | Distinct Patients | Rows | Earliest (YYYY-MM) | Latest (YYYY-MM) |")
+  ln("|-------|-------------------|------|---------------------|-------------------|")
+
+  for (td in table_dates) {
+    res <- safe_query(sprintf("
+      SELECT COUNT(DISTINCT PATID) AS n_patients,
+             COUNT(*)              AS n_rows,
+             FORMAT(MIN(%s), 'yyyy-MM') AS earliest,
+             FORMAT(MAX(%s), 'yyyy-MM') AS latest
+      FROM %s.%s
+    ", td$date_col, td$date_col, schema_name, td$tbl), td$tbl)
+
+    if (nrow(res) > 0 && !is.na(res$n_patients[1]) && res$n_patients[1] > 0) {
+      ln("| ", td$tbl, " | ", sup(res$n_patients[1]), " | ",
+         format(res$n_rows[1], big.mark = ","), " | ",
+         ifelse(is.na(res$earliest[1]), "—", res$earliest[1]), " | ",
+         ifelse(is.na(res$latest[1]), "—", res$latest[1]), " |")
+    }
+  }
+  ln("")
+
+  # ================================================================
+  # SECTION 2: Year-by-year data volume (ENCOUNTER table)
+  # ================================================================
+  ln("---")
+  ln("## 2. Year-by-Year Patient Volume (ENCOUNTER)")
+  ln("")
+  ln("This shows how many distinct patients have at least one encounter per year.")
+  ln("")
+
+  yearly <- safe_query(sprintf("
+    SELECT YEAR(ADMIT_DATE)       AS yr,
+           COUNT(DISTINCT PATID)  AS n_patients,
+           COUNT(*)               AS n_encounters
+    FROM %s.ENCOUNTER
+    WHERE ADMIT_DATE IS NOT NULL
+    GROUP BY YEAR(ADMIT_DATE)
+    ORDER BY yr
+  ", schema_name), "yearly encounters")
+
+  if (nrow(yearly) > 0) {
+    ln("| Year | Distinct Patients | Encounters |")
+    ln("|------|-------------------|------------|")
+    for (i in seq_len(nrow(yearly))) {
+      ln("| ", yearly$yr[i], " | ", sup(yearly$n_patients[i]), " | ",
+         format(yearly$n_encounters[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 3: Legacy Encounters, EHR Migration, and Record Duplication
+  # ================================================================
+  ln("---")
+  ln("## 3. Legacy Encounters, EHR Migration, and Record Duplication")
+  ln("")
+  ln("### Background: AllScripts → Epic Migration")
+  ln("")
+  ln("This CDW contains data from TWO EHR eras:")
+  ln("1. **AllScripts era** — original EHR data fed directly into the CDW.")
+  ln("2. **Epic era** — after migration, Epic became the primary EHR feed.")
+  ln("")
+  ln("During the Epic go-live, some AllScripts records were imported INTO Epic.")
+  ln("The Epic feed then sent those imported records back into the CDW, creating")
+  ln("**duplicate records**: the original AllScripts version AND the re-imported")
+  ln("Epic version of the same clinical event.")
+  ln("")
+  ln("These duplicates are identifiable via two columns in the ENCOUNTER table:")
+  ln("- `RAW_ENC_TYPE = 'Legacy Encounter'` — the Epic-side label for imported")
+  ln("  AllScripts encounters that were re-fed into the CDW.")
+  ln("- `IS_LEGACY_IMPORT = 'Y'` — a CDW-level flag for the same records.")
+  ln("")
+  ln("**Default rule: ALWAYS filter out legacy encounters** unless you have a")
+  ln("specific reason to keep them. Including them causes double-counting of")
+  ln("encounters, diagnoses, procedures, and other linked records from the")
+  ln("pre-Epic period.")
+  ln("")
+  ln("```sql")
+  ln("-- Standard filter to exclude duplicate legacy encounters:")
+  ln("INNER JOIN CDW.dbo.ENCOUNTER e ON ...")
+  ln("  AND e.RAW_ENC_TYPE <> 'Legacy Encounter'")
+  ln("```")
+  ln("")
+
+  # 3a. RAW_ENC_TYPE distribution (primary filter)
+  ln("### 3a. RAW_ENC_TYPE Distribution")
+  ln("")
+  ln("This is the primary column for identifying legacy duplicates.")
+  ln("")
+
+  raw_enc_dist <- safe_query(sprintf("
+    SELECT ISNULL(RAW_ENC_TYPE, '(NULL)') AS raw_enc_type,
+           COUNT(DISTINCT PATID)  AS n_patients,
+           COUNT(*)               AS n_encounters
+    FROM %s.ENCOUNTER
+    GROUP BY RAW_ENC_TYPE
+    ORDER BY n_encounters DESC
+  ", schema_name), "RAW_ENC_TYPE dist")
+
+  if (nrow(raw_enc_dist) > 0) {
+    ln("| RAW_ENC_TYPE | Patients | Encounters |")
+    ln("|--------------|----------|------------|")
+    for (i in seq_len(nrow(raw_enc_dist))) {
+      ln("| ", raw_enc_dist$raw_enc_type[i], " | ",
+         sup(raw_enc_dist$n_patients[i]), " | ",
+         format(raw_enc_dist$n_encounters[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # 3b. IS_LEGACY_IMPORT distribution (secondary/corroborating flag)
+  has_legacy_col <- safe_query(sprintf("
+    SELECT TOP 1 COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = 'ENCOUNTER'
+      AND COLUMN_NAME = 'IS_LEGACY_IMPORT'
+  ", schema_name), "IS_LEGACY_IMPORT check")
+
+  if (nrow(has_legacy_col) > 0) {
+    legacy_dist <- safe_query(sprintf("
+      SELECT ISNULL(IS_LEGACY_IMPORT, '(NULL)') AS legacy_flag,
+             COUNT(DISTINCT PATID)  AS n_patients,
+             COUNT(*)               AS n_encounters
+      FROM %s.ENCOUNTER
+      GROUP BY IS_LEGACY_IMPORT
+      ORDER BY legacy_flag
+    ", schema_name), "IS_LEGACY_IMPORT dist")
+
+    if (nrow(legacy_dist) > 0) {
+      ln("### 3b. IS_LEGACY_IMPORT Distribution")
+      ln("")
+      ln("| IS_LEGACY_IMPORT | Patients | Encounters |")
+      ln("|------------------|----------|------------|")
+      for (i in seq_len(nrow(legacy_dist))) {
+        ln("| ", legacy_dist$legacy_flag[i], " | ",
+           sup(legacy_dist$n_patients[i]), " | ",
+           format(legacy_dist$n_encounters[i], big.mark = ","), " |")
+      }
+      ln("")
+    }
+
+    # Cross-tab RAW_ENC_TYPE vs IS_LEGACY_IMPORT to verify alignment
+    cross_tab <- safe_query(sprintf("
+      SELECT ISNULL(RAW_ENC_TYPE, '(NULL)') AS raw_enc_type,
+             ISNULL(IS_LEGACY_IMPORT, '(NULL)') AS legacy_flag,
+             COUNT(*) AS n_encounters
+      FROM %s.ENCOUNTER
+      WHERE RAW_ENC_TYPE = 'Legacy Encounter'
+         OR IS_LEGACY_IMPORT = 'Y'
+      GROUP BY RAW_ENC_TYPE, IS_LEGACY_IMPORT
+      ORDER BY raw_enc_type, legacy_flag
+    ", schema_name), "cross-tab legacy flags")
+
+    if (nrow(cross_tab) > 0) {
+      ln("### Cross-tab: RAW_ENC_TYPE vs IS_LEGACY_IMPORT")
+      ln("")
+      ln("Verifies whether the two legacy flags align.")
+      ln("")
+      ln("| RAW_ENC_TYPE | IS_LEGACY_IMPORT | Encounters |")
+      ln("|--------------|------------------|------------|")
+      for (i in seq_len(nrow(cross_tab))) {
+        ln("| ", cross_tab$raw_enc_type[i], " | ",
+           cross_tab$legacy_flag[i], " | ",
+           format(cross_tab$n_encounters[i], big.mark = ","), " |")
+      }
+      ln("")
+    }
+  }
+
+  # 3c. CDW_Source distribution on ENCOUNTER
+  ln("### 3c. CDW_Source Distribution (ENCOUNTER)")
+  ln("")
+  ln("Shows which source system feeds each encounter. Multiple CDW_Source")
+  ln("values in the same year range may indicate overlapping feeds.")
+  ln("")
+
+  cdw_src <- safe_query(sprintf("
+    SELECT ISNULL(CDW_Source, '(NULL)') AS cdw_source,
+           COUNT(DISTINCT PATID)  AS n_patients,
+           COUNT(*)               AS n_encounters,
+           FORMAT(MIN(ADMIT_DATE), 'yyyy-MM') AS earliest,
+           FORMAT(MAX(ADMIT_DATE), 'yyyy-MM') AS latest
+    FROM %s.ENCOUNTER
+    WHERE ADMIT_DATE IS NOT NULL
+    GROUP BY CDW_Source
+    ORDER BY n_encounters DESC
+  ", schema_name), "CDW_Source dist")
+
+  if (nrow(cdw_src) > 0) {
+    ln("| CDW_Source | Patients | Encounters | Earliest | Latest |")
+    ln("|-----------|----------|------------|----------|--------|")
+    for (i in seq_len(nrow(cdw_src))) {
+      ln("| ", cdw_src$cdw_source[i], " | ",
+         sup(cdw_src$n_patients[i]), " | ",
+         format(cdw_src$n_encounters[i], big.mark = ","), " | ",
+         ifelse(is.na(cdw_src$earliest[i]), "—", cdw_src$earliest[i]), " | ",
+         ifelse(is.na(cdw_src$latest[i]), "—", cdw_src$latest[i]), " |")
+    }
+    ln("")
+  }
+
+  # 3d. Legacy vs non-legacy by year
+  legacy_by_year <- safe_query(sprintf("
+    SELECT YEAR(ADMIT_DATE) AS yr,
+           CASE WHEN RAW_ENC_TYPE = 'Legacy Encounter' THEN 'Legacy'
+                ELSE 'Non-Legacy' END AS legacy_flag,
+           COUNT(DISTINCT PATID)  AS n_patients,
+           COUNT(*)               AS n_encounters
+    FROM %s.ENCOUNTER
+    WHERE ADMIT_DATE IS NOT NULL
+    GROUP BY YEAR(ADMIT_DATE),
+             CASE WHEN RAW_ENC_TYPE = 'Legacy Encounter' THEN 'Legacy'
+                  ELSE 'Non-Legacy' END
+    ORDER BY yr, legacy_flag
+  ", schema_name), "legacy by year")
+
+  if (nrow(legacy_by_year) > 0) {
+    ln("### 3d. Legacy vs Non-Legacy Encounters by Year")
+    ln("")
+    ln("Shows when the duplicate legacy records appear and when they stop.")
+    ln("Years with BOTH Legacy and Non-Legacy rows indicate the overlap")
+    ln("period where double-counting occurs if legacy records are not filtered.")
+    ln("")
+    ln("| Year | Category | Patients | Encounters |")
+    ln("|------|----------|----------|------------|")
+    for (i in seq_len(nrow(legacy_by_year))) {
+      ln("| ", legacy_by_year$yr[i], " | ",
+         legacy_by_year$legacy_flag[i], " | ",
+         sup(legacy_by_year$n_patients[i]), " | ",
+         format(legacy_by_year$n_encounters[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # 3e. Data completeness: legacy vs non-legacy
+  ln("### 3e. Data Completeness: Legacy vs Non-Legacy")
+  ln("")
+  ln("Percentage of encounters with non-NULL values for key fields.")
+  ln("Differences may indicate what data was carried over in the migration")
+  ln("vs what was left behind.")
+  ln("")
+
+  completeness_cols <- c("DISCHARGE_DATE", "DISCHARGE_DISPOSITION",
+                         "DISCHARGE_STATUS", "PAYER_TYPE_PRIMARY",
+                         "FACILITY_LOCATION")
+  ln("| Column | Legacy % Non-NULL | Non-Legacy % Non-NULL |")
+  ln("|--------|-------------------|----------------------|")
+
+  for (cc in completeness_cols) {
+    comp_res <- safe_query(sprintf("
+      SELECT
+        CASE WHEN RAW_ENC_TYPE = 'Legacy Encounter' THEN 'Legacy'
+             ELSE 'Non-Legacy' END AS legacy_flag,
+        COUNT(*) AS total,
+        SUM(CASE WHEN %s IS NOT NULL THEN 1 ELSE 0 END) AS n_nonnull
+      FROM %s.ENCOUNTER
+      GROUP BY CASE WHEN RAW_ENC_TYPE = 'Legacy Encounter' THEN 'Legacy'
+                    ELSE 'Non-Legacy' END
+    ", cc, schema_name), paste0("completeness ", cc))
+
+    if (nrow(comp_res) >= 1) {
+      leg_row <- comp_res[comp_res$legacy_flag == "Legacy", ]
+      non_row <- comp_res[comp_res$legacy_flag == "Non-Legacy", ]
+      leg_pct <- if (nrow(leg_row) > 0 && leg_row$total[1] > 0)
+        round(100 * leg_row$n_nonnull[1] / leg_row$total[1], 1) else "—"
+      non_pct <- if (nrow(non_row) > 0 && non_row$total[1] > 0)
+        round(100 * non_row$n_nonnull[1] / non_row$total[1], 1) else "—"
+      ln("| ", cc, " | ", leg_pct, "%% | ", non_pct, "%% |")
+    }
+  }
+  ln("")
+
+  # 3f. Linked tables: do legacy encounters have associated records?
+  ln("### 3f. Linked Data Availability for Legacy Encounters")
+  ln("")
+  ln("Do legacy encounters have associated records in other tables?")
+  ln("If legacy encounters DO have linked diagnoses/procedures, that confirms")
+  ln("they are duplicates of the original AllScripts records (not empty shells).")
+  ln("")
+
+  linked_tables <- list(
+    list(tbl = "DIAGNOSIS",    join_col = "ENCOUNTERID"),
+    list(tbl = "PROCEDURES",   join_col = "ENCOUNTERID"),
+    list(tbl = "PRESCRIBING",  join_col = "ENCOUNTERID"),
+    list(tbl = "LAB_RESULT_CM", join_col = "ENCOUNTERID"),
+    list(tbl = "VITAL",        join_col = "ENCOUNTERID")
+  )
+
+  ln("| Linked Table | Legacy Enc w/ Records | Non-Legacy Enc w/ Records |")
+  ln("|--------------|----------------------|--------------------------|")
+
+  for (lt in linked_tables) {
+    link_res <- safe_query(sprintf("
+      SELECT
+        CASE WHEN e.RAW_ENC_TYPE = 'Legacy Encounter' THEN 'Legacy'
+             ELSE 'Non-Legacy' END AS legacy_flag,
+        COUNT(DISTINCT e.ENCOUNTERID) AS total_enc,
+        COUNT(DISTINCT t.ENCOUNTERID) AS linked_enc
+      FROM %s.ENCOUNTER e
+      LEFT JOIN %s.%s t ON e.ENCOUNTERID = t.ENCOUNTERID
+      GROUP BY CASE WHEN e.RAW_ENC_TYPE = 'Legacy Encounter' THEN 'Legacy'
+                    ELSE 'Non-Legacy' END
+    ", schema_name, schema_name, lt$tbl), paste0("linked ", lt$tbl))
+
+    if (nrow(link_res) >= 1) {
+      leg_row <- link_res[link_res$legacy_flag == "Legacy", ]
+      non_row <- link_res[link_res$legacy_flag == "Non-Legacy", ]
+      leg_pct <- if (nrow(leg_row) > 0 && leg_row$total_enc[1] > 0)
+        paste0(round(100 * leg_row$linked_enc[1] / leg_row$total_enc[1], 1), "%%")
+      else "—"
+      non_pct <- if (nrow(non_row) > 0 && non_row$total_enc[1] > 0)
+        paste0(round(100 * non_row$linked_enc[1] / non_row$total_enc[1], 1), "%%")
+      else "—"
+      ln("| ", lt$tbl, " | ", leg_pct, " | ", non_pct, " |")
+    }
+  }
+  ln("")
+
+  # 3g. EHR source system identification
+  ln("### 3g. Patient EHR Source Coverage")
+  ln("")
+  ln("Patients with ALLSCRIPTS_PERSON_ID vs EPIC_PAT_ID in DEMOGRAPHIC,")
+  ln("showing how many patients come from each source system. Patients with")
+  ln("BOTH IDs are those whose AllScripts records were linked to Epic.")
+  ln("")
+
+  ehr_src <- safe_query(sprintf("
+    SELECT
+      SUM(CASE WHEN ALLSCRIPTS_PERSON_ID IS NOT NULL THEN 1 ELSE 0 END) AS n_allscripts,
+      SUM(CASE WHEN EPIC_PAT_ID IS NOT NULL THEN 1 ELSE 0 END) AS n_epic,
+      SUM(CASE WHEN ALLSCRIPTS_PERSON_ID IS NOT NULL
+                AND EPIC_PAT_ID IS NOT NULL THEN 1 ELSE 0 END) AS n_both,
+      COUNT(*) AS n_total
+    FROM %s.DEMOGRAPHIC
+  ", schema_name), "EHR source IDs")
+
+  if (nrow(ehr_src) > 0 && !all(is.na(ehr_src))) {
+    ln("| Category | Patients |")
+    ln("|----------|----------|")
+    ln("| Total in DEMOGRAPHIC | ", sup(ehr_src$n_total[1]), " |")
+    ln("| Has ALLSCRIPTS_PERSON_ID | ", sup(ehr_src$n_allscripts[1]), " |")
+    ln("| Has EPIC_PAT_ID | ", sup(ehr_src$n_epic[1]), " |")
+    ln("| Has BOTH (linked across systems) | ", sup(ehr_src$n_both[1]), " |")
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 4: Diagnosis coding systems by year (ICD-9 vs ICD-10)
+  # ================================================================
+  ln("---")
+  ln("## 4. Diagnosis Coding Systems by Year (ICD-9 vs ICD-10)")
+  ln("")
+  ln("DX_TYPE values: '09' = ICD-9-CM, '10' = ICD-10-CM, 'SM' = SNOMED, etc.")
+  ln("The US transitioned from ICD-9 to ICD-10 on 2015-10-01. Knowing which")
+  ln("years have which coding system is essential for writing correct SQL.")
+  ln("")
+
+  dx_by_year <- safe_query(sprintf("
+    SELECT YEAR(ADMIT_DATE) AS yr,
+           DX_TYPE,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_rows
+    FROM %s.DIAGNOSIS
+    WHERE ADMIT_DATE IS NOT NULL
+    GROUP BY YEAR(ADMIT_DATE), DX_TYPE
+    ORDER BY yr, DX_TYPE
+  ", schema_name), "DX_TYPE by year")
+
+  if (nrow(dx_by_year) > 0) {
+    ln("| Year | DX_TYPE | Distinct Patients | Rows |")
+    ln("|------|---------|-------------------|------|")
+    for (i in seq_len(nrow(dx_by_year))) {
+      ln("| ", dx_by_year$yr[i], " | ", dx_by_year$DX_TYPE[i], " | ",
+         sup(dx_by_year$n_patients[i]), " | ",
+         format(dx_by_year$n_rows[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 5: Procedure coding systems
+  # ================================================================
+  ln("---")
+  ln("## 5. Procedure Coding Systems")
+  ln("")
+
+  px_types <- safe_query(sprintf("
+    SELECT PX_TYPE,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_rows,
+           FORMAT(MIN(PX_DATE), 'yyyy-MM') AS earliest,
+           FORMAT(MAX(PX_DATE), 'yyyy-MM') AS latest
+    FROM %s.PROCEDURES
+    WHERE PX_DATE IS NOT NULL
+    GROUP BY PX_TYPE
+    ORDER BY n_patients DESC
+  ", schema_name), "PX_TYPE")
+
+  if (nrow(px_types) > 0) {
+    ln("PX_TYPE values: 'CH' = CPT/HCPCS, '10' = ICD-10-PCS, '09' = ICD-9-CM, 'RE' = Revenue, etc.")
+    ln("")
+    ln("| PX_TYPE | Distinct Patients | Rows | Earliest | Latest |")
+    ln("|---------|-------------------|------|----------|--------|")
+    for (i in seq_len(nrow(px_types))) {
+      ln("| ", px_types$PX_TYPE[i], " | ", sup(px_types$n_patients[i]), " | ",
+         format(px_types$n_rows[i], big.mark = ","), " | ",
+         px_types$earliest[i], " | ", px_types$latest[i], " |")
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 6: Lab LOINC coverage (top 50 most common)
+  # ================================================================
+  ln("---")
+  ln("## 6. Lab Results — Top 50 LOINCs by Patient Count")
+  ln("")
+
+  top_labs <- safe_query(sprintf("
+    SELECT TOP 50
+           LAB_LOINC,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_results,
+           AVG(TRY_CAST(RESULT_NUM AS FLOAT)) AS mean_val,
+           MIN(TRY_CAST(RESULT_NUM AS FLOAT)) AS min_val,
+           MAX(TRY_CAST(RESULT_NUM AS FLOAT)) AS max_val
+    FROM %s.LAB_RESULT_CM
+    WHERE LAB_LOINC IS NOT NULL
+    GROUP BY LAB_LOINC
+    ORDER BY n_patients DESC
+  ", schema_name), "top labs")
+
+  if (nrow(top_labs) > 0) {
+    ln("| LAB_LOINC | Patients | Results | Mean | Min | Max |")
+    ln("|-----------|----------|---------|------|-----|-----|")
+    for (i in seq_len(nrow(top_labs))) {
+      r <- top_labs[i, ]
+      ln("| ", r$LAB_LOINC, " | ", sup(r$n_patients), " | ",
+         format(r$n_results, big.mark = ","), " | ",
+         ifelse(is.na(r$mean_val), "—", round(r$mean_val, 2)), " | ",
+         ifelse(is.na(r$min_val), "—", round(r$min_val, 2)), " | ",
+         ifelse(is.na(r$max_val), "—", round(r$max_val, 2)), " |")
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 7: Prescribing — Top 50 RXNORM_CUI by patient count
+  # ================================================================
+  ln("---")
+  ln("## 7. Prescribing — Top 50 Medications (RXNORM_CUI) by Patient Count")
+  ln("")
+
+  top_rx <- safe_query(sprintf("
+    SELECT TOP 50
+           RXNORM_CUI,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_prescriptions,
+           FORMAT(MIN(RX_ORDER_DATE), 'yyyy-MM') AS earliest,
+           FORMAT(MAX(RX_ORDER_DATE), 'yyyy-MM') AS latest
+    FROM %s.PRESCRIBING
+    WHERE RXNORM_CUI IS NOT NULL AND RXNORM_CUI != ''
+    GROUP BY RXNORM_CUI
+    ORDER BY n_patients DESC
+  ", schema_name), "top Rx")
+
+  if (nrow(top_rx) > 0) {
+    ln("| RXNORM_CUI | Patients | Prescriptions | Earliest | Latest |")
+    ln("|------------|----------|---------------|----------|--------|")
+    for (i in seq_len(nrow(top_rx))) {
+      r <- top_rx[i, ]
+      ln("| ", r$RXNORM_CUI, " | ", sup(r$n_patients), " | ",
+         format(r$n_prescriptions, big.mark = ","), " | ",
+         r$earliest, " | ", r$latest, " |")
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 8: Demographic distributions
+  # ================================================================
+  ln("---")
+  ln("## 8. Demographic Distributions")
+  ln("")
+
+  for (col in c("SEX", "RACE", "HISPANIC")) {
+    dist <- safe_query(sprintf("
+      SELECT %s AS val, COUNT(DISTINCT PATID) AS n_patients
+      FROM %s.DEMOGRAPHIC
+      GROUP BY %s
+      ORDER BY n_patients DESC
+    ", col, schema_name, col), paste0("DEMOGRAPHIC.", col))
+
+    if (nrow(dist) > 0) {
+      ln("### ", col)
+      ln("")
+      ln("| Value | Patients |")
+      ln("|-------|----------|")
+      for (i in seq_len(nrow(dist))) {
+        ln("| ", ifelse(is.na(dist$val[i]), "(NULL)", dist$val[i]),
+           " | ", sup(dist$n_patients[i]), " |")
+      }
+      ln("")
+    }
+  }
+
+  # ================================================================
+  # SECTION 9: Encounter type distribution
+  # ================================================================
+  ln("---")
+  ln("## 9. Encounter Types")
+  ln("")
+
+  enc_types <- safe_query(sprintf("
+    SELECT ENC_TYPE,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_encounters
+    FROM %s.ENCOUNTER
+    GROUP BY ENC_TYPE
+    ORDER BY n_patients DESC
+  ", schema_name), "ENC_TYPE")
+
+  if (nrow(enc_types) > 0) {
+    ln("PCORnet ENC_TYPE: AV=Ambulatory, ED=Emergency, EI=ED-to-Inpatient,")
+    ln("IP=Inpatient, IS=Institutional, OS=Outpt Surgery, OA=Other Ambulatory,")
+    ln("TH=Telehealth, NI=No info, UN=Unknown, OT=Other")
+    ln("")
+    ln("| ENC_TYPE | Patients | Encounters |")
+    ln("|----------|----------|------------|")
+    for (i in seq_len(nrow(enc_types))) {
+      ln("| ", ifelse(is.na(enc_types$ENC_TYPE[i]), "(NULL)", enc_types$ENC_TYPE[i]),
+         " | ", sup(enc_types$n_patients[i]), " | ",
+         format(enc_types$n_encounters[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 10: Vital signs completeness
+  # ================================================================
+  ln("---")
+  ln("## 10. Vital Signs Completeness")
+  ln("")
+
+  vital_cols <- c("HT", "WT", "ORIGINAL_BMI", "SYSTOLIC", "DIASTOLIC", "SMOKING")
+  for (vc in vital_cols) {
+    vc_res <- safe_query(sprintf("
+      SELECT COUNT(DISTINCT PATID) AS n_patients,
+             COUNT(*) AS n_rows
+      FROM %s.VITAL
+      WHERE %s IS NOT NULL
+    ", schema_name, vc), paste0("VITAL.", vc))
+
+    if (nrow(vc_res) > 0 && vc_res$n_patients[1] > 0) {
+      ln("- **", vc, "**: ", sup(vc_res$n_patients[1]),
+         " patients (", format(vc_res$n_rows[1], big.mark = ","), " measurements)")
+    }
+  }
+
+  # Smoking value distribution
+  smoking <- safe_query(sprintf("
+    SELECT SMOKING, COUNT(DISTINCT PATID) AS n_patients
+    FROM %s.VITAL
+    WHERE SMOKING IS NOT NULL
+    GROUP BY SMOKING
+    ORDER BY n_patients DESC
+  ", schema_name), "SMOKING values")
+
+  if (nrow(smoking) > 0) {
+    ln("")
+    ln("### SMOKING Values")
+    ln("")
+    ln("| SMOKING | Patients |")
+    ln("|---------|----------|")
+    for (i in seq_len(nrow(smoking))) {
+      ln("| ", smoking$SMOKING[i], " | ", sup(smoking$n_patients[i]), " |")
+    }
+  }
+  ln("")
+
+  # ================================================================
+  # SECTION 11: DEATH table profile
+  # ================================================================
+  ln("---")
+  ln("## 11. Death Records")
+  ln("")
+
+  death_res <- safe_query(sprintf("
+    SELECT COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_rows
+    FROM %s.DEATH
+  ", schema_name), "DEATH count")
+
+  if (nrow(death_res) > 0) {
+    ln("Distinct patients with death records: ", sup(death_res$n_patients[1]))
+    ln("Total rows (may have duplicates per patient): ",
+       format(death_res$n_rows[1], big.mark = ","))
+    ln("")
+  }
+
+  death_src <- safe_query(sprintf("
+    SELECT DEATH_SOURCE, COUNT(DISTINCT PATID) AS n_patients
+    FROM %s.DEATH
+    WHERE DEATH_SOURCE IS NOT NULL
+    GROUP BY DEATH_SOURCE
+    ORDER BY n_patients DESC
+  ", schema_name), "DEATH_SOURCE")
+
+  if (nrow(death_src) > 0) {
+    ln("### DEATH_SOURCE Values")
+    ln("")
+    ln("| DEATH_SOURCE | Patients |")
+    ln("|--------------|----------|")
+    for (i in seq_len(nrow(death_src))) {
+      ln("| ", death_src$DEATH_SOURCE[i], " | ", sup(death_src$n_patients[i]), " |")
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 12: Column completeness (NULL rates) for key tables
+  # ================================================================
+  ln("---")
+  ln("## 12. Column Completeness — Key Tables")
+  ln("")
+  ln("Percentage of rows where the column is NOT NULL.")
+  ln("")
+
+  completeness_tables <- list(
+    list(tbl = "DEMOGRAPHIC", cols = c("BIRTH_DATE", "SEX", "RACE", "HISPANIC")),
+    list(tbl = "PRESCRIBING", cols = c("RXNORM_CUI", "RX_ORDER_DATE",
+                                        "RX_START_DATE", "RX_END_DATE",
+                                        "RX_QUANTITY", "RX_DAYS_SUPPLY",
+                                        "RX_DOSE_ORDERED")),
+    list(tbl = "DIAGNOSIS",   cols = c("DX", "DX_TYPE", "ADMIT_DATE",
+                                        "DX_DATE", "DX_SOURCE")),
+    list(tbl = "LAB_RESULT_CM", cols = c("LAB_LOINC", "RESULT_NUM",
+                                          "RESULT_QUAL", "RESULT_DATE",
+                                          "NORM_RANGE_LOW", "NORM_RANGE_HIGH"))
+  )
+
+  for (ct in completeness_tables) {
+    total_sql <- sprintf("SELECT COUNT(*) AS n FROM %s.%s", schema_name, ct$tbl)
+    total_res <- safe_query(total_sql, paste0(ct$tbl, " total"))
+    if (nrow(total_res) == 0 || total_res$n[1] == 0) next
+
+    total_n <- total_res$n[1]
+    ln("### ", ct$tbl, " (", format(total_n, big.mark = ","), " rows)")
+    ln("")
+    ln("| Column | % Non-NULL |")
+    ln("|--------|-----------|")
+
+    for (col in ct$cols) {
+      col_res <- safe_query(sprintf("
+        SELECT COUNT(*) AS n_nonnull
+        FROM %s.%s
+        WHERE %s IS NOT NULL
+      ", schema_name, ct$tbl, col), paste0(ct$tbl, ".", col))
+
+      if (nrow(col_res) > 0) {
+        pct <- round(100 * col_res$n_nonnull[1] / total_n, 1)
+        ln("| ", col, " | ", pct, "%% |")
+      }
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 13: Top 30 diagnosis codes (ICD-10 only, by patient count)
+  # ================================================================
+  ln("---")
+  ln("## 13. Top 30 ICD-10 Diagnosis Codes by Patient Count")
+  ln("")
+
+  top_dx <- safe_query(sprintf("
+    SELECT TOP 30
+           DX,
+           COUNT(DISTINCT PATID) AS n_patients
+    FROM %s.DIAGNOSIS
+    WHERE DX_TYPE = '10' AND DX IS NOT NULL
+    GROUP BY DX
+    ORDER BY n_patients DESC
+  ", schema_name), "top ICD-10 DX")
+
+  if (nrow(top_dx) > 0) {
+    ln("| ICD-10 Code | Patients |")
+    ln("|-------------|----------|")
+    for (i in seq_len(nrow(top_dx))) {
+      ln("| ", top_dx$DX[i], " | ", sup(top_dx$n_patients[i]), " |")
+    }
+    ln("")
+  }
+
+  # ================================================================
+  # SECTION 14: Clinically important condition prevalence
+  # ================================================================
+  ln("---")
+  ln("## 14. Prevalence of Clinically Important Conditions")
+  ln("")
+  ln("Patient counts for conditions commonly used in TTE study design.")
+  ln("Counts use ICD-10 codes (DX_TYPE = '10'). Patients may appear in")
+  ln("multiple categories.")
+  ln("")
+
+  conditions <- list(
+    list(name = "Atrial fibrillation (I48.x)",  pattern = "I48%"),
+    list(name = "Heart failure (I50.x)",         pattern = "I50%"),
+    list(name = "Ischemic stroke (I63.x)",       pattern = "I63%"),
+    list(name = "Type 2 diabetes (E11.x)",       pattern = "E11%"),
+    list(name = "CKD stage 3 (N18.3x)",         pattern = "N18.3%"),
+    list(name = "CKD stage 4 (N18.4)",          pattern = "N18.4%"),
+    list(name = "CKD stage 5 (N18.5)",          pattern = "N18.5%"),
+    list(name = "ESRD / dialysis (N18.6, Z99.2)", pattern = "N18.6%"),
+    list(name = "Hypertension (I10-I16)",        pattern = "I1[0-6]%"),
+    list(name = "COPD (J44.x)",                  pattern = "J44%"),
+    list(name = "Sepsis (R65.2x, A41.x)",        pattern = "R65.2%"),
+    list(name = "Dementia (F01-F03, G30)",        pattern = "F0[1-3]%"),
+    list(name = "Liver cirrhosis (K74.x)",        pattern = "K74%"),
+    list(name = "VTE / PE (I26.x, I82.x)",       pattern = "I26%"),
+    list(name = "Major bleeding (various)",       pattern = "K92.0%"),
+    list(name = "Obesity (E66.x)",               pattern = "E66%")
+  )
+
+  ln("| Condition | Patients |")
+  ln("|-----------|----------|")
+
+  for (cond in conditions) {
+    # Use LIKE for simple patterns, handle multi-pattern conditions
+    if (grepl(",", cond$name) || grepl("I1\\[", cond$pattern)) {
+      # Multi-pattern: use separate queries for some conditions
+      if (grepl("Sepsis", cond$name)) {
+        cond_res <- safe_query(sprintf("
+          SELECT COUNT(DISTINCT PATID) AS n_patients
+          FROM %s.DIAGNOSIS
+          WHERE DX_TYPE = '10'
+            AND (DX LIKE 'R65.2%%' OR DX LIKE 'A41%%')
+        ", schema_name), cond$name)
+      } else if (grepl("ESRD", cond$name)) {
+        cond_res <- safe_query(sprintf("
+          SELECT COUNT(DISTINCT PATID) AS n_patients
+          FROM %s.DIAGNOSIS
+          WHERE DX_TYPE = '10'
+            AND (DX LIKE 'N18.6%%' OR DX LIKE 'Z99.2%%')
+        ", schema_name), cond$name)
+      } else if (grepl("Dementia", cond$name)) {
+        cond_res <- safe_query(sprintf("
+          SELECT COUNT(DISTINCT PATID) AS n_patients
+          FROM %s.DIAGNOSIS
+          WHERE DX_TYPE = '10'
+            AND (DX LIKE 'F01%%' OR DX LIKE 'F02%%' OR DX LIKE 'F03%%'
+                 OR DX LIKE 'G30%%')
+        ", schema_name), cond$name)
+      } else if (grepl("Hypertension", cond$name)) {
+        cond_res <- safe_query(sprintf("
+          SELECT COUNT(DISTINCT PATID) AS n_patients
+          FROM %s.DIAGNOSIS
+          WHERE DX_TYPE = '10'
+            AND (DX LIKE 'I10%%' OR DX LIKE 'I11%%' OR DX LIKE 'I12%%'
+                 OR DX LIKE 'I13%%' OR DX LIKE 'I14%%' OR DX LIKE 'I15%%'
+                 OR DX LIKE 'I16%%')
+        ", schema_name), cond$name)
+      } else if (grepl("VTE", cond$name)) {
+        cond_res <- safe_query(sprintf("
+          SELECT COUNT(DISTINCT PATID) AS n_patients
+          FROM %s.DIAGNOSIS
+          WHERE DX_TYPE = '10'
+            AND (DX LIKE 'I26%%' OR DX LIKE 'I82%%')
+        ", schema_name), cond$name)
+      } else {
+        cond_res <- safe_query(sprintf("
+          SELECT COUNT(DISTINCT PATID) AS n_patients
+          FROM %s.DIAGNOSIS
+          WHERE DX_TYPE = '10' AND DX LIKE '%s'
+        ", schema_name, cond$pattern), cond$name)
+      }
+    } else {
+      cond_res <- safe_query(sprintf("
+        SELECT COUNT(DISTINCT PATID) AS n_patients
+        FROM %s.DIAGNOSIS
+        WHERE DX_TYPE = '10' AND DX LIKE '%s'
+      ", schema_name, cond$pattern), cond$name)
+    }
+
+    if (nrow(cond_res) > 0) {
+      ln("| ", cond$name, " | ", sup(cond_res$n_patients[1]), " |")
+    }
+  }
+  ln("")
+
+  # ================================================================
+  # SECTION 15: Key medication prevalence (PRESCRIBING)
+  # ================================================================
+  ln("---")
+  ln("## 15. Key Medication Classes — Patient Counts")
+  ln("")
+  ln("Based on RXNORM_CUI in PRESCRIBING table. Counts are distinct patients")
+  ln("with at least one prescription record.")
+  ln("")
+
+  # Use generic names via free-text RAW_RX_MED_NAME if available,
+  # otherwise we search RXNORM_CUI ranges. Since RXNORM_CUI mappings
+  # vary, use RAW_RX_MED_NAME LIKE for robustness.
+  med_classes <- list(
+    list(name = "Apixaban",     pattern = "%apixaban%"),
+    list(name = "Rivaroxaban",  pattern = "%rivaroxaban%"),
+    list(name = "Dabigatran",   pattern = "%dabigatran%"),
+    list(name = "Edoxaban",     pattern = "%edoxaban%"),
+    list(name = "Warfarin",     pattern = "%warfarin%"),
+    list(name = "Amiodarone",   pattern = "%amiodarone%"),
+    list(name = "Flecainide",   pattern = "%flecainide%"),
+    list(name = "Sotalol",      pattern = "%sotalol%"),
+    list(name = "Dronedarone",  pattern = "%dronedarone%"),
+    list(name = "Dapagliflozin", pattern = "%dapagliflozin%"),
+    list(name = "Empagliflozin", pattern = "%empagliflozin%"),
+    list(name = "Canagliflozin", pattern = "%canagliflozin%"),
+    list(name = "Metformin",    pattern = "%metformin%"),
+    list(name = "Metoprolol",   pattern = "%metoprolol%"),
+    list(name = "Diltiazem",    pattern = "%diltiazem%"),
+    list(name = "Digoxin",      pattern = "%digoxin%"),
+    list(name = "Semaglutide",  pattern = "%semaglutide%")
+  )
+
+  # Check if RAW_RX_MED_NAME exists
+  has_raw <- safe_query(sprintf("
+    SELECT TOP 1 COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = 'PRESCRIBING'
+      AND COLUMN_NAME = 'RAW_RX_MED_NAME'
+  ", schema_name), "RAW_RX_MED_NAME check")
+
+  med_col <- if (nrow(has_raw) > 0) "RAW_RX_MED_NAME" else "RXNORM_CUI"
+
+  ln("Search column: **", med_col, "**")
+  ln("")
+  ln("| Medication | Patients | Prescriptions |")
+  ln("|------------|----------|---------------|")
+
+  for (med in med_classes) {
+    med_res <- safe_query(sprintf("
+      SELECT COUNT(DISTINCT PATID) AS n_patients,
+             COUNT(*) AS n_rx
+      FROM %s.PRESCRIBING
+      WHERE %s LIKE '%s'
+    ", schema_name, med_col, med$pattern), med$name)
+
+    if (nrow(med_res) > 0) {
+      ln("| ", med$name, " | ", sup(med_res$n_patients[1]), " | ",
+         format(med_res$n_rx[1], big.mark = ","), " |")
+    }
+  }
+  ln("")
+
+  # ================================================================
+  # SECTION 16: Key LOINCs for common TTE confounders
+  # ================================================================
+  ln("---")
+  ln("## 16. Key Lab LOINCs for TTE Confounders")
+  ln("")
+  ln("Patient counts for specific LOINCs commonly needed as confounders or")
+  ln("eligibility criteria in target trial emulations.")
+  ln("")
+
+  key_loincs <- list(
+    list(loinc = "2160-0", name = "Serum creatinine"),
+    list(loinc = "48642-3", name = "eGFR (CKD-EPI)"),
+    list(loinc = "33914-3", name = "eGFR (MDRD)"),
+    list(loinc = "4548-4",  name = "HbA1c"),
+    list(loinc = "2093-3",  name = "Total cholesterol"),
+    list(loinc = "2571-8",  name = "Triglycerides"),
+    list(loinc = "2085-9",  name = "HDL cholesterol"),
+    list(loinc = "13457-7", name = "LDL cholesterol (calc)"),
+    list(loinc = "718-7",   name = "Hemoglobin"),
+    list(loinc = "777-3",   name = "Platelets"),
+    list(loinc = "6299-2",  name = "BUN"),
+    list(loinc = "2823-3",  name = "Potassium"),
+    list(loinc = "2951-2",  name = "Sodium"),
+    list(loinc = "1742-6",  name = "ALT"),
+    list(loinc = "1920-8",  name = "AST"),
+    list(loinc = "1975-2",  name = "Total bilirubin"),
+    list(loinc = "6598-7",  name = "Troponin T"),
+    list(loinc = "49563-0", name = "Troponin I (HS)"),
+    list(loinc = "30313-1", name = "INR"),
+    list(loinc = "33762-6", name = "NT-proBNP")
+  )
+
+  ln("| LOINC | Lab Test | Patients | Results |")
+  ln("|-------|----------|----------|---------|")
+
+  for (ll in key_loincs) {
+    lab_res <- safe_query(sprintf("
+      SELECT COUNT(DISTINCT PATID) AS n_patients,
+             COUNT(*) AS n_results
+      FROM %s.LAB_RESULT_CM
+      WHERE LAB_LOINC = '%s'
+    ", schema_name, ll$loinc), ll$name)
+
+    if (nrow(lab_res) > 0) {
+      ln("| ", ll$loinc, " | ", ll$name, " | ",
+         sup(lab_res$n_patients[1]), " | ",
+         format(lab_res$n_results[1], big.mark = ","), " |")
+    }
+  }
+  ln("")
+
+  # ================================================================
+  # Write to file
+  # ================================================================
+  profile_text <- paste(out, collapse = "\n")
+
+  if (!is.null(output_file)) {
+    writeLines(profile_text, output_file)
+    message("Data profile written to: ", output_file)
+  }
+
+  return(invisible(profile_text))
+}
+```
+
+Run the profiler against the CDW.
+
+```{r run-profile}
+#| code-fold: true
+con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+DBI::dbExecute(con, "USE CDW")
+
+profile_cdw_for_autoTTE(con, schema_name = "dbo",
+                        output_file = "CDW_data_profile.md")
+dbDisconnect(con)
+```

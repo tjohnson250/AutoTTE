@@ -177,6 +177,18 @@ that all three passes were actually performed:
   than before, this is the cause.
 - Does `count_temp()` use `COUNT(DISTINCT PATID)` (not `COUNT(*)`)? Using
   `COUNT(*)` hides row duplication from JOINs.
+- **Legacy encounter filtering (CRITICAL — duplicate records):** Does every
+  ENCOUNTER join include `AND e.RAW_ENC_TYPE <> 'Legacy Encounter'`? Legacy
+  encounters are **duplicates** of original AllScripts records that were
+  re-imported via Epic. Failing to filter them causes double-counting of
+  encounters, diagnoses, procedures, etc. This is a MUST-FIX unless the
+  protocol explicitly justifies keeping them (e.g., binary comorbidity flags
+  where duplication is harmless). Check `CDW_data_profile.md` Section 3 for
+  the volume of legacy encounters.
+- **ICD-9/10 transition coverage:** If the study lookback window extends
+  before the ICD-10 transition date shown in `CDW_data_profile.md` Section 4,
+  the SQL must include both DX_TYPE = '09' and DX_TYPE = '10' with
+  appropriate code mappings, or it will miss pre-transition diagnoses.
 
 **Per-protocol verdict in your markdown review:**
 - **ACCEPT** — Ready to execute, no major issues

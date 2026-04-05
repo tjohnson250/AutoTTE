@@ -167,9 +167,15 @@ consider it a credible starting point.
 ### Feasibility Acceptance Criteria
 - [ ] Every approved question was assessed against the dataset registry
       AND/OR against the PCORnet CDW schema (if CDW mode is enabled)
+- [ ] Worker consulted `CDW_data_profile.md` for actual patient counts,
+      coding system coverage, and column completeness (not just the schema)
+- [ ] Sample size estimates are grounded in profile data (e.g., "CDW has
+      X patients with AF + CKD stage 4 based on the data profile")
+- [ ] ICD-9 vs ICD-10 coverage was checked for the proposed study period
 - [ ] For feasible matches: specific variables identified for exposure,
       outcome, and key confounders
-- [ ] Positivity concerns discussed for each match
+- [ ] Positivity concerns discussed for each match, informed by actual
+      medication counts from the data profile
 - [ ] At least one feasible question-dataset pair identified
 - [ ] Data gaps documented with what data would be needed
 
@@ -177,6 +183,9 @@ consider it a credible starting point.
 - Dataset claims that are vague ("MIMIC probably has this")
 - No discussion of time-zero feasibility
 - Claiming variables exist without checking get_dataset_details or the schema files
+- Sample size estimates not backed by actual data profile counts ("we expect
+  300-800 per arm" without citing the profile)
+- Study period extends before Oct 2015 but SQL only uses ICD-10 codes
 
 ### Protocol Acceptance Criteria
 - [ ] Target trial specification complete (all 7 elements from WORKER.md)
@@ -221,6 +230,9 @@ consider it a credible starting point.
 - Monolithic main() with eval: false — results won't render inline
 - Confounder JOINs using MAX(date)+self-join instead of ROW_NUMBER() (causes row duplication)
 - CONSORT shows MORE patients after confounders than before (row duplication from JOINs)
+- ENCOUNTER joins missing `AND e.RAW_ENC_TYPE <> 'Legacy Encounter'` filter
+  (causes double-counting of AllScripts-era records due to Epic re-import)
+- Study period extends before ICD-10 transition but SQL only uses DX_TYPE = '10'
 
 ### Protocol Review Acceptance Criteria
 - [ ] Reviewer checked each protocol against the TTE checklist in REVIEW.md

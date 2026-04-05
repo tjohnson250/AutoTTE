@@ -81,6 +81,7 @@ build_cohort_sql <- function(config) {
     INNER JOIN CDW.dbo.DEMOGRAPHIC d
       ON e.PATID = d.PATID
     WHERE e.ADMIT_DATE BETWEEN {config$study_start} AND {config$study_end}
+      AND e.RAW_ENC_TYPE <> 'Legacy Encounter' -- Exclude AllScripts duplicates
       AND e.ENC_TYPE IN ({{ENC_TYPES}})        -- e.g., ('IP', 'EI') for inpatient
       -- {{ADDITIONAL_ELIGIBILITY_CRITERIA}}
       -- Example: patient must have a diagnosis of atrial fibrillation

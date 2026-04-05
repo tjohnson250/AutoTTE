@@ -159,9 +159,17 @@ The coordinator will tell you which target to use.
 
 ### When targeting the PCORnet CDW:
 
-Use `analysis_plan_template_cdw.R` as your structural reference. The schema
+Use `analysis_plan_template_cdw.R` as your structural reference. The reference
 files are in the project root:
-- `CDW_DBO_database_schema.txt` — full PCORnet CDM schema
+- `CDW_DBO_database_schema.txt` — full PCORnet CDM schema (column names, types, keys)
+- `CDW_data_profile.md` — **data profile with aggregate counts, coding systems,
+  temporal coverage, and condition/medication prevalence** (no PHI). Read this
+  BEFORE writing the feasibility assessment or protocol SQL. It tells you:
+  - How many years of data exist and which years use ICD-9 vs ICD-10
+  - Patient counts per condition and medication (realistic sample size estimates)
+  - Which lab LOINCs are well-populated vs. sparse
+  - Column completeness (NULL rates) so you don't rely on empty fields
+  - Demographic distributions for subgroup feasibility
 - `MasterPatientIndex_DBO_database_schema.txt` — MPI schema
 
 **Key PCORnet CDM tables and how to use them:**
@@ -188,7 +196,33 @@ files are in the project root:
   `CDW.dbo.DIAGNOSIS`, `CDW.dbo.ENCOUNTER`). Do NOT use bare `dbo.TABLE_NAME`.
 - PATID is the universal patient key (varchar)
 - ENCOUNTERID links encounters across tables
-- Use ICD-10 codes (DX_TYPE = '10') unless the study period requires ICD-9
+- Use ICD-10 codes (DX_TYPE = '10') unless the study period requires ICD-9.
+  **Check `CDW_data_profile.md` Section 4** to see which years have ICD-9 vs
+  ICD-10 data in this CDW. If your lookback window extends before the ICD-10
+  transition (typically October 2015), you MUST include ICD-9 codes as well
+  (DX_TYPE = '09') or you will miss diagnoses from the earlier period
+- **Legacy encounters — DUPLICATE RECORD HAZARD (AllScripts → Epic migration):**
+  This CDW contains data from two EHR eras. When the institution transitioned
+  from AllScripts to Epic, some AllScripts records were imported into Epic.
+  Epic then re-fed those records into the CDW, creating **duplicates** of the
+  original AllScripts records. These duplicates are flagged as
+  `RAW_ENC_TYPE = 'Legacy Encounter'` in the ENCOUNTER table.
+  **Check `CDW_data_profile.md` Section 3** for the full breakdown.
+  - **Default: ALWAYS filter out legacy encounters** to avoid double-counting.
+    Add this condition to every ENCOUNTER join:
+    ```sql
+    AND e.RAW_ENC_TYPE <> 'Legacy Encounter'
+    ```
+  - **Exception — comorbidity lookback only:** You may KEEP legacy encounters
+    when building a binary "any prior diagnosis" indicator where double-counting
+    is harmless (e.g., `EXISTS (SELECT 1 FROM DIAGNOSIS WHERE DX LIKE 'I48%')`).
+    Even then, prefer filtering them out for consistency.
+  - **The `CDW_Source` column** on many tables indicates which feed produced
+    the record (e.g., 'GECBI' for Epic). Use this for additional verification
+    when needed, but `RAW_ENC_TYPE` on ENCOUNTER is the primary filter.
+  - **Always document your choice** in the protocol's "Emulation Using
+    Observational Data" section. State whether legacy encounters are included
+    or excluded and cite the data profile.
 - Medications: use RXNORM_CUI in PRESCRIBING, NDC in DISPENSING
 - Labs: use LOINC codes in LAB_RESULT_CM
 - Build temp tables step by step: #eligible → #treatment → #outcomes → #analytic_cohort
