@@ -233,6 +233,8 @@ consider it a credible starting point.
 - ENCOUNTER joins missing `AND e.RAW_ENC_TYPE <> 'Legacy Encounter'` filter
   (causes double-counting of AllScripts-era records due to Epic re-import)
 - Study period extends before ICD-10 transition but SQL only uses DX_TYPE = '10'
+- SQL queries on date columns lack explicit date range bounds (CDW has junk
+  dates 1820–3019; unbounded queries will include garbage records)
 
 ### Protocol Review Acceptance Criteria
 - [ ] Reviewer checked each protocol against the TTE checklist in REVIEW.md

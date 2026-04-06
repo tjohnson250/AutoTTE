@@ -196,6 +196,30 @@ files are in the project root:
   `CDW.dbo.DIAGNOSIS`, `CDW.dbo.ENCOUNTER`). Do NOT use bare `dbo.TABLE_NAME`.
 - PATID is the universal patient key (varchar)
 - ENCOUNTERID links encounters across tables
+- **Date quality — ALWAYS bound your study period explicitly.** The CDW contains
+  junk dates ranging from 1820 to 3019 due to EHR default values, data entry
+  errors, and placeholder dates. Key facts from `CDW_data_profile.md`:
+  - Year 1900 has ~40K patients — this is a default/unknown date, not real data.
+  - Pre-2000 data is sparse and unreliable (single-digit to low-hundreds volumes).
+  - Realistic clinical data begins around **2000** and reaches full volume ~**2005**.
+  - Future dates (2027+) include some scheduled appointments but mostly errors.
+  - **Every query that uses a date column** (ADMIT_DATE, PX_DATE, RX_ORDER_DATE,
+    RESULT_DATE, etc.) MUST include an explicit date range filter:
+    ```sql
+    WHERE e.ADMIT_DATE BETWEEN '2005-01-01' AND GETDATE()
+    ```
+  - Choose the study start date based on when data volume is sufficient for
+    your question. Check `CDW_data_profile.md` Section 2 for year-by-year
+    patient volumes.
+  - For the study period boundary, document your choice in the protocol and
+    justify it based on the data profile. Key data eras:
+    - **AllScripts era:** through ~2019-2020 (all data before Epic go-live)
+    - **Epic go-live:** ~2019-2020 (legacy encounter volume drops sharply after 2021)
+    - **Post-ICD-10 only:** 2016+ (ICD-10 transition was Oct 2015, separate from Epic)
+    - **Post-Epic + post-ICD-10:** ~2020+
+    Example: "Study period begins 2020 to ensure post-Epic, post-ICD-10
+    data" or "Study period begins 2016 for post-ICD-10 coverage, but note
+    this is still AllScripts-era data requiring legacy encounter filtering."
 - Use ICD-10 codes (DX_TYPE = '10') unless the study period requires ICD-9.
   **Check `CDW_data_profile.md` Section 4** to see which years have ICD-9 vs
   ICD-10 data in this CDW. If your lookback window extends before the ICD-10

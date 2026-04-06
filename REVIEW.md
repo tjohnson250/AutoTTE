@@ -189,6 +189,15 @@ that all three passes were actually performed:
   before the ICD-10 transition date shown in `CDW_data_profile.md` Section 4,
   the SQL must include both DX_TYPE = '09' and DX_TYPE = '10' with
   appropriate code mappings, or it will miss pre-transition diagnoses.
+- **Date range bounds (CRITICAL):** Does every query with a date column
+  include an explicit date range filter? The CDW has junk dates from 1820
+  to 3019 (default values, data entry errors, future placeholders). Queries
+  without date bounds will silently include garbage records. Check that:
+  - The study period start date is justified (full data volume begins ~2005,
+    post-ICD-10 from ~2016, post-Epic from ~2020; note the AllScripts-to-Epic
+    transition was ~2019-2020, NOT 2016)
+  - No date column is used in a WHERE or JOIN without a lower and upper bound
+  - The protocol documents the study period choice with rationale
 
 **Per-protocol verdict in your markdown review:**
 - **ACCEPT** — Ready to execute, no major issues
