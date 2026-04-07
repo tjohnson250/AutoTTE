@@ -247,6 +247,41 @@ files are in the project root:
   - **Always document your choice** in the protocol's "Emulation Using
     Observational Data" section. State whether legacy encounters are included
     or excluded and cite the data profile.
+- **Clinical code validation — MANDATORY for all code lists.** You have access
+  to MCP tools for looking up and validating clinical codes. **Every medication,
+  diagnosis, lab, and procedure code list in a protocol MUST be validated using
+  these tools before the protocol is finalized.** Incomplete code lists silently
+  exclude patients and bias results.
+
+  **RxNorm (medications — `mcp__rxnorm__*` tools):**
+  - For EVERY drug in the protocol, call `get_rxcuis_for_drug(ingredient, strength, dose_form)`
+    to get the COMPLETE set of SCD + SBD RXCUIs. Never manually curate a partial list.
+  - Include both SCD (generic) and SBD (branded) forms. EHRs record branded entries
+    (e.g., "Ecotrin" for aspirin, "Hemady" for dexamethasone 20mg, "Velcade" for bortezomib).
+  - For drug class queries (e.g., "all DOACs"), call `get_drug_class_members()`.
+  - Before finalizing, call `validate_rxcui_list()` on every RXCUI list in the SQL.
+  - Common pitfall: using ingredient-level CUIs (e.g., '11289' for warfarin). PCORnet
+    PRESCRIBING stores SCD/SBD-level CUIs — ingredient CUIs will match NOTHING.
+
+  **ICD-10-CM (diagnoses — `mcp__clinical_codes__search_icd10`, `get_icd10_hierarchy`):**
+  - For EVERY diagnosis in the protocol, call `get_icd10_hierarchy(code_prefix)` to
+    see all subcodes. A DX LIKE 'I82.4%' pattern is fine only if you've verified
+    what codes live underneath it.
+  - For condition searches, call `search_icd10(condition_name)` to catch codes you
+    might not know about (e.g., I82.A–C for axillary/subclavian/jugular DVT).
+
+  **LOINC (labs — `mcp__clinical_codes__search_loinc`, `find_related_loincs`):**
+  - For EVERY lab test, call `search_loinc(test_name)` and then `find_related_loincs()`
+    on your primary LOINC to see all related codes for the same analyte.
+  - EHRs may use different LOINCs for serum vs plasma, calculated vs measured, etc.
+    Include all relevant variants.
+
+  **HCPCS (procedures — `mcp__clinical_codes__search_hcpcs`):**
+  - For parenteral drugs (IV/SC), ALWAYS look up the corresponding J-codes using
+    `search_hcpcs(drug_name)`. Injectable drugs often appear in PROCEDURES rather
+    than PRESCRIBING. Multi-source detection (PRESCRIBING + PROCEDURES + MED_ADMIN)
+    is required for any parenteral agent.
+
 - Medications: use RXNORM_CUI in PRESCRIBING, NDC in DISPENSING
 - Labs: use LOINC codes in LAB_RESULT_CM
 - Build temp tables step by step: #eligible → #treatment → #outcomes → #analytic_cohort

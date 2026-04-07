@@ -235,6 +235,17 @@ consider it a credible starting point.
 - Study period extends before ICD-10 transition but SQL only uses DX_TYPE = '10'
 - SQL queries on date columns lack explicit date range bounds (CDW has junk
   dates 1820–3019; unbounded queries will include garbage records)
+- **Medication code lists not validated with RxNorm MCP tools** — every RXCUI list
+  must be generated via `mcp__rxnorm__get_rxcuis_for_drug()` and verified via
+  `mcp__rxnorm__validate_rxcui_list()`. Manually curated partial lists miss branded
+  formulations and silently exclude patients.
+- **Missing branded drug codes** (e.g., only SCD but no SBD) — Ecotrin, Hemady,
+  Velcade, Darzalex, Pradaxa, Coumadin, Jantoven, Lovenox, etc. must be included.
+- **Ingredient-level RXCUIs used in PRESCRIBING queries** (e.g., '11289' for
+  warfarin) — these will match NOTHING in PCORnet; only SCD/SBD codes work.
+- **Parenteral drugs detected via PRESCRIBING only** without J-code backup —
+  injectable agents (daratumumab, bortezomib, carfilzomib, etc.) require
+  multi-source detection (PRESCRIBING + PROCEDURES + MED_ADMIN).
 
 ### Protocol Review Acceptance Criteria
 - [ ] Reviewer checked each protocol against the TTE checklist in REVIEW.md

@@ -127,7 +127,7 @@ the first sub-agent (literature discovery).
 When launching sub-agents, always pipe through stream_viewer.py with a label:
 cat <<'SUBPROMPT' | claude -p --verbose --max-turns \$MAX_TURNS \\
   --output-format stream-json \\
-  --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,Bash,Read,Write,Edit,WebSearch,WebFetch" \\
+  --allowedTools "mcp__pubmed__search_pubmed,mcp__pubmed__fetch_abstracts,mcp__pubmed__query_dataset_registry,mcp__pubmed__get_dataset_details,mcp__rxnorm__search_drug,mcp__rxnorm__get_all_related,mcp__rxnorm__get_rxcuis_for_drug,mcp__rxnorm__validate_rxcui_list,mcp__rxnorm__get_drug_class_members,mcp__rxnorm__lookup_rxcui,mcp__clinical_codes__search_loinc,mcp__clinical_codes__get_loinc_details,mcp__clinical_codes__find_related_loincs,mcp__clinical_codes__search_icd10,mcp__clinical_codes__get_icd10_hierarchy,mcp__clinical_codes__search_hcpcs,mcp__clinical_codes__lookup_hcpcs,Bash,Read,Write,Edit,WebSearch,WebFetch" \\
   2>&1 | python3 tools/stream_viewer.py --label "Worker"
 [prompt for sub-agent]
 SUBPROMPT

@@ -4,6 +4,16 @@
       "command": "python",
       "args": ["tools/pubmed_server.py"],
       "env": {}
+    },
+    "rxnorm": {
+      "command": "python",
+      "args": ["tools/rxnorm_server.py"],
+      "env": {}
+    },
+    "clinical_codes": {
+      "command": "python",
+      "args": ["tools/clinical_codes_server.py"],
+      "env": {}
     }
   }
 }

@@ -189,6 +189,25 @@ that all three passes were actually performed:
   before the ICD-10 transition date shown in `CDW_data_profile.md` Section 4,
   the SQL must include both DX_TYPE = '09' and DX_TYPE = '10' with
   appropriate code mappings, or it will miss pre-transition diagnoses.
+- **Clinical code completeness (CRITICAL — silent patient loss):** Were all
+  medication, diagnosis, lab, and procedure code lists validated using MCP tools?
+  For EVERY drug in the protocol:
+  - Call `mcp__rxnorm__validate_rxcui_list` with the RXCUIs used in the SQL and
+    the expected drug name. Flag any WARNING about missing codes.
+  - Verify both SCD (generic) and SBD (branded) forms are included. Missing
+    branded codes (e.g., Ecotrin for aspirin, Hemady for dexamethasone, Velcade
+    for bortezomib) silently drops patients.
+  - Check that NO ingredient-level RXCUIs are used (e.g., '11289' for warfarin).
+    PCORnet PRESCRIBING stores SCD/SBD-level codes only.
+  For EVERY diagnosis code pattern (DX LIKE 'X%'):
+  - Call `mcp__clinical_codes__get_icd10_hierarchy` to verify all subcodes are
+    captured by the pattern.
+  For EVERY lab LOINC:
+  - Call `mcp__clinical_codes__find_related_loincs` to check if related codes
+    for the same analyte are missing.
+  For parenteral drugs:
+  - Verify multi-source detection (PRESCRIBING + PROCEDURES J-codes + MED_ADMIN).
+  If code validation was NOT performed by the worker, this is an automatic **REVISE**.
 - **Date range bounds (CRITICAL):** Does every query with a date column
   include an explicit date range filter? The CDW has junk dates from 1820
   to 3019 (default values, data entry errors, future placeholders). Queries
