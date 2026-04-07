@@ -294,6 +294,23 @@ Maintain `{results_dir}/agent_state.json` with:
 
 Update this after every sub-agent completes.
 
+## Handling Previous Runs
+
+If the results directory already contains files from a prior run, **always
+start fresh**. The system is non-interactive — you cannot ask the user what
+to do. Prior runs may have been generated with older agent instructions, older
+MCP tools, or incomplete clinical code lists. Specifically:
+
+1. **Archive the old run:** Rename the existing results directory by appending
+   a timestamp or version suffix (e.g., `atrial_fibrillation` →
+   `atrial_fibrillation_pre_YYYYMMDD`).
+2. **Create a fresh results directory** with the original name.
+3. **Start the full pipeline from scratch** — literature discovery through
+   protocol generation. Do NOT reuse prior deliverables, even if they look
+   complete. The whole point of re-running is to apply current instructions.
+4. **Log the archival** in your coordinator_log.md with a note about why the
+   re-run was triggered.
+
 ## Launching Your First Sub-Agent
 
 When you start, the therapeutic area will be provided in your initial prompt.
