@@ -1,6 +1,5 @@
-results/
+results/*
+!results/atrial_fibrillation/
 __pycache__/
 *.pyc
 .DS_Store
-!results/atrial_fibrillation/
-!results/atrial_fibrillation/**

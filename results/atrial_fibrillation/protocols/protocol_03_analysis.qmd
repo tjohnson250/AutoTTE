@@ -1,0 +1,1941 @@
+---
+title: "Protocol 03: OAC vs No OAC at CHA₂DS₂-VASc = 1 (Men) / 2 (Women) in AF"
+subtitle: "Target Trial Emulation --- PCORnet CDW"
+author: "Auto-Protocol Designer"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    self-contained: true
+    theme: cosmo
+execute:
+  eval: true
+  warning: false
+  message: true
+---
+
+## Study Overview
+
+This protocol emulates a target trial comparing **oral anticoagulation (OAC)
+initiation vs no OAC** for ischemic stroke/systemic embolism risk in adults
+with non-valvular AF at the guideline treatment threshold: CHA₂DS₂-VASc = 1
+(men) or 2 (women).
+
+- **Design:** New-user, treated vs untreated cohort
+- **Estimand:** ATE (Average Treatment Effect)
+- **Method:** Inverse Probability Weighting (IPW) + Weighted Cox PH
+- **Time zero:** First qualifying encounter with AF + target CHA₂DS₂-VASc + no prior OAC
+- **Grace period:** ±7 days for OAC prescription
+- **Follow-up:** 365 days (1 year)
+- **Study period:** 2016-01-01 to 2025-12-31
+
+
+<!-- ============================================================= -->
+<!-- PART 1: Function definitions (Sections 0-8)                    -->
+<!-- These chunks register functions but produce no visible output  -->
+<!-- ============================================================= -->
+
+
+## 0. Setup and Configuration
+
+```{r}
+#| label: setup
+#| message: false
+
+library(tidyverse)
+library(DBI)
+library(odbc)
+library(WeightIt)
+library(cobalt)
+library(survival)
+library(sandwich)
+library(lmtest)
+library(EValue)
+library(survminer)
+```
+
+```{r}
+#| label: config
+
+config <- list(
+  question        = "OAC vs No OAC at CHA2DS2-VASc = 1 (Men) / 2 (Women) in AF",
+  exposure_var    = "treatment",
+  outcome_var     = "stroke_se_event",
+  time_var        = "time_to_stroke_se",
+  estimand        = "ATE",
+  analysis_method = "ipw",
+  study_start     = "2016-01-01",
+  study_end       = "2025-12-31",
+  followup_days   = 365,
+  grace_period    = 7,         # +/- days for OAC prescription
+  lookback_dx     = 730,       # 2 years for comorbidity lookback (CHA2DS2-VASc)
+  lookback_lab    = 180,       # days for baseline lab lookback
+  lookback_vital  = 365,       # days for baseline vital lookback
+  lookback_rx     = 90         # days for concurrent medication lookback
+)
+```
+
+
+## 1. Database Connection
+
+```{r}
+#| label: db-connect
+
+connect_cdw <- function() {
+  con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+  return(con)
+}
+```
+
+
+## 2. Cohort SQL
+
+The cohort is built in sequential steps using temp tables:
+`#af_patients` -> `#chadsvasc_components` -> `#chadsvasc_eligible` ->
+`#eligible` -> `#treatment` -> `#outcomes` -> `#analytic_cohort`.
+
+All tables are fully qualified as `CDW.dbo.TABLE_NAME`. Medications are
+identified by RXNORM_CUI (SCD + SBD), diagnoses by ICD-10 with `DX_TYPE = '10'`.
+Legacy encounters are excluded throughout.
+
+The critical step is the CHA₂DS₂-VASc score computation in SQL, which builds
+each component from DIAGNOSIS and DEMOGRAPHIC, then filters to the exact
+target score (= 1 for men, = 2 for women).
+
+```{r}
+#| label: cohort-sql
+
+build_cohort_sql <- function(config) {
+
+  # ── Step 1: Eligible population ──
+  # AF + CHA2DS2-VASc = 1 (men) / 2 (women), no prior OAC
+  eligibility_sql <- paste0("
+    -- =========================================================
+    -- STEP 1: Eligible Population
+    -- NVAF + CHA2DS2-VASc = 1 (men) / 2 (women), new to OAC
+    -- =========================================================
+
+    -- 1a. Find all patients with non-valvular AF
+    IF OBJECT_ID('tempdb..#af_patients') IS NOT NULL DROP TABLE #af_patients;
+
+    SELECT DISTINCT dx.PATID
+    INTO #af_patients
+    FROM CDW.dbo.DIAGNOSIS dx
+    INNER JOIN CDW.dbo.ENCOUNTER e ON dx.ENCOUNTERID = e.ENCOUNTERID
+      AND e.RAW_ENC_TYPE <> 'Legacy Encounter'
+    WHERE dx.DX LIKE 'I48%'
+      AND dx.DX NOT IN ('I48.3','I48.4','I48.92')  -- exclude flutter
+      AND dx.DX_TYPE = '10'
+      AND dx.ADMIT_DATE BETWEEN '", config$study_start, "' AND '", config$study_end, "'
+    -- Exclude valvular AF
+    EXCEPT
+    SELECT DISTINCT vdx.PATID
+    FROM CDW.dbo.DIAGNOSIS vdx
+    WHERE (vdx.DX LIKE 'I05%' OR vdx.DX LIKE 'I06%'
+           OR vdx.DX LIKE 'I07%' OR vdx.DX LIKE 'I08%'
+           OR vdx.DX IN ('Z95.2','Z95.3','Z95.4'))
+      AND vdx.DX_TYPE = '10'
+      AND vdx.ADMIT_DATE BETWEEN '2005-01-01' AND GETDATE()
+    ;
+
+    -- 1b. For each AF patient, find the first encounter where AF + target
+    --     CHA2DS2-VASc score is met. Compute score from components.
+    --     Time zero = first encounter date where score = 1 (men) / 2 (women).
+
+    -- Build CHA2DS2-VASc components per patient, per encounter date
+    -- We need the score AS OF each encounter to find the first date it hits threshold
+    -- Strategy: find first AF encounter, then compute score at that point using
+    -- all prior diagnoses. If score matches, that's time zero.
+
+    IF OBJECT_ID('tempdb..#first_af_enc') IS NOT NULL DROP TABLE #first_af_enc;
+
+    -- First AF encounter per patient (the earliest encounter with an AF Dx)
+    SELECT
+      dx.PATID,
+      MIN(dx.ADMIT_DATE) AS first_af_date
+    INTO #first_af_enc
+    FROM CDW.dbo.DIAGNOSIS dx
+    INNER JOIN CDW.dbo.ENCOUNTER e ON dx.ENCOUNTERID = e.ENCOUNTERID
+      AND e.RAW_ENC_TYPE <> 'Legacy Encounter'
+    INNER JOIN #af_patients af ON dx.PATID = af.PATID
+    WHERE dx.DX LIKE 'I48%'
+      AND dx.DX NOT IN ('I48.3','I48.4','I48.92')
+      AND dx.DX_TYPE = '10'
+      AND dx.ADMIT_DATE BETWEEN '", config$study_start, "' AND '", config$study_end, "'
+    GROUP BY dx.PATID
+    ;
+
+    -- 1c. Compute CHA2DS2-VASc components at the first AF encounter date
+    IF OBJECT_ID('tempdb..#chadsvasc_components') IS NOT NULL DROP TABLE #chadsvasc_components;
+
+    SELECT
+      fa.PATID,
+      fa.first_af_date AS index_date,
+      d.BIRTH_DATE,
+      d.SEX,
+      d.RACE,
+      d.HISPANIC,
+      DATEDIFF(year, d.BIRTH_DATE, fa.first_af_date) AS age_at_index,
+
+      -- CHA2DS2-VASc components (lookback: all prior diagnoses)
+      ISNULL(comps.chf_flag, 0) AS chf_flag,
+      ISNULL(comps.htn_flag, 0) AS htn_flag,
+      ISNULL(comps.dm_flag, 0) AS dm_flag,
+      ISNULL(comps.stroke_tia_flag, 0) AS stroke_tia_flag,
+      ISNULL(comps.vasc_flag, 0) AS vasc_flag,
+
+      -- Age score
+      CASE WHEN DATEDIFF(year, d.BIRTH_DATE, fa.first_af_date) >= 75 THEN 2
+           WHEN DATEDIFF(year, d.BIRTH_DATE, fa.first_af_date) BETWEEN 65 AND 74 THEN 1
+           ELSE 0 END AS age_score,
+
+      -- Sex score
+      CASE WHEN d.SEX = 'F' THEN 1 ELSE 0 END AS sex_score,
+
+      -- Total CHA2DS2-VASc score
+      ISNULL(comps.chf_flag, 0)
+      + ISNULL(comps.htn_flag, 0)
+      + CASE WHEN DATEDIFF(year, d.BIRTH_DATE, fa.first_af_date) >= 75 THEN 2
+             WHEN DATEDIFF(year, d.BIRTH_DATE, fa.first_af_date) BETWEEN 65 AND 74 THEN 1
+             ELSE 0 END
+      + ISNULL(comps.dm_flag, 0)
+      + ISNULL(comps.stroke_tia_flag, 0) * 2
+      + ISNULL(comps.vasc_flag, 0)
+      + CASE WHEN d.SEX = 'F' THEN 1 ELSE 0 END
+      AS chadsvasc_total
+
+    INTO #chadsvasc_components
+    FROM #first_af_enc fa
+    INNER JOIN CDW.dbo.DEMOGRAPHIC d ON fa.PATID = d.PATID
+    LEFT JOIN (
+      SELECT
+        dx.PATID,
+        MAX(CASE WHEN dx.DX LIKE 'I50%' THEN 1 ELSE 0 END) AS chf_flag,
+        MAX(CASE WHEN dx.DX LIKE 'I10%' OR dx.DX LIKE 'I11%'
+                   OR dx.DX LIKE 'I12%' OR dx.DX LIKE 'I13%'
+                   OR dx.DX LIKE 'I15%' OR dx.DX LIKE 'I16%' THEN 1 ELSE 0 END) AS htn_flag,
+        MAX(CASE WHEN dx.DX LIKE 'E10%' OR dx.DX LIKE 'E11%'
+                   OR dx.DX LIKE 'E13%' THEN 1 ELSE 0 END) AS dm_flag,
+        MAX(CASE WHEN dx.DX LIKE 'I63%' OR dx.DX LIKE 'G45%'
+                   OR dx.DX LIKE 'I74%' THEN 1 ELSE 0 END) AS stroke_tia_flag,
+        MAX(CASE WHEN dx.DX LIKE 'I21%' OR dx.DX LIKE 'I25%'
+                   OR dx.DX LIKE 'I70%' OR dx.DX LIKE 'I71%'
+                   OR dx.DX = 'I73.9' THEN 1 ELSE 0 END) AS vasc_flag
+      FROM CDW.dbo.DIAGNOSIS dx
+      INNER JOIN #first_af_enc fa2 ON dx.PATID = fa2.PATID
+      WHERE dx.DX_TYPE = '10'
+        AND dx.ADMIT_DATE <= fa2.first_af_date
+        AND dx.ADMIT_DATE BETWEEN '2005-01-01' AND GETDATE()
+      GROUP BY dx.PATID
+    ) comps ON fa.PATID = comps.PATID
+    ;
+
+    -- 1d. Filter to target score: CHA2DS2-VASc = 1 (men) or = 2 (women)
+    --     Also exclude age >= 75 (2 pts -> score >= 3), prior stroke/TIA (2 pts),
+    --     active cancer, and patients under 18.
+    IF OBJECT_ID('tempdb..#eligible') IS NOT NULL DROP TABLE #eligible;
+
+    SELECT
+      cv.PATID,
+      cv.index_date,
+      cv.BIRTH_DATE,
+      cv.SEX,
+      cv.RACE,
+      cv.HISPANIC,
+      cv.age_at_index,
+      cv.chadsvasc_total,
+      cv.chf_flag,
+      cv.htn_flag,
+      cv.dm_flag,
+      cv.vasc_flag,
+      cv.age_score,
+      cv.sex_score,
+      -- Which component drives the score (the single non-sex, non-zero factor)
+      CASE
+        WHEN cv.chf_flag = 1 THEN 'CHF'
+        WHEN cv.htn_flag = 1 THEN 'HTN'
+        WHEN cv.dm_flag = 1 THEN 'DM'
+        WHEN cv.vasc_flag = 1 THEN 'Vascular'
+        WHEN cv.age_score = 1 THEN 'Age65-74'
+        ELSE 'Unknown'
+      END AS driving_component
+    INTO #eligible
+    FROM #chadsvasc_components cv
+    WHERE (
+        (cv.SEX = 'M' AND cv.chadsvasc_total = 1)
+        OR
+        (cv.SEX = 'F' AND cv.chadsvasc_total = 2)
+      )
+      -- Explicit exclusions (redundant with score but safety checks)
+      AND cv.stroke_tia_flag = 0        -- no prior stroke/TIA (would be +2)
+      AND cv.age_at_index < 75          -- age >= 75 would be +2
+      AND cv.age_at_index >= 18         -- adults only
+      -- Exclude active cancer
+      AND NOT EXISTS (
+        SELECT 1 FROM CDW.dbo.DIAGNOSIS cdx
+        WHERE cdx.PATID = cv.PATID
+          AND cdx.DX >= 'C00' AND cdx.DX < 'C98'
+          AND cdx.DX_TYPE = '10'
+          AND cdx.ADMIT_DATE >= DATEADD(year, -1, cv.index_date)
+          AND cdx.ADMIT_DATE <= cv.index_date
+          AND cdx.ADMIT_DATE BETWEEN '2005-01-01' AND GETDATE()
+      )
+      -- No prior OAC at any time (new-user design)
+      AND NOT EXISTS (
+        SELECT 1 FROM CDW.dbo.PRESCRIBING prx
+        WHERE prx.PATID = cv.PATID
+          AND prx.RXNORM_CUI IN (
+            -- All OAC RXCUIs
+            '1364435','1364445','1364441','1364447',
+            '1114198','1232082','1232086','2059015',
+            '1114202','1232084','1232088','2059017',
+            '1037179','1723476','1037045','1037181','1723478','1037049',
+            '1599543','1599551','1599555','1599549','1599553','1599557',
+            '855350','855288','855302','855312','855318','855324','855332',
+            '855338','855344','855296',
+            '855290','855304','855314','855320','855326','855334','855340',
+            '855346','855298',
+            '855292','855306','855316','855322','855328','855336','855342',
+            '855348','855300'
+          )
+          AND COALESCE(prx.RX_START_DATE, prx.RX_ORDER_DATE)
+              < DATEADD(day, -", config$grace_period, ", cv.index_date)
+          AND COALESCE(prx.RX_START_DATE, prx.RX_ORDER_DATE)
+              BETWEEN '2005-01-01' AND GETDATE()
+      )
+      -- Must have at least one non-legacy encounter in prior 365 days
+      AND EXISTS (
+        SELECT 1 FROM CDW.dbo.ENCOUNTER enc
+        WHERE enc.PATID = cv.PATID
+          AND enc.RAW_ENC_TYPE <> 'Legacy Encounter'
+          AND enc.ADMIT_DATE >= DATEADD(day, -365, cv.index_date)
+          AND enc.ADMIT_DATE <= cv.index_date
+          AND enc.ADMIT_DATE BETWEEN '2005-01-01' AND GETDATE()
+      )
+    ;
+
+    -- ── CONSORT: capture sub-step counts ──
+    IF OBJECT_ID('tempdb..#consort_counts') IS NOT NULL DROP TABLE #consort_counts;
+    SELECT
+      (SELECT COUNT(DISTINCT PATID) FROM #af_patients)            AS n_af_patients,
+      (SELECT COUNT(DISTINCT PATID) FROM #first_af_enc)           AS n_first_af,
+      (SELECT COUNT(DISTINCT PATID) FROM #chadsvasc_components)   AS n_scored,
+      (SELECT COUNT(DISTINCT PATID) FROM #eligible)               AS n_eligible
+    INTO #consort_counts;
+
+    DROP TABLE IF EXISTS #af_patients;
+    DROP TABLE IF EXISTS #first_af_enc;
+    DROP TABLE IF EXISTS #chadsvasc_components;
+  ")
+
+  # ── Step 2: Treatment assignment ──
+  # OAC within +/-7 days = treated; no OAC = untreated
+  treatment_sql <- paste0("
+    -- =========================================================
+    -- STEP 2: Treatment Assignment
+    -- OAC (treatment=1) vs No OAC (treatment=0)
+    -- Grace period: +/-", config$grace_period, " days from index_date
+    -- =========================================================
+
+    IF OBJECT_ID('tempdb..#treatment') IS NOT NULL DROP TABLE #treatment;
+
+    SELECT
+      e.*,
+      CASE WHEN oac.PATID IS NOT NULL THEN 1 ELSE 0 END AS treatment,
+      oac.oac_drug AS oac_type,
+      YEAR(e.index_date) AS index_year
+    INTO #treatment
+    FROM #eligible e
+    LEFT JOIN (
+      SELECT
+        p.PATID,
+        CASE
+          WHEN p.RXNORM_CUI IN ('1364435','1364445','1364441','1364447')
+            THEN 'apixaban'
+          WHEN p.RXNORM_CUI IN ('1114198','1232082','1232086','2059015',
+                                 '1114202','1232084','1232088','2059017')
+            THEN 'rivaroxaban'
+          WHEN p.RXNORM_CUI IN ('1037179','1723476','1037045',
+                                 '1037181','1723478','1037049')
+            THEN 'dabigatran'
+          WHEN p.RXNORM_CUI IN ('1599543','1599551','1599555',
+                                 '1599549','1599553','1599557')
+            THEN 'edoxaban'
+          ELSE 'warfarin'
+        END AS oac_drug,
+        ROW_NUMBER() OVER (PARTITION BY p.PATID
+                           ORDER BY ABS(DATEDIFF(day,
+                             COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE),
+                             e2.index_date))) AS rn
+      FROM CDW.dbo.PRESCRIBING p
+      INNER JOIN #eligible e2 ON p.PATID = e2.PATID
+      WHERE p.RXNORM_CUI IN (
+        -- All OAC RXCUIs
+        '1364435','1364445','1364441','1364447',
+        '1114198','1232082','1232086','2059015',
+        '1114202','1232084','1232088','2059017',
+        '1037179','1723476','1037045','1037181','1723478','1037049',
+        '1599543','1599551','1599555','1599549','1599553','1599557',
+        '855350','855288','855302','855312','855318','855324','855332',
+        '855338','855344','855296',
+        '855290','855304','855314','855320','855326','855334','855340',
+        '855346','855298',
+        '855292','855306','855316','855322','855328','855336','855342',
+        '855348','855300'
+      )
+      AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE)
+          BETWEEN DATEADD(day, -", config$grace_period, ", e2.index_date)
+              AND DATEADD(day,  ", config$grace_period, ", e2.index_date)
+    ) oac ON e.PATID = oac.PATID AND oac.rn = 1
+    ;
+  ")
+
+  # ── Step 3: Outcome ascertainment ──
+  outcome_sql <- paste0("
+    -- =========================================================
+    -- STEP 3: Outcome Ascertainment
+    -- Primary: Ischemic stroke / systemic embolism
+    -- Secondary: Major bleeding, ICH, all-cause mortality
+    -- Follow-up: ", config$followup_days, " days from index_date
+    -- =========================================================
+
+    IF OBJECT_ID('tempdb..#outcomes') IS NOT NULL DROP TABLE #outcomes;
+
+    SELECT
+      t.PATID,
+      t.index_date,
+      t.treatment,
+      t.oac_type,
+      t.index_year,
+      t.BIRTH_DATE, t.SEX, t.RACE, t.HISPANIC, t.age_at_index,
+      t.chadsvasc_total, t.chf_flag, t.htn_flag, t.dm_flag,
+      t.vasc_flag, t.age_score, t.sex_score, t.driving_component,
+
+      -- Primary: Ischemic stroke / systemic embolism
+      stroke_se.first_stroke_se_date,
+      CASE WHEN stroke_se.first_stroke_se_date IS NOT NULL THEN 1 ELSE 0 END AS stroke_se_event,
+
+      -- Secondary: Major bleeding (all)
+      bleed.first_bleed_date,
+      CASE WHEN bleed.first_bleed_date IS NOT NULL THEN 1 ELSE 0 END AS bleed_event,
+
+      -- Secondary: Intracranial hemorrhage (subset)
+      ich.first_ich_date,
+      CASE WHEN ich.first_ich_date IS NOT NULL THEN 1 ELSE 0 END AS ich_event,
+
+      -- Secondary: All-cause mortality
+      death.DEATH_DATE AS death_date,
+      CASE WHEN death.DEATH_DATE IS NOT NULL
+           AND death.DEATH_DATE > t.index_date
+           AND death.DEATH_DATE <= DATEADD(day, ", config$followup_days, ", t.index_date)
+           THEN 1 ELSE 0 END AS death_event,
+
+      -- Time to stroke/SE or censoring
+      CASE
+        WHEN stroke_se.first_stroke_se_date IS NOT NULL
+          THEN DATEDIFF(day, t.index_date, stroke_se.first_stroke_se_date)
+        WHEN death.DEATH_DATE IS NOT NULL
+          AND death.DEATH_DATE > t.index_date
+          AND death.DEATH_DATE <= DATEADD(day, ", config$followup_days, ", t.index_date)
+          THEN DATEDIFF(day, t.index_date, death.DEATH_DATE)
+        ELSE ", config$followup_days, "
+      END AS time_to_stroke_se,
+
+      -- Time to major bleeding or censoring
+      CASE
+        WHEN bleed.first_bleed_date IS NOT NULL
+          THEN DATEDIFF(day, t.index_date, bleed.first_bleed_date)
+        WHEN death.DEATH_DATE IS NOT NULL
+          AND death.DEATH_DATE > t.index_date
+          AND death.DEATH_DATE <= DATEADD(day, ", config$followup_days, ", t.index_date)
+          THEN DATEDIFF(day, t.index_date, death.DEATH_DATE)
+        ELSE ", config$followup_days, "
+      END AS time_to_bleed,
+
+      -- Time to ICH or censoring
+      CASE
+        WHEN ich.first_ich_date IS NOT NULL
+          THEN DATEDIFF(day, t.index_date, ich.first_ich_date)
+        WHEN death.DEATH_DATE IS NOT NULL
+          AND death.DEATH_DATE > t.index_date
+          AND death.DEATH_DATE <= DATEADD(day, ", config$followup_days, ", t.index_date)
+          THEN DATEDIFF(day, t.index_date, death.DEATH_DATE)
+        ELSE ", config$followup_days, "
+      END AS time_to_ich,
+
+      -- Time to death or censoring
+      CASE
+        WHEN death.DEATH_DATE IS NOT NULL
+          AND death.DEATH_DATE > t.index_date
+          AND death.DEATH_DATE <= DATEADD(day, ", config$followup_days, ", t.index_date)
+          THEN DATEDIFF(day, t.index_date, death.DEATH_DATE)
+        ELSE ", config$followup_days, "
+      END AS time_to_death
+
+    INTO #outcomes
+    FROM #treatment t
+
+    -- Stroke / systemic embolism (I63.x, I74.x) on IP/EI/ED
+    LEFT JOIN (
+      SELECT dx.PATID, MIN(dx.ADMIT_DATE) AS first_stroke_se_date
+      FROM CDW.dbo.DIAGNOSIS dx
+      INNER JOIN CDW.dbo.ENCOUNTER enc ON dx.ENCOUNTERID = enc.ENCOUNTERID
+        AND enc.RAW_ENC_TYPE <> 'Legacy Encounter'
+      INNER JOIN #treatment t2 ON dx.PATID = t2.PATID
+      WHERE (dx.DX LIKE 'I63%' OR dx.DX LIKE 'I74%')
+        AND dx.DX_TYPE = '10'
+        AND enc.ENC_TYPE IN ('IP','EI','ED')
+        AND dx.ADMIT_DATE > t2.index_date
+        AND dx.ADMIT_DATE <= DATEADD(day, ", config$followup_days, ", t2.index_date)
+      GROUP BY dx.PATID
+    ) stroke_se ON t.PATID = stroke_se.PATID
+
+    -- Major bleeding: ICH (I60-I62) + GI (K92.0-K92.2, K62.5)
+    --   + ulcer/gastritis hemorrhage
+    LEFT JOIN (
+      SELECT dx.PATID, MIN(dx.ADMIT_DATE) AS first_bleed_date
+      FROM CDW.dbo.DIAGNOSIS dx
+      INNER JOIN CDW.dbo.ENCOUNTER enc ON dx.ENCOUNTERID = enc.ENCOUNTERID
+        AND enc.RAW_ENC_TYPE <> 'Legacy Encounter'
+      INNER JOIN #treatment t3 ON dx.PATID = t3.PATID
+      WHERE (dx.DX LIKE 'I60%'    -- subarachnoid hemorrhage
+          OR dx.DX LIKE 'I61%'    -- intracerebral hemorrhage
+          OR dx.DX LIKE 'I62%'    -- other intracranial hemorrhage
+          OR dx.DX IN ('K92.0','K92.1','K92.2','K62.5')  -- GI bleed
+          OR dx.DX IN ('K25.0','K25.4','K26.0','K26.4',
+                        'K27.0','K27.4','K29.01'))  -- ulcer/gastritis with bleed
+        AND dx.DX_TYPE = '10'
+        AND enc.ENC_TYPE IN ('IP','EI','ED')
+        AND dx.ADMIT_DATE > t3.index_date
+        AND dx.ADMIT_DATE <= DATEADD(day, ", config$followup_days, ", t3.index_date)
+      GROUP BY dx.PATID
+    ) bleed ON t.PATID = bleed.PATID
+
+    -- Intracranial hemorrhage (I60-I62 only, for NCB calculation)
+    LEFT JOIN (
+      SELECT dx.PATID, MIN(dx.ADMIT_DATE) AS first_ich_date
+      FROM CDW.dbo.DIAGNOSIS dx
+      INNER JOIN CDW.dbo.ENCOUNTER enc ON dx.ENCOUNTERID = enc.ENCOUNTERID
+        AND enc.RAW_ENC_TYPE <> 'Legacy Encounter'
+      INNER JOIN #treatment t4 ON dx.PATID = t4.PATID
+      WHERE (dx.DX LIKE 'I60%' OR dx.DX LIKE 'I61%' OR dx.DX LIKE 'I62%')
+        AND dx.DX_TYPE = '10'
+        AND enc.ENC_TYPE IN ('IP','EI','ED')
+        AND dx.ADMIT_DATE > t4.index_date
+        AND dx.ADMIT_DATE <= DATEADD(day, ", config$followup_days, ", t4.index_date)
+      GROUP BY dx.PATID
+    ) ich ON t.PATID = ich.PATID
+
+    -- All-cause mortality (deduplicated; date guard)
+    LEFT JOIN (
+      SELECT d.PATID, d.DEATH_DATE,
+             ROW_NUMBER() OVER (PARTITION BY d.PATID ORDER BY d.DEATH_DATE) AS rn
+      FROM CDW.dbo.DEATH d
+      WHERE d.DEATH_DATE BETWEEN '2000-01-01' AND GETDATE()
+    ) death ON t.PATID = death.PATID AND death.rn = 1
+    ;
+  ")
+
+  # ── Step 4: Confounder extraction ──
+  confounders_sql <- paste0("
+    -- =========================================================
+    -- STEP 4: Confounder Extraction
+    -- Lookback: ", config$lookback_dx, " days for Dx,
+    --           ", config$lookback_lab, " days for labs,
+    --           ", config$lookback_vital, " days for vitals,
+    --           ", config$lookback_rx, " days for concurrent meds
+    -- =========================================================
+
+    IF OBJECT_ID('tempdb..#analytic_cohort') IS NOT NULL DROP TABLE #analytic_cohort;
+
+    SELECT
+      o.*,
+
+      -- ===== Comorbidities (lookback ", config$lookback_dx, " days) =====
+      -- Note: CHA2DS2-VASc components already captured; these add
+      -- non-score comorbidities for confounder adjustment
+      ISNULL(comorbid.ckd, 0) AS ckd,
+      ISNULL(comorbid.prior_bleed, 0) AS prior_bleed,
+      ISNULL(comorbid.liver_disease, 0) AS liver_disease,
+      ISNULL(comorbid.anemia, 0) AS anemia,
+      ISNULL(comorbid.obesity_dx, 0) AS obesity_dx,
+      ISNULL(comorbid.copd, 0) AS copd,
+      ISNULL(comorbid.osa, 0) AS osa,
+      ISNULL(comorbid.alcohol_use, 0) AS alcohol_use,
+
+      -- ===== Vitals (most recent within ", config$lookback_vital, " days) =====
+      vitals.ORIGINAL_BMI AS bmi,
+      vitals.SYSTOLIC AS bp_systolic,
+      vitals.DIASTOLIC AS bp_diastolic,
+
+      -- ===== Labs (most recent within ", config$lookback_lab, " days) =====
+      lab_egfr.RESULT_NUM AS egfr_value,
+      lab_cr.RESULT_NUM AS creatinine,
+      lab_hba1c.RESULT_NUM AS hba1c,
+      lab_hgb.RESULT_NUM AS hemoglobin,
+
+      -- ===== Concurrent medications (within ", config$lookback_rx, " days) =====
+      CASE WHEN antiplatelet.PATID IS NOT NULL THEN 1 ELSE 0 END AS antiplatelet_use,
+      CASE WHEN statin.PATID IS NOT NULL THEN 1 ELSE 0 END AS statin_use,
+      CASE WHEN acei_arb.PATID IS NOT NULL THEN 1 ELSE 0 END AS acei_arb_use,
+      CASE WHEN beta_blocker.PATID IS NOT NULL THEN 1 ELSE 0 END AS beta_blocker_use,
+      CASE WHEN ppi.PATID IS NOT NULL THEN 1 ELSE 0 END AS ppi_use,
+      CASE WHEN nsaid.PATID IS NOT NULL THEN 1 ELSE 0 END AS nsaid_use,
+
+      -- ===== Enrollment =====
+      enr.ENR_BASIS
+
+    INTO #analytic_cohort
+    FROM #outcomes o
+
+    -- ----- Non-score comorbidities (GROUP BY -> 1 row per PATID) -----
+    LEFT JOIN (
+      SELECT
+        dx.PATID,
+        MAX(CASE WHEN dx.DX LIKE 'N18%' THEN 1 ELSE 0 END) AS ckd,
+        MAX(CASE WHEN dx.DX LIKE 'I60%' OR dx.DX LIKE 'I61%'
+                   OR dx.DX LIKE 'I62%' OR dx.DX LIKE 'K92%'
+                   OR dx.DX IN ('K62.5','K25.0','K25.4','K26.0','K26.4',
+                                'K27.0','K27.4','K29.01') THEN 1 ELSE 0 END) AS prior_bleed,
+        MAX(CASE WHEN dx.DX LIKE 'K70%' OR dx.DX LIKE 'K71%'
+                   OR dx.DX LIKE 'K72%' OR dx.DX LIKE 'K73%'
+                   OR dx.DX LIKE 'K74%' THEN 1 ELSE 0 END) AS liver_disease,
+        MAX(CASE WHEN dx.DX LIKE 'D50%' OR dx.DX LIKE 'D51%'
+                   OR dx.DX LIKE 'D52%' OR dx.DX LIKE 'D53%'
+                   OR dx.DX LIKE 'D63%' OR dx.DX LIKE 'D64%' THEN 1 ELSE 0 END) AS anemia,
+        MAX(CASE WHEN dx.DX LIKE 'E66%' THEN 1 ELSE 0 END) AS obesity_dx,
+        MAX(CASE WHEN dx.DX LIKE 'J44%' THEN 1 ELSE 0 END) AS copd,
+        MAX(CASE WHEN dx.DX LIKE 'G47.3%' THEN 1 ELSE 0 END) AS osa,
+        MAX(CASE WHEN dx.DX LIKE 'F10%' THEN 1 ELSE 0 END) AS alcohol_use
+      FROM CDW.dbo.DIAGNOSIS dx
+      INNER JOIN #outcomes o2 ON dx.PATID = o2.PATID
+      WHERE dx.DX_TYPE = '10'
+        AND dx.ADMIT_DATE <= o2.index_date
+        AND dx.ADMIT_DATE >= DATEADD(day, -", config$lookback_dx, ", o2.index_date)
+        AND dx.ADMIT_DATE BETWEEN '2005-01-01' AND GETDATE()
+      GROUP BY dx.PATID
+    ) comorbid ON o.PATID = comorbid.PATID
+
+    -- ----- Vitals (exactly 1 row per patient via ROW_NUMBER) -----
+    LEFT JOIN (
+      SELECT PATID, ORIGINAL_BMI, SYSTOLIC, DIASTOLIC FROM (
+        SELECT v.PATID, v.ORIGINAL_BMI, v.SYSTOLIC, v.DIASTOLIC,
+               ROW_NUMBER() OVER (PARTITION BY v.PATID ORDER BY v.MEASURE_DATE DESC) AS rn
+        FROM CDW.dbo.VITAL v
+        INNER JOIN #outcomes o3 ON v.PATID = o3.PATID
+        WHERE v.MEASURE_DATE <= o3.index_date
+          AND v.MEASURE_DATE >= DATEADD(day, -", config$lookback_vital, ", o3.index_date)
+          AND v.MEASURE_DATE BETWEEN '2005-01-01' AND GETDATE()
+      ) v_ranked WHERE rn = 1
+    ) vitals ON o.PATID = vitals.PATID
+
+    -- ----- Lab: eGFR (LOINC 48642-3, 62238-1) -----
+    LEFT JOIN (
+      SELECT PATID, RESULT_NUM FROM (
+        SELECT l.PATID, l.RESULT_NUM,
+               ROW_NUMBER() OVER (PARTITION BY l.PATID ORDER BY l.RESULT_DATE DESC) AS rn
+        FROM CDW.dbo.LAB_RESULT_CM l
+        INNER JOIN #outcomes o4 ON l.PATID = o4.PATID
+        WHERE l.LAB_LOINC IN ('48642-3','62238-1')
+          AND l.RESULT_NUM IS NOT NULL
+          AND l.RESULT_DATE <= o4.index_date
+          AND l.RESULT_DATE >= DATEADD(day, -", config$lookback_lab, ", o4.index_date)
+      ) ranked WHERE rn = 1
+    ) lab_egfr ON o.PATID = lab_egfr.PATID
+
+    -- ----- Lab: Serum creatinine (LOINC 2160-0) -----
+    LEFT JOIN (
+      SELECT PATID, RESULT_NUM FROM (
+        SELECT l.PATID, l.RESULT_NUM,
+               ROW_NUMBER() OVER (PARTITION BY l.PATID ORDER BY l.RESULT_DATE DESC) AS rn
+        FROM CDW.dbo.LAB_RESULT_CM l
+        INNER JOIN #outcomes o5 ON l.PATID = o5.PATID
+        WHERE l.LAB_LOINC = '2160-0'
+          AND l.RESULT_NUM IS NOT NULL
+          AND l.RESULT_DATE <= o5.index_date
+          AND l.RESULT_DATE >= DATEADD(day, -", config$lookback_lab, ", o5.index_date)
+      ) ranked WHERE rn = 1
+    ) lab_cr ON o.PATID = lab_cr.PATID
+
+    -- ----- Lab: HbA1c (LOINC 4548-4) -----
+    LEFT JOIN (
+      SELECT PATID, RESULT_NUM FROM (
+        SELECT l.PATID, l.RESULT_NUM,
+               ROW_NUMBER() OVER (PARTITION BY l.PATID ORDER BY l.RESULT_DATE DESC) AS rn
+        FROM CDW.dbo.LAB_RESULT_CM l
+        INNER JOIN #outcomes o6 ON l.PATID = o6.PATID
+        WHERE l.LAB_LOINC = '4548-4'
+          AND l.RESULT_NUM IS NOT NULL
+          AND l.RESULT_DATE <= o6.index_date
+          AND l.RESULT_DATE >= DATEADD(day, -", config$lookback_lab, ", o6.index_date)
+      ) ranked WHERE rn = 1
+    ) lab_hba1c ON o.PATID = lab_hba1c.PATID
+
+    -- ----- Lab: Hemoglobin (LOINC 718-7) -----
+    LEFT JOIN (
+      SELECT PATID, RESULT_NUM FROM (
+        SELECT l.PATID, l.RESULT_NUM,
+               ROW_NUMBER() OVER (PARTITION BY l.PATID ORDER BY l.RESULT_DATE DESC) AS rn
+        FROM CDW.dbo.LAB_RESULT_CM l
+        INNER JOIN #outcomes o7 ON l.PATID = o7.PATID
+        WHERE l.LAB_LOINC = '718-7'
+          AND l.RESULT_NUM IS NOT NULL
+          AND l.RESULT_DATE <= o7.index_date
+          AND l.RESULT_DATE >= DATEADD(day, -", config$lookback_lab, ", o7.index_date)
+      ) ranked WHERE rn = 1
+    ) lab_hgb ON o.PATID = lab_hgb.PATID
+
+    -- ----- Concurrent antiplatelet (aspirin, clopidogrel, prasugrel, ticagrelor) -----
+    LEFT JOIN (
+      SELECT DISTINCT p.PATID
+      FROM CDW.dbo.PRESCRIBING p
+      INNER JOIN #outcomes o9 ON p.PATID = o9.PATID
+      WHERE p.RXNORM_CUI IN (
+              '243670','308416','212033','198467',
+              '309362','213169',
+              '855812','855818','855814','855820',
+              '1116632','1116635','1116634','1116637'
+            )
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE)
+            >= DATEADD(day, -", config$lookback_rx, ", o9.index_date)
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE) <= o9.index_date
+    ) antiplatelet ON o.PATID = antiplatelet.PATID
+
+    -- ----- Concurrent statin -----
+    LEFT JOIN (
+      SELECT DISTINCT p.PATID
+      FROM CDW.dbo.PRESCRIBING p
+      INNER JOIN #outcomes o10 ON p.PATID = o10.PATID
+      WHERE p.RXNORM_CUI IN (
+              '259255','617311','617314','617318',
+              '859747','859751','859755','859749',
+              '198211','314231','152923','312961',
+              '312962','312963','433849','312964'
+            )
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE)
+            >= DATEADD(day, -", config$lookback_rx, ", o10.index_date)
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE) <= o10.index_date
+    ) statin ON o.PATID = statin.PATID
+
+    -- ----- Concurrent ACEi / ARB -----
+    LEFT JOIN (
+      SELECT DISTINCT p.PATID
+      FROM CDW.dbo.PRESCRIBING p
+      INNER JOIN #outcomes o11 ON p.PATID = o11.PATID
+      WHERE p.RXNORM_CUI IN (
+              '314076','314077','197884','314078',
+              '979467','979471','979480',
+              '349483','349199','349201','349485'
+            )
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE)
+            >= DATEADD(day, -", config$lookback_rx, ", o11.index_date)
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE) <= o11.index_date
+    ) acei_arb ON o.PATID = acei_arb.PATID
+
+    -- ----- Concurrent beta-blocker -----
+    LEFT JOIN (
+      SELECT DISTINCT p.PATID
+      FROM CDW.dbo.PRESCRIBING p
+      INNER JOIN #outcomes o12 ON p.PATID = o12.PATID
+      WHERE p.RXNORM_CUI IN (
+              '866924','866514','866511',
+              '866427','866436','866412','866419',
+              '200031','200032','200033','200034'
+            )
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE)
+            >= DATEADD(day, -", config$lookback_rx, ", o12.index_date)
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE) <= o12.index_date
+    ) beta_blocker ON o.PATID = beta_blocker.PATID
+
+    -- ----- Concurrent PPI -----
+    LEFT JOIN (
+      SELECT DISTINCT p.PATID
+      FROM CDW.dbo.PRESCRIBING p
+      INNER JOIN #outcomes o13 ON p.PATID = o13.PATID
+      WHERE p.RXNORM_CUI IN (
+              '198053','198054',
+              '261296','261297',
+              '606725','606730'
+            )
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE)
+            >= DATEADD(day, -", config$lookback_rx, ", o13.index_date)
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE) <= o13.index_date
+    ) ppi ON o.PATID = ppi.PATID
+
+    -- ----- Concurrent NSAID -----
+    LEFT JOIN (
+      SELECT DISTINCT p.PATID
+      FROM CDW.dbo.PRESCRIBING p
+      INNER JOIN #outcomes o14 ON p.PATID = o14.PATID
+      WHERE p.RXNORM_CUI IN (
+              '197805','197806','197807','197808',
+              '198013','198014',
+              '311461','311462'
+            )
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE)
+            >= DATEADD(day, -", config$lookback_rx, ", o14.index_date)
+        AND COALESCE(p.RX_START_DATE, p.RX_ORDER_DATE) <= o14.index_date
+    ) nsaid ON o.PATID = nsaid.PATID
+
+    -- ----- Enrollment (exactly 1 row per patient via ROW_NUMBER) -----
+    LEFT JOIN (
+      SELECT PATID, ENR_BASIS FROM (
+        SELECT enr.PATID, enr.ENR_BASIS,
+               ROW_NUMBER() OVER (PARTITION BY enr.PATID ORDER BY enr.ENR_START_DATE DESC) AS rn
+        FROM CDW.dbo.ENROLLMENT enr
+        INNER JOIN #outcomes o15 ON enr.PATID = o15.PATID
+        WHERE o15.index_date BETWEEN enr.ENR_START_DATE
+          AND COALESCE(enr.ENR_END_DATE, '9999-12-31')
+      ) ranked WHERE rn = 1
+    ) enr ON o.PATID = enr.PATID
+    ;
+  ")
+
+  return(list(
+    eligibility  = eligibility_sql,
+    treatment    = treatment_sql,
+    outcome      = outcome_sql,
+    confounders  = confounders_sql
+  ))
+}
+```
+
+
+## 3. Execute SQL and Pull Data
+
+```{r}
+#| label: helper-count
+
+count_temp <- function(con, tbl) {
+  res <- dbGetQuery(con, paste("SELECT COUNT(DISTINCT PATID) AS n FROM", tbl))
+  res$n[1]
+}
+```
+
+```{r}
+#| label: pull-cohort
+
+pull_analytic_cohort <- function(con, config) {
+  sql_parts <- build_cohort_sql(config)
+  consort <- list()
+
+  message("=== Executing Cohort SQL ===")
+
+  message("  Step 1: Building eligible population (NVAF + CHA2DS2-VASc target + new to OAC)...")
+  dbExecute(con, sql_parts$eligibility)
+
+  consort_raw <- dbGetQuery(con, "SELECT * FROM #consort_counts")
+  names(consort_raw) <- tolower(names(consort_raw))
+  consort$af_patients   <- consort_raw$n_af_patients[1]
+  consort$first_af      <- consort_raw$n_first_af[1]
+  consort$scored        <- consort_raw$n_scored[1]
+  consort$eligible      <- consort_raw$n_eligible[1]
+  try(dbExecute(con, "DROP TABLE IF EXISTS #consort_counts"), silent = TRUE)
+
+  message(sprintf("    -> NVAF patients:          %d", consort$af_patients))
+  message(sprintf("    -> With first AF encounter: %d", consort$first_af))
+  message(sprintf("    -> Score computed:          %d", consort$scored))
+  message(sprintf("    -> Eligible (target score): %d", consort$eligible))
+
+  message("  Step 2: Assigning treatment (OAC vs No OAC)...")
+  dbExecute(con, sql_parts$treatment)
+  consort$treatment <- count_temp(con, "#treatment")
+  message(sprintf("    -> #treatment: %d patients", consort$treatment))
+
+  message("  Step 3: Ascertaining outcomes...")
+  dbExecute(con, sql_parts$outcome)
+  consort$outcomes <- count_temp(con, "#outcomes")
+  message(sprintf("    -> #outcomes: %d patients", consort$outcomes))
+
+  message("  Step 4: Extracting confounders and building analytic cohort...")
+  dbExecute(con, sql_parts$confounders)
+  cohort <- dbGetQuery(con, "SELECT * FROM #analytic_cohort")
+
+  names(cohort) <- tolower(names(cohort))
+
+  consort$analytic  <- nrow(cohort)
+  consort$n_oac     <- sum(cohort$treatment == 1, na.rm = TRUE)
+  consort$n_no_oac  <- sum(cohort$treatment == 0, na.rm = TRUE)
+
+  message(sprintf(
+    "  Analytic cohort: %d patients (%d OAC, %d No OAC)",
+    consort$analytic, consort$n_oac, consort$n_no_oac
+  ))
+
+  for (tbl in c("#eligible", "#treatment", "#outcomes", "#analytic_cohort")) {
+    try(dbExecute(con, paste("DROP TABLE IF EXISTS", tbl)), silent = TRUE)
+  }
+
+  attr(cohort, "consort") <- consort
+  return(cohort)
+}
+```
+
+
+## 3a. CONSORT Flow Diagram
+
+```{r}
+#| label: consort-text
+
+print_consort_table <- function(consort) {
+  steps <- tibble::tibble(
+    Step = c("1a. NVAF patients (I48.x, non-valvular)",
+             "1b. With first AF encounter in study period",
+             "1c. CHA2DS2-VASc score computed",
+             "1d. Eligible (target score, no prior OAC, no exclusions)",
+             "2.  Treatment assigned (OAC vs No OAC)",
+             "3.  Outcomes ascertained",
+             "4.  Analytic cohort (with confounders)"),
+    N    = c(consort$af_patients,
+             consort$first_af,
+             consort$scored,
+             consort$eligible,
+             consort$treatment,
+             consort$outcomes,
+             consort$analytic),
+    Excluded = c(NA_integer_,
+                 consort$af_patients - consort$first_af,
+                 consort$first_af    - consort$scored,
+                 consort$scored      - consort$eligible,
+                 consort$eligible    - consort$treatment,
+                 consort$treatment   - consort$outcomes,
+                 consort$outcomes    - consort$analytic)
+  )
+  message("\n=== CONSORT Flow (text) ===")
+  print(steps, n = Inf)
+  invisible(steps)
+}
+```
+
+```{r}
+#| label: consort-diagram
+
+render_consort_diagram <- function(consort) {
+
+  grid::grid.newpage()
+  fmt <- function(x) format(x, big.mark = ",")
+
+  box_w  <- grid::unit(0.50, "npc")
+  box_h  <- grid::unit(0.055, "npc")
+  excl_w <- grid::unit(0.28, "npc")
+  excl_h <- grid::unit(0.040, "npc")
+  x_main <- 0.38
+  x_excl <- 0.82
+
+  y_pos <- seq(0.92, 0.12, length.out = 8)
+
+  draw_box <- function(x, y, w, h, label, fill = "white") {
+    grid::grid.rect(x = grid::unit(x, "npc"), y = grid::unit(y, "npc"),
+                    width = w, height = h,
+                    gp = grid::gpar(fill = fill, col = "grey30", lwd = 1.5))
+    grid::grid.text(label, x = grid::unit(x, "npc"), y = grid::unit(y, "npc"),
+                    gp = grid::gpar(fontsize = 9, fontface = "bold"))
+  }
+
+  draw_arrow <- function(x1, y1, x2, y2) {
+    grid::grid.lines(x = grid::unit(c(x1, x2), "npc"),
+                     y = grid::unit(c(y1, y2), "npc"),
+                     arrow = grid::arrow(length = grid::unit(0.015, "npc"),
+                                         type = "closed"),
+                     gp = grid::gpar(fill = "grey30", col = "grey30"))
+  }
+
+  draw_excl <- function(y_from, y_to, n, reason) {
+    if (n <= 0) return(invisible(NULL))
+    mid_y <- mean(c(y_from - 0.028, y_to + 0.028))
+    draw_arrow(x_main + 0.25, mid_y, x_excl - 0.14, mid_y)
+    draw_box(x_excl, mid_y, excl_w, excl_h,
+             sprintf("Excluded: %s\n(%s)", fmt(n), reason),
+             fill = "#FFF3F3")
+  }
+
+  grid::grid.text("CONSORT Flow: OAC vs No OAC at Low CHA2DS2-VASc",
+                  x = 0.5, y = 0.97,
+                  gp = grid::gpar(fontsize = 13, fontface = "bold"))
+
+  labels <- c(
+    sprintf("1a. NVAF Patients\nn = %s", fmt(consort$af_patients)),
+    sprintf("1b. First AF Encounter\nn = %s", fmt(consort$first_af)),
+    sprintf("1c. Score Computed\nn = %s", fmt(consort$scored)),
+    sprintf("1d. Eligible (target score)\nn = %s", fmt(consort$eligible)),
+    sprintf("2. Treatment Assigned\nn = %s", fmt(consort$treatment)),
+    sprintf("3. Outcomes Ascertained\nn = %s", fmt(consort$outcomes)),
+    sprintf("4. Analytic Cohort\nn = %s", fmt(consort$analytic))
+  )
+  fills <- c(rep("white", 6), "#F0FFF0")
+
+  for (i in seq_along(labels)) {
+    draw_box(x_main, y_pos[i], box_w, box_h, labels[i], fill = fills[i])
+    if (i < length(labels)) {
+      draw_arrow(x_main, y_pos[i] - 0.028, x_main, y_pos[i + 1] + 0.028)
+    }
+  }
+
+  excl_counts  <- c(consort$af_patients - consort$first_af,
+                    consort$first_af    - consort$scored,
+                    consort$scored      - consort$eligible,
+                    consort$eligible    - consort$treatment,
+                    consort$treatment   - consort$outcomes,
+                    consort$outcomes    - consort$analytic)
+  excl_reasons <- c("no AF encounter in period",
+                    "demographics/score not computable",
+                    "wrong score / exclusions",
+                    "all assigned (OAC or not)",
+                    "outcome ascertainment",
+                    "confounder join")
+  for (i in seq_along(excl_counts)) {
+    draw_excl(y_pos[i], y_pos[i + 1], excl_counts[i], excl_reasons[i])
+  }
+
+  draw_arrow(x_main - 0.10, y_pos[7] - 0.028, x_main - 0.18, y_pos[8] + 0.020)
+  draw_arrow(x_main + 0.10, y_pos[7] - 0.028, x_main + 0.18, y_pos[8] + 0.020)
+
+  draw_box(x_main - 0.20, y_pos[8], grid::unit(0.26, "npc"), box_h,
+           sprintf("OAC\nn = %s", fmt(consort$n_oac)),
+           fill = "#F0F0FF")
+  draw_box(x_main + 0.20, y_pos[8], grid::unit(0.26, "npc"), box_h,
+           sprintf("No OAC\nn = %s", fmt(consort$n_no_oac)),
+           fill = "#F0F0FF")
+
+  invisible(NULL)
+}
+```
+
+
+## 4. Data Preparation
+
+```{r}
+#| label: prepare-cohort
+
+prepare_cohort <- function(cohort) {
+  cohort <- cohort |>
+    mutate(
+      sex_cat = factor(sex, levels = c("F", "M"),
+                       labels = c("Female", "Male")),
+      race_cat = case_when(
+        race == "03" ~ "Black",
+        race == "05" ~ "White",
+        race == "02" ~ "Asian",
+        race %in% c("01", "04", "06", "07") ~ "Other",
+        TRUE ~ "Unknown"
+      ) |> factor(),
+      hispanic_cat = factor(
+        if_else(hispanic == "Y", "Hispanic", "Non-Hispanic")
+      ),
+      driving_component = factor(driving_component,
+                                  levels = c("CHF", "HTN", "DM",
+                                             "Vascular", "Age65-74", "Unknown")),
+      oac_type_cat = factor(
+        case_when(
+          is.na(oac_type) ~ "None",
+          TRUE ~ oac_type
+        )
+      ),
+      enr_basis_cat = factor(
+        case_when(
+          enr_basis %in% c("I", "A") ~ enr_basis,
+          TRUE ~ "Other/Unknown"
+        )
+      ),
+      treatment = as.integer(treatment),
+      treatment_label = factor(
+        if_else(treatment == 1, "OAC", "No OAC"),
+        levels = c("No OAC", "OAC")
+      ),
+      # Ensure minimum follow-up time of 1 day
+      time_to_stroke_se = pmax(time_to_stroke_se, 1),
+      time_to_bleed     = pmax(time_to_bleed, 1),
+      time_to_ich       = pmax(time_to_ich, 1),
+      time_to_death     = pmax(time_to_death, 1)
+    ) |>
+    filter(!is.na(treatment))
+
+  # Impute missing continuous covariates with median
+  cohort <- cohort |>
+    mutate(
+      bmi          = if_else(is.na(bmi), median(bmi, na.rm = TRUE), bmi),
+      bp_systolic  = if_else(is.na(bp_systolic),
+                             median(bp_systolic, na.rm = TRUE), bp_systolic),
+      bp_diastolic = if_else(is.na(bp_diastolic),
+                             median(bp_diastolic, na.rm = TRUE), bp_diastolic),
+      egfr_value   = if_else(is.na(egfr_value),
+                             median(egfr_value, na.rm = TRUE), egfr_value),
+      creatinine   = if_else(is.na(creatinine),
+                             median(creatinine, na.rm = TRUE), creatinine),
+      hba1c        = if_else(is.na(hba1c),
+                             median(hba1c, na.rm = TRUE), hba1c),
+      hemoglobin   = if_else(is.na(hemoglobin),
+                             median(hemoglobin, na.rm = TRUE), hemoglobin)
+    )
+
+  return(cohort)
+}
+```
+
+
+## 5. Causal Analysis Functions (IPW)
+
+```{r}
+#| label: confounders
+
+confounders <- c(
+  "age_at_index", "sex_cat", "race_cat", "hispanic_cat",
+  "bmi", "bp_systolic", "bp_diastolic",
+  "egfr_value", "creatinine", "hba1c", "hemoglobin",
+  "chf_flag", "htn_flag", "dm_flag", "vasc_flag",
+  "ckd", "prior_bleed", "liver_disease", "anemia",
+  "obesity_dx", "copd", "osa", "alcohol_use",
+  "antiplatelet_use", "statin_use", "acei_arb_use",
+  "beta_blocker_use", "ppi_use", "nsaid_use",
+  "enr_basis_cat",
+  "index_year"
+)
+
+build_ps_formula <- function(confounders, cohort) {
+  dropped <- character()
+  keep    <- character()
+
+  for (v in confounders) {
+    col <- cohort[[v]]
+    if (is.null(col)) {
+      dropped <- c(dropped, v)
+      next
+    }
+    if (is.factor(col) || is.character(col)) {
+      n_levels <- length(unique(na.omit(col)))
+      if (n_levels < 2) {
+        dropped <- c(dropped, v)
+        next
+      }
+    } else {
+      if (sd(col, na.rm = TRUE) == 0 || all(is.na(col))) {
+        dropped <- c(dropped, v)
+        next
+      }
+    }
+    keep <- c(keep, v)
+  }
+
+  if (length(dropped) > 0) {
+    message(sprintf("  PS model: dropped %d constant/single-level variable(s): %s",
+                    length(dropped), paste(dropped, collapse = ", ")))
+  }
+  message(sprintf("  PS model: using %d confounder(s)", length(keep)))
+
+  as.formula(paste("treatment ~", paste(keep, collapse = " + ")))
+}
+```
+
+```{r}
+#| label: ipw-analysis
+
+run_ipw_analysis <- function(cohort, confounders, config) {
+  message("\n=== IPW Analysis ===")
+
+  # --- Guard: treatment must have at least 2 arms ---
+  n_arms <- length(unique(cohort$treatment))
+  if (n_arms < 2) {
+    stop(sprintf(
+      "Cannot run IPW: treatment variable has only %d unique value(s) (%s). ",
+      n_arms, paste(unique(cohort$treatment), collapse = ", ")),
+      "Check the CONSORT diagram -- one treatment arm may have been ",
+      "completely filtered out during eligibility.", call. = FALSE)
+  }
+  message(sprintf("Treatment arms: OAC (n=%d), No OAC (n=%d)",
+                  sum(cohort$treatment == 1), sum(cohort$treatment == 0)))
+
+  # --- Build PS formula, dropping single-level factors ---
+  ps_formula <- build_ps_formula(confounders, cohort)
+
+  # --- Fit propensity score model and compute weights ---
+  message("Fitting propensity score model (logistic regression)...")
+  weights <- weightit(
+    ps_formula,
+    data     = cohort,
+    method   = "glm",
+    estimand = config$estimand
+  )
+
+  # --- Balance diagnostics ---
+  message("Checking covariate balance...")
+  bal <- bal.tab(weights, stats = c("m", "v"), thresholds = c(m = 0.1))
+  print(bal)
+
+  p_love <- love.plot(weights, threshold = 0.1, abs = TRUE,
+                      title = "Covariate Balance: OAC vs No OAC (IPW)")
+
+  cohort$ps <- weights$ps
+  p_ps <- ggplot(cohort, aes(x = ps, fill = treatment_label)) +
+    geom_density(alpha = 0.5) +
+    labs(x = "Propensity Score (P[OAC])", y = "Density",
+         title = "Propensity Score Distribution by Treatment Group",
+         fill = "Treatment") +
+    theme_minimal()
+
+  ess_fn <- function(w) sum(w)^2 / sum(w^2)
+  message(sprintf("Effective sample size: OAC=%.1f, No OAC=%.1f",
+                  ess_fn(weights$weights[cohort$treatment == 1]),
+                  ess_fn(weights$weights[cohort$treatment == 0])))
+
+  cohort$ipw <- weights$weights
+
+  # --- Primary: Ischemic stroke / SE ---
+  message("\n--- Primary Outcome: Ischemic Stroke / SE ---")
+  fit_stroke_se <- coxph(
+    Surv(time_to_stroke_se, stroke_se_event) ~ treatment,
+    data = cohort, weights = ipw, robust = TRUE
+  )
+  print(summary(fit_stroke_se))
+
+  # --- Secondary: Major bleeding ---
+  message("\n--- Secondary Outcome: Major Bleeding ---")
+  fit_bleed <- coxph(
+    Surv(time_to_bleed, bleed_event) ~ treatment,
+    data = cohort, weights = ipw, robust = TRUE
+  )
+  print(summary(fit_bleed))
+
+  # --- Secondary: ICH ---
+  message("\n--- Secondary Outcome: Intracranial Hemorrhage ---")
+  fit_ich <- coxph(
+    Surv(time_to_ich, ich_event) ~ treatment,
+    data = cohort, weights = ipw, robust = TRUE
+  )
+  print(summary(fit_ich))
+
+  # --- Secondary: All-cause mortality ---
+  message("\n--- Secondary Outcome: All-Cause Mortality ---")
+  fit_death <- coxph(
+    Surv(time_to_death, death_event) ~ treatment,
+    data = cohort, weights = ipw, robust = TRUE
+  )
+  print(summary(fit_death))
+
+  # --- Weighted KM curves ---
+  km_stroke_se <- survfit(
+    Surv(time_to_stroke_se, stroke_se_event) ~ treatment_label,
+    data = cohort, weights = ipw
+  )
+  p_km_stroke_se <- ggsurvplot(
+    km_stroke_se, data = cohort,
+    risk.table = TRUE, pval = TRUE,
+    title = "Ischemic Stroke/SE: OAC vs No OAC (IPW)",
+    xlab = "Days from Time Zero",
+    ylab = "Stroke-Free Probability",
+    palette = c("#E7B800", "#2E9FDF")
+  )
+
+  km_bleed <- survfit(
+    Surv(time_to_bleed, bleed_event) ~ treatment_label,
+    data = cohort, weights = ipw
+  )
+  p_km_bleed <- ggsurvplot(
+    km_bleed, data = cohort,
+    risk.table = TRUE, pval = TRUE,
+    title = "Major Bleeding: OAC vs No OAC (IPW)",
+    xlab = "Days from Time Zero",
+    ylab = "Bleeding-Free Probability",
+    palette = c("#E7B800", "#2E9FDF")
+  )
+
+  km_death <- survfit(
+    Surv(time_to_death, death_event) ~ treatment_label,
+    data = cohort, weights = ipw
+  )
+  p_km_death <- ggsurvplot(
+    km_death, data = cohort,
+    risk.table = TRUE, pval = TRUE,
+    title = "All-Cause Mortality: OAC vs No OAC (IPW)",
+    xlab = "Days from Time Zero",
+    ylab = "Survival Probability",
+    palette = c("#E7B800", "#2E9FDF")
+  )
+
+  return(list(
+    weights = weights,
+    balance = bal,
+    fits = list(
+      stroke_se = fit_stroke_se,
+      bleed     = fit_bleed,
+      ich       = fit_ich,
+      death     = fit_death
+    ),
+    plots = list(
+      love       = p_love,
+      ps_dist    = p_ps,
+      km_stroke  = p_km_stroke_se,
+      km_bleed   = p_km_bleed,
+      km_death   = p_km_death
+    ),
+    cohort = cohort
+  ))
+}
+```
+
+
+## 6. Net Clinical Benefit
+
+```{r}
+#| label: net-clinical-benefit
+
+compute_ncb <- function(cohort) {
+  message("\n=== Net Clinical Benefit ===")
+
+  # Weighted event rates per 100 person-years
+  compute_rate <- function(data, event_col, time_col) {
+    events <- sum(data[[event_col]] * data$ipw)
+    py     <- sum(data[[time_col]] * data$ipw) / 365.25
+    rate   <- events / py * 100
+    return(rate)
+  }
+
+  oac_data    <- cohort |> filter(treatment == 1)
+  no_oac_data <- cohort |> filter(treatment == 0)
+
+  # Stroke/SE rates
+  stroke_rate_oac    <- compute_rate(oac_data, "stroke_se_event", "time_to_stroke_se")
+  stroke_rate_no_oac <- compute_rate(no_oac_data, "stroke_se_event", "time_to_stroke_se")
+
+  # ICH rates (for NCB calculation with weight = 1.5)
+  ich_rate_oac    <- compute_rate(oac_data, "ich_event", "time_to_ich")
+  ich_rate_no_oac <- compute_rate(no_oac_data, "ich_event", "time_to_ich")
+
+  # NCB = (stroke reduction) - 1.5 * (ICH excess)
+  stroke_reduction <- stroke_rate_no_oac - stroke_rate_oac
+  ich_excess       <- ich_rate_oac - ich_rate_no_oac
+  ncb              <- stroke_reduction - 1.5 * ich_excess
+
+  results <- tibble::tibble(
+    Metric = c(
+      "Stroke/SE rate (OAC), per 100 PY",
+      "Stroke/SE rate (No OAC), per 100 PY",
+      "Stroke reduction (No OAC - OAC)",
+      "ICH rate (OAC), per 100 PY",
+      "ICH rate (No OAC), per 100 PY",
+      "ICH excess (OAC - No OAC)",
+      "Net Clinical Benefit (per 100 PY)"
+    ),
+    Value = round(c(
+      stroke_rate_oac,
+      stroke_rate_no_oac,
+      stroke_reduction,
+      ich_rate_oac,
+      ich_rate_no_oac,
+      ich_excess,
+      ncb
+    ), 3)
+  )
+
+  message(sprintf("  Stroke rate OAC:    %.3f per 100 PY", stroke_rate_oac))
+  message(sprintf("  Stroke rate No OAC: %.3f per 100 PY", stroke_rate_no_oac))
+  message(sprintf("  Stroke reduction:   %.3f per 100 PY", stroke_reduction))
+  message(sprintf("  ICH rate OAC:       %.3f per 100 PY", ich_rate_oac))
+  message(sprintf("  ICH rate No OAC:    %.3f per 100 PY", ich_rate_no_oac))
+  message(sprintf("  ICH excess:         %.3f per 100 PY", ich_excess))
+  message(sprintf("  NCB:                %.3f per 100 PY", ncb))
+  message(sprintf("  Interpretation: %s",
+                  if_else(ncb > 0,
+                          "POSITIVE NCB -- stroke reduction outweighs ICH risk",
+                          "NEGATIVE/ZERO NCB -- ICH risk offsets stroke reduction")))
+
+  return(results)
+}
+```
+
+
+## 7. Subgroup Analyses
+
+```{r}
+#| label: subgroup-analysis
+
+run_subgroup_analyses <- function(cohort, confounders, config) {
+  message("\n=== Subgroup Analyses ===")
+
+  subgroups <- list(
+    "Driving: CHF"       = cohort$driving_component == "CHF",
+    "Driving: HTN"       = cohort$driving_component == "HTN",
+    "Driving: DM"        = cohort$driving_component == "DM",
+    "Driving: Vascular"  = cohort$driving_component == "Vascular",
+    "Driving: Age 65-74" = cohort$driving_component == "Age65-74",
+    "Male"               = cohort$sex_cat == "Male",
+    "Female"             = cohort$sex_cat == "Female",
+    "Age < 70"           = cohort$age_at_index < 70,
+    "Age >= 70"          = cohort$age_at_index >= 70,
+    "Prior bleeding"     = cohort$prior_bleed == 1,
+    "No prior bleeding"  = cohort$prior_bleed == 0
+  )
+
+  results <- tibble::tibble(
+    Subgroup = character(),
+    N = integer(),
+    N_OAC = integer(),
+    N_NoOAC = integer(),
+    N_events = integer(),
+    HR = numeric(),
+    CI_lo = numeric(),
+    CI_hi = numeric(),
+    P_value = numeric()
+  )
+
+  for (sg_name in names(subgroups)) {
+    sg_data <- cohort[subgroups[[sg_name]], ]
+
+    # Guard: need 2 arms and at least 10 per arm
+    if (length(unique(sg_data$treatment)) < 2 ||
+        sum(sg_data$treatment == 1) < 10 ||
+        sum(sg_data$treatment == 0) < 10) {
+      message(sprintf("  Skipping '%s': insufficient patients in one arm", sg_name))
+      results <- bind_rows(results, tibble::tibble(
+        Subgroup = sg_name, N = nrow(sg_data),
+        N_OAC = sum(sg_data$treatment == 1),
+        N_NoOAC = sum(sg_data$treatment == 0),
+        N_events = sum(sg_data$stroke_se_event),
+        HR = NA_real_, CI_lo = NA_real_, CI_hi = NA_real_, P_value = NA_real_
+      ))
+      next
+    }
+
+    tryCatch({
+      ps_formula <- build_ps_formula(confounders, sg_data)
+      w <- weightit(ps_formula, data = sg_data, method = "glm",
+                    estimand = config$estimand)
+      sg_data$ipw <- w$weights
+
+      fit <- coxph(Surv(time_to_stroke_se, stroke_se_event) ~ treatment,
+                   data = sg_data, weights = ipw, robust = TRUE)
+      s <- summary(fit)
+
+      results <- bind_rows(results, tibble::tibble(
+        Subgroup = sg_name,
+        N = nrow(sg_data),
+        N_OAC = sum(sg_data$treatment == 1),
+        N_NoOAC = sum(sg_data$treatment == 0),
+        N_events = sum(sg_data$stroke_se_event),
+        HR = s$conf.int[1, 1],
+        CI_lo = s$conf.int[1, 3],
+        CI_hi = s$conf.int[1, 4],
+        P_value = s$coefficients[1, "Pr(>|z|)"]
+      ))
+      message(sprintf("  %s: HR=%.2f (%.2f-%.2f), N=%d",
+                      sg_name, s$conf.int[1,1], s$conf.int[1,3],
+                      s$conf.int[1,4], nrow(sg_data)))
+    }, error = function(e) {
+      message(sprintf("  Error in '%s': %s", sg_name, e$message))
+      results <<- bind_rows(results, tibble::tibble(
+        Subgroup = sg_name, N = nrow(sg_data),
+        N_OAC = sum(sg_data$treatment == 1),
+        N_NoOAC = sum(sg_data$treatment == 0),
+        N_events = sum(sg_data$stroke_se_event),
+        HR = NA_real_, CI_lo = NA_real_, CI_hi = NA_real_, P_value = NA_real_
+      ))
+    })
+  }
+
+  return(results)
+}
+```
+
+
+## 8. Sensitivity Analyses
+
+```{r}
+#| label: sensitivity-analysis
+
+run_sensitivity <- function(ipw_results, cohort, confounders, config) {
+  message("\n=== Sensitivity Analyses ===")
+
+  sensitivity <- list()
+
+  # --- 8a. E-value for stroke/SE ---
+  message("\n--- E-value Analysis (Stroke/SE) ---")
+  fit_stroke <- ipw_results$fits$stroke_se
+  s <- summary(fit_stroke)
+  hr  <- s$conf.int[1, 1]
+  lo  <- s$conf.int[1, 3]
+  hi  <- s$conf.int[1, 4]
+
+  evals <- evalues.HR(hr, lo = lo, hi = hi, rare = TRUE)
+  sensitivity$evalue_stroke <- evals
+  message("E-value for stroke/SE:")
+  print(evals)
+
+  # --- 8b. E-value for major bleeding ---
+  message("\n--- E-value Analysis (Major Bleeding) ---")
+  fit_bleed <- ipw_results$fits$bleed
+  s_bleed <- summary(fit_bleed)
+  hr_b  <- s_bleed$conf.int[1, 1]
+  lo_b  <- s_bleed$conf.int[1, 3]
+  hi_b  <- s_bleed$conf.int[1, 4]
+
+  evals_bleed <- evalues.HR(hr_b, lo = lo_b, hi = hi_b, rare = TRUE)
+  sensitivity$evalue_bleed <- evals_bleed
+  message("E-value for major bleeding:")
+  print(evals_bleed)
+
+  # --- 8c. PS trimming (5th-95th percentile) ---
+  message("\n--- PS Trimming (5th-95th Percentile) ---")
+  ps_lo <- quantile(cohort$ps, 0.05, na.rm = TRUE)
+  ps_hi <- quantile(cohort$ps, 0.95, na.rm = TRUE)
+  cohort_trimmed <- cohort |>
+    filter(ps >= ps_lo & ps <= ps_hi)
+
+  message(sprintf("  Trimmed from %d to %d patients (PS range: %.3f-%.3f)",
+                  nrow(cohort), nrow(cohort_trimmed), ps_lo, ps_hi))
+
+  if (length(unique(cohort_trimmed$treatment)) < 2) {
+    message("WARNING: After PS trimming, only 1 arm remains. Skipping.")
+    sensitivity$trimmed_fit <- NULL
+  } else {
+    ps_formula_trim <- build_ps_formula(confounders, cohort_trimmed)
+    w_trim <- weightit(ps_formula_trim, data = cohort_trimmed,
+                       method = "glm", estimand = config$estimand)
+    cohort_trimmed$ipw <- w_trim$weights
+
+    fit_trim <- coxph(
+      Surv(time_to_stroke_se, stroke_se_event) ~ treatment,
+      data = cohort_trimmed, weights = ipw, robust = TRUE
+    )
+    sensitivity$trimmed_fit <- fit_trim
+    message("Trimmed analysis (stroke/SE):")
+    print(summary(fit_trim))
+  }
+
+  # --- 8d. Post-Epic era only (2021+) ---
+  message("\n--- Post-Epic Era (2021+) ---")
+  cohort_epic <- cohort |> filter(index_year >= 2021)
+
+  if (length(unique(cohort_epic$treatment)) < 2 ||
+      min(table(cohort_epic$treatment)) < 10) {
+    message("WARNING: Insufficient patients in post-Epic era. Skipping.")
+    sensitivity$epic_fit <- NULL
+  } else {
+    ps_formula_epic <- build_ps_formula(confounders, cohort_epic)
+    w_epic <- weightit(ps_formula_epic, data = cohort_epic,
+                       method = "glm", estimand = config$estimand)
+    cohort_epic$ipw <- w_epic$weights
+
+    fit_epic <- coxph(
+      Surv(time_to_stroke_se, stroke_se_event) ~ treatment,
+      data = cohort_epic, weights = ipw, robust = TRUE
+    )
+    sensitivity$epic_fit <- fit_epic
+    message(sprintf("Post-Epic analysis (N=%d):", nrow(cohort_epic)))
+    print(summary(fit_epic))
+  }
+
+  # --- 8e. DOAC-only OAC arm ---
+  message("\n--- DOAC-Only OAC Arm ---")
+  cohort_doac <- cohort |>
+    filter(treatment == 0 | oac_type_cat %in% c("apixaban", "rivaroxaban",
+                                                  "dabigatran", "edoxaban"))
+
+  if (length(unique(cohort_doac$treatment)) < 2 ||
+      min(table(cohort_doac$treatment)) < 10) {
+    message("WARNING: Insufficient DOAC-only patients. Skipping.")
+    sensitivity$doac_fit <- NULL
+  } else {
+    ps_formula_doac <- build_ps_formula(confounders, cohort_doac)
+    w_doac <- weightit(ps_formula_doac, data = cohort_doac,
+                       method = "glm", estimand = config$estimand)
+    cohort_doac$ipw <- w_doac$weights
+
+    fit_doac <- coxph(
+      Surv(time_to_stroke_se, stroke_se_event) ~ treatment,
+      data = cohort_doac, weights = ipw, robust = TRUE
+    )
+    sensitivity$doac_fit <- fit_doac
+    message(sprintf("DOAC-only analysis (N=%d):", nrow(cohort_doac)))
+    print(summary(fit_doac))
+  }
+
+  return(sensitivity)
+}
+```
+
+
+## 8a. Summary Helper
+
+```{r}
+#| label: summary-helper
+
+format_hr <- function(fit) {
+  s <- summary(fit)
+  sprintf("HR = %.2f (95%% CI: %.2f-%.2f), p = %.4f",
+          s$conf.int[1, 1], s$conf.int[1, 3], s$conf.int[1, 4],
+          s$coefficients[1, "Pr(>|z|)"])
+}
+```
+
+
+<!-- ============================================================= -->
+<!-- PART 2: Execution & Results (Sections 9+)                      -->
+<!-- Each section calls its function and displays results inline    -->
+<!-- ============================================================= -->
+
+
+## 9. Connect and Pull Cohort
+
+```{r}
+#| label: exec-connect
+
+con <- connect_cdw()
+cohort_raw <- pull_analytic_cohort(con, config)
+consort <- attr(cohort_raw, "consort")
+dbDisconnect(con)
+```
+
+### CONSORT Flow (Text)
+
+```{r}
+#| label: exec-consort-text
+
+consort_table <- print_consort_table(consort)
+knitr::kable(consort_table, caption = "CONSORT Patient Flow")
+```
+
+### CONSORT Flow Diagram
+
+```{r}
+#| label: fig-consort
+#| fig-cap: "CONSORT flow diagram showing patient attrition at each cohort-building step."
+#| fig-width: 10
+#| fig-height: 12
+
+render_consort_diagram(consort)
+```
+
+### Empty Cohort Guard
+
+```{r}
+#| label: exec-empty-guard
+
+if (nrow(cohort_raw) == 0) {
+  message("*** STOPPING: Analytic cohort has 0 patients. ***")
+  message("Review the CONSORT diagram above to identify where patients were lost.")
+  knitr::knit_exit()
+}
+```
+
+
+## 10. Prepare Data and Table 1
+
+```{r}
+#| label: exec-prepare
+
+cohort <- prepare_cohort(cohort_raw)
+
+message(sprintf("Prepared cohort: %d patients (%d OAC, %d No OAC)",
+                nrow(cohort),
+                sum(cohort$treatment == 1),
+                sum(cohort$treatment == 0)))
+```
+
+### Table 1: Baseline Characteristics
+
+```{r}
+#| label: exec-table1
+
+table1_data <- cohort |>
+  group_by(treatment_label) |>
+  summarise(
+    N = n(),
+    `Age (mean +/- SD)` = sprintf("%.1f +/- %.1f", mean(age_at_index), sd(age_at_index)),
+    `Female (%)` = sprintf("%.1f", 100 * mean(sex_cat == "Female")),
+    `White (%)` = sprintf("%.1f", 100 * mean(race_cat == "White")),
+    `Black (%)` = sprintf("%.1f", 100 * mean(race_cat == "Black")),
+    `Hispanic (%)` = sprintf("%.1f", 100 * mean(hispanic_cat == "Hispanic")),
+    `CHA2DS2-VASc (mean)` = sprintf("%.1f", mean(chadsvasc_total)),
+    `Driving: CHF (%)` = sprintf("%.1f", 100 * mean(driving_component == "CHF")),
+    `Driving: HTN (%)` = sprintf("%.1f", 100 * mean(driving_component == "HTN")),
+    `Driving: DM (%)` = sprintf("%.1f", 100 * mean(driving_component == "DM")),
+    `Driving: Vascular (%)` = sprintf("%.1f", 100 * mean(driving_component == "Vascular")),
+    `Driving: Age 65-74 (%)` = sprintf("%.1f", 100 * mean(driving_component == "Age65-74")),
+    `BMI (mean)` = sprintf("%.1f", mean(bmi, na.rm = TRUE)),
+    `SBP (mean)` = sprintf("%.0f", mean(bp_systolic, na.rm = TRUE)),
+    `eGFR (mean)` = sprintf("%.1f", mean(egfr_value, na.rm = TRUE)),
+    `Creatinine (mean)` = sprintf("%.1f", mean(creatinine, na.rm = TRUE)),
+    `Hemoglobin (mean)` = sprintf("%.1f", mean(hemoglobin, na.rm = TRUE)),
+    `CKD (%)` = sprintf("%.1f", 100 * mean(ckd)),
+    `Prior bleeding (%)` = sprintf("%.1f", 100 * mean(prior_bleed)),
+    `Liver disease (%)` = sprintf("%.1f", 100 * mean(liver_disease)),
+    `Anemia (%)` = sprintf("%.1f", 100 * mean(anemia)),
+    `Antiplatelet (%)` = sprintf("%.1f", 100 * mean(antiplatelet_use)),
+    `Statin (%)` = sprintf("%.1f", 100 * mean(statin_use)),
+    `ACEi/ARB (%)` = sprintf("%.1f", 100 * mean(acei_arb_use)),
+    `Beta-blocker (%)` = sprintf("%.1f", 100 * mean(beta_blocker_use)),
+    `PPI (%)` = sprintf("%.1f", 100 * mean(ppi_use)),
+    `NSAID (%)` = sprintf("%.1f", 100 * mean(nsaid_use)),
+    .groups = "drop"
+  ) |>
+  pivot_longer(-treatment_label, names_to = "Characteristic", values_to = "Value") |>
+  pivot_wider(names_from = treatment_label, values_from = Value)
+
+knitr::kable(table1_data, caption = "Table 1: Baseline Characteristics by Treatment Group")
+```
+
+### OAC Type Distribution
+
+```{r}
+#| label: exec-oac-types
+
+oac_patients <- cohort |> filter(treatment == 1)
+oac_dist <- oac_patients |>
+  count(oac_type_cat) |>
+  mutate(pct = round(100 * n / sum(n), 1))
+knitr::kable(oac_dist, caption = "OAC Type Distribution Among Treated Patients")
+```
+
+### Event Rates
+
+```{r}
+#| label: exec-events
+
+events <- cohort |>
+  group_by(treatment_label) |>
+  summarise(
+    N = n(),
+    `Stroke/SE events` = sum(stroke_se_event),
+    `Major bleeding events` = sum(bleed_event),
+    `ICH events` = sum(ich_event),
+    `Deaths` = sum(death_event),
+    .groups = "drop"
+  )
+knitr::kable(events, caption = "Outcome Event Counts by Treatment Group")
+```
+
+
+## 11. IPW Analysis
+
+```{r}
+#| label: exec-ipw
+
+ipw_results <- run_ipw_analysis(cohort, confounders, config)
+cohort <- ipw_results$cohort
+```
+
+### Love Plot (Covariate Balance)
+
+```{r}
+#| label: fig-love-plot
+#| fig-cap: "Absolute standardized mean differences before and after IPW."
+#| fig-width: 10
+#| fig-height: 8
+
+print(ipw_results$plots$love)
+```
+
+### Propensity Score Distribution
+
+```{r}
+#| label: fig-ps-dist
+#| fig-cap: "Propensity score distributions by treatment group."
+#| fig-width: 8
+#| fig-height: 5
+
+print(ipw_results$plots$ps_dist)
+```
+
+
+## 12. Cox Model Results and Kaplan-Meier Curves
+
+### Summary of All Outcomes
+
+```{r}
+#| label: exec-results-summary
+
+outcome_summary <- tibble::tibble(
+  Outcome = c("Ischemic stroke / SE (primary)",
+              "Major bleeding",
+              "Intracranial hemorrhage",
+              "All-cause mortality"),
+  Result = c(
+    format_hr(ipw_results$fits$stroke_se),
+    format_hr(ipw_results$fits$bleed),
+    format_hr(ipw_results$fits$ich),
+    format_hr(ipw_results$fits$death)
+  )
+)
+knitr::kable(outcome_summary,
+             caption = "Weighted Cox PH Results: OAC (treatment=1) vs No OAC (ref)")
+```
+
+### Kaplan-Meier: Stroke / SE
+
+```{r}
+#| label: fig-km-stroke
+#| fig-cap: "Weighted Kaplan-Meier curves for ischemic stroke/systemic embolism."
+#| fig-width: 9
+#| fig-height: 7
+
+print(ipw_results$plots$km_stroke)
+```
+
+### Kaplan-Meier: Major Bleeding
+
+```{r}
+#| label: fig-km-bleed
+#| fig-cap: "Weighted Kaplan-Meier curves for major bleeding."
+#| fig-width: 9
+#| fig-height: 7
+
+print(ipw_results$plots$km_bleed)
+```
+
+### Kaplan-Meier: All-Cause Mortality
+
+```{r}
+#| label: fig-km-death
+#| fig-cap: "Weighted Kaplan-Meier curves for all-cause mortality."
+#| fig-width: 9
+#| fig-height: 7
+
+print(ipw_results$plots$km_death)
+```
+
+
+## 13. Net Clinical Benefit
+
+```{r}
+#| label: exec-ncb
+
+ncb_results <- compute_ncb(cohort)
+knitr::kable(ncb_results,
+             caption = "Net Clinical Benefit: OAC vs No OAC (per 100 person-years)")
+```
+
+
+## 14. Subgroup Analyses
+
+```{r}
+#| label: exec-subgroups
+
+subgroup_results <- run_subgroup_analyses(cohort, confounders, config)
+knitr::kable(subgroup_results |>
+               mutate(across(where(is.numeric), ~round(., 3))),
+             caption = "Subgroup Analysis: Stroke/SE Outcome (OAC vs No OAC)")
+```
+
+### Forest Plot
+
+```{r}
+#| label: fig-forest
+#| fig-cap: "Forest plot of subgroup analyses for ischemic stroke/SE."
+#| fig-width: 10
+#| fig-height: 8
+
+sg_plot_data <- subgroup_results |> filter(!is.na(HR))
+
+if (nrow(sg_plot_data) > 0) {
+  ggplot(sg_plot_data, aes(x = HR, y = reorder(Subgroup, HR))) +
+    geom_point(size = 3) +
+    geom_errorbarh(aes(xmin = CI_lo, xmax = CI_hi), height = 0.2) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +
+    scale_x_log10() +
+    labs(x = "Hazard Ratio (OAC vs No OAC)",
+         y = NULL,
+         title = "Subgroup Analyses: Ischemic Stroke / SE",
+         subtitle = "HR < 1 favors OAC") +
+    theme_minimal() +
+    theme(axis.text.y = element_text(size = 10))
+} else {
+  message("No subgroup analyses had sufficient data for plotting.")
+}
+```
+
+
+## 15. Sensitivity Analyses
+
+```{r}
+#| label: exec-sensitivity
+
+sensitivity_results <- run_sensitivity(ipw_results, cohort, confounders, config)
+```
+
+### E-value Results
+
+```{r}
+#| label: exec-evalue
+
+message("=== E-value: Stroke/SE ===")
+print(sensitivity_results$evalue_stroke)
+
+message("\n=== E-value: Major Bleeding ===")
+print(sensitivity_results$evalue_bleed)
+```
+
+### PS Trimming Results
+
+```{r}
+#| label: exec-trimmed
+
+if (!is.null(sensitivity_results$trimmed_fit)) {
+  message("Trimmed stroke/SE result:")
+  message(format_hr(sensitivity_results$trimmed_fit))
+} else {
+  message("PS trimming analysis was skipped (insufficient arms).")
+}
+```
+
+### Post-Epic Era Results
+
+```{r}
+#| label: exec-epic
+
+if (!is.null(sensitivity_results$epic_fit)) {
+  message("Post-Epic (2021+) stroke/SE result:")
+  message(format_hr(sensitivity_results$epic_fit))
+} else {
+  message("Post-Epic analysis was skipped (insufficient patients).")
+}
+```
+
+### DOAC-Only OAC Arm Results
+
+```{r}
+#| label: exec-doac-only
+
+if (!is.null(sensitivity_results$doac_fit)) {
+  message("DOAC-only OAC arm stroke/SE result:")
+  message(format_hr(sensitivity_results$doac_fit))
+} else {
+  message("DOAC-only analysis was skipped (insufficient patients).")
+}
+```
+
+
+## 16. Summary
+
+```{r}
+#| label: exec-summary
+
+message("\n", strrep("=", 70))
+message("PROTOCOL 03 SUMMARY: OAC vs No OAC at Low CHA2DS2-VASc in AF")
+message(strrep("=", 70))
+message(sprintf("Analytic cohort: %d patients", nrow(cohort)))
+message(sprintf("  OAC:    %d", sum(cohort$treatment == 1)))
+message(sprintf("  No OAC: %d", sum(cohort$treatment == 0)))
+message(sprintf("Follow-up:     %d days", config$followup_days))
+message(sprintf("Study period:  %s to %s", config$study_start, config$study_end))
+message("")
+message("PRIMARY OUTCOME (Ischemic Stroke / SE):")
+message(sprintf("  %s", format_hr(ipw_results$fits$stroke_se)))
+message("")
+message("SECONDARY OUTCOMES:")
+message(sprintf("  Major bleeding: %s", format_hr(ipw_results$fits$bleed)))
+message(sprintf("  ICH:            %s", format_hr(ipw_results$fits$ich)))
+message(sprintf("  All-cause death:%s", format_hr(ipw_results$fits$death)))
+message("")
+message("NET CLINICAL BENEFIT:")
+knitr::kable(ncb_results)
+message("")
+message("Interpretation: HR < 1 favors OAC; HR > 1 favors No OAC.")
+message("Treatment = 1 (OAC) is the 'treated' group in the Cox model.")
+message("")
+message("CRITICAL CAVEAT: This is a treated-vs-untreated design with")
+message("strong confounding by indication. E-values should be reviewed")
+message("carefully to assess the plausibility of the causal estimate.")
+message(strrep("=", 70))
+```
