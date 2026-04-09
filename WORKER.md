@@ -88,13 +88,47 @@ single paper (e.g., "Fu et al. is the only study..."), citation chaining is
 the fastest way to verify or refute that claim. Missing a direct predecessor
 or competitor study undermines the entire gap analysis.
 
+### Methodology Classification — CRITICAL
+PubMed structured abstracts frequently **omit the names of methodological
+frameworks** used in a study. A paper may use target trial emulation,
+instrumental variable analysis, regression discontinuity, or other causal
+inference frameworks, but the PubMed abstract returned by `fetch_abstracts`
+may only say "retrospective cohort study." This is a known limitation of
+PubMed's E-utilities API.
+
+**For every key paper (especially those cited in your top questions):**
+1. After fetching the PubMed abstract, use **WebSearch** to search for
+   the paper by title + "target trial emulation" (or the relevant
+   methodology). News coverage and journal pages often describe the
+   methodology more completely than the PubMed abstract.
+2. When classifying a study's design, do NOT rely solely on the PubMed
+   abstract. Cross-reference with at least one other source (journal page,
+   news coverage, or author's institutional press release).
+3. If you cite a paper and later claim "no study has applied [methodology X]
+   to [topic Y]," you MUST verify that NONE of your own cited papers used
+   that methodology. This is a self-consistency check — contradicting your
+   own cited evidence is a fatal error.
+
+**Example of what can go wrong:** A worker cited Bukhbinder 2026 (PMID
+41921123) as a "retrospective cohort" study based on the PubMed abstract,
+then claimed "no study has applied TTE to flu vaccination and dementia."
+In fact, Bukhbinder 2026 explicitly uses target trial emulation with
+sequential nested trials — this was clearly described on the journal page
+and in news coverage, but not in the PubMed API response. The worker
+contradicted its own cited evidence.
+
 ### Search Completeness Checklist
 Before finalizing `02_evidence_gaps.md`, verify for each top-5 question:
 - [ ] At least one narrow PICO-specific search was run (not just broad thematic)
 - [ ] Abstracts were fetched for all results of targeted searches
 - [ ] Citation chaining was done for the top 3 questions
 - [ ] Any claim of "no studies exist" or "only one study" was stress-tested
-      with at least 2 different search strategies
+      with at least 2 different search strategies, including at least one
+      **WebSearch** (not just PubMed) to catch papers whose methodology is
+      described on the journal page but not in the PubMed abstract
+- [ ] For any claim "no study has applied [method] to [topic]," verified
+      that none of the papers you already cited actually used that method
+      (self-consistency check)
 - [ ] Searches covered both the primary clinical literature AND relevant
       specialty journals (search by condition terms that specialists would use)
 

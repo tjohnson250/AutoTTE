@@ -81,12 +81,40 @@ that all three passes were actually performed:
    hepatology, geriatrics) are routinely missed by broad cardiology-focused
    searches.
 
+4. **Stress-test "no study has applied [method]" claims (CRITICAL):** When
+   the worker claims no study has applied a specific methodology (e.g., target
+   trial emulation, instrumental variables, regression discontinuity) to a
+   topic, you MUST:
+   a. **Self-consistency check:** Verify that NONE of the worker's own cited
+      papers actually used that methodology. PubMed abstracts frequently omit
+      methodology framework names — a paper may use target trial emulation but
+      the PubMed abstract only says "retrospective cohort."
+   b. **WebSearch verification:** Run a WebSearch (not just PubMed) for
+      `"[methodology]" AND "[topic keywords]"`. Journal pages, press releases,
+      and news coverage often describe methodology more completely than PubMed
+      abstracts. If this search returns a relevant paper the worker cited but
+      misclassified, that is a **critical error** requiring REVISE.
+   c. **Cross-check the worker's top cited papers:** For each of the 3-5 most
+      important papers cited, search the web for `"[paper title]" "[methodology]"`
+      to verify the worker didn't miss the methodology description.
+
+   **Example of this failure mode:** A worker cited Bukhbinder 2026 (PMID
+   41921123) and classified it as "retrospective cohort" based on the PubMed
+   abstract, then claimed "no study has applied TTE to flu vaccination and
+   dementia." In fact, Bukhbinder 2026 explicitly uses target trial emulation
+   — clearly described on the journal page but absent from PubMed's API
+   response. The worker contradicted its own cited evidence.
+
 **Red flags for search completeness:**
 - Worker only ran broad MeSH searches with no targeted per-question follow-up
 - Top question has fewer than 3 supporting papers and no explanation of why
 - Worker claims "no prior studies" without evidence of targeted searching
 - All cited papers come from the same 2-3 high-impact journals (missing
   specialty journal coverage)
+- Worker claims "no study has applied [method X]" but one of their own cited
+  papers actually uses that method (self-contradiction — automatic REVISE)
+- "No study" methodology claims verified only via PubMed without WebSearch
+  cross-reference (PubMed abstracts routinely omit methodology names)
 
 **Per-question verdict in your markdown review:**
 - VERIFIED — PMIDs check out, PICO is accurate, gap score is reasonable

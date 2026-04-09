@@ -148,6 +148,14 @@ consider it a credible starting point.
 - All cited papers come from the same 2-3 high-impact journals (missing
   specialty journal coverage — check nephrology, hepatology, geriatrics journals)
 - Claims of "the only study" or "no prior work" without targeted verification
+- **Claims of "no study has applied [method X]" that contradict the worker's
+  own cited papers** (e.g., citing a paper that uses TTE, then claiming no
+  TTE exists for that topic). This self-contradiction indicates the worker
+  relied solely on PubMed abstracts for methodology classification without
+  cross-referencing journal pages or web sources.
+- Methodology classifications based only on PubMed abstracts without
+  WebSearch cross-reference (PubMed abstracts routinely omit framework names
+  like "target trial emulation," "instrumental variables," etc.)
 
 ### Discovery Review Acceptance Criteria
 - [ ] Reviewer verified at least a sample of PMIDs via fetch_abstracts
@@ -156,6 +164,9 @@ consider it a credible starting point.
 - [ ] Reviewer ran independent PICO-specific searches for at least the top 3
       questions to check for papers the worker missed
 - [ ] Reviewer stress-tested any "only study" / "no prior work" claims
+- [ ] Reviewer stress-tested any "no study has applied [method]" claims using
+      WebSearch (not just PubMed), AND checked that no cited paper actually
+      uses that method (self-consistency check)
 - [ ] An "approved questions" list is provided
 
 **Red flags requiring re-review:**
@@ -163,6 +174,11 @@ consider it a credible starting point.
 - Reviewer rejected everything without constructive suggestions
 - Reviewer did not run any independent targeted searches (just verified
   the worker's cited PMIDs without looking for missing papers)
+- Reviewer verified "no study has applied [method]" claims using only
+  PubMed — must also use WebSearch since PubMed abstracts routinely omit
+  methodology framework names
+- Reviewer did not check whether any of the worker's own cited papers
+  actually use the methodology claimed to be absent (self-consistency)
 
 ### Feasibility Acceptance Criteria
 - [ ] Every approved question was assessed against the dataset registry
