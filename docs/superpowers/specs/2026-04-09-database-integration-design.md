@@ -23,12 +23,14 @@ A config-driven database abstraction with two operating modes:
 
 ### 1. Database Configuration Files
 
-Location: `databases/<name>.yaml`
+Location: `databases/<id>.yaml` (filename matches the `id` field)
 
-Each file declares one data source:
+Each file declares one data source. The `id` field is a slug used consistently
+for the YAML filename and all associated file paths:
 
 ```yaml
-name: "PCORnet Synthetic CDW"
+id: "synthetic_pcornet"      # slug — used for file naming and API lookups
+name: "PCORnet Synthetic CDW" # display name — used in agent output
 cdm: "pcornet"              # pcornet | omop | custom
 cdm_version: "6.0"
 engine: "duckdb"             # duckdb | mssql | postgres | sqlite
@@ -45,13 +47,15 @@ schema_prefix: "main"
 # Auto-populated by coordinator if missing:
 schema_dump: "databases/schemas/synthetic_pcornet_schema.txt"
 data_profile: "databases/profiles/synthetic_pcornet_profile.md"
+conventions: "databases/conventions/synthetic_pcornet_conventions.md"
 ```
 
 Key fields:
 
 | Field | Purpose |
 |-------|---------|
-| `name` | Human-readable identifier, used in `--db-config` and agent output |
+| `id` | Slug used for file naming and MCP tool lookups. Must match the YAML filename (without `.yaml`) |
+| `name` | Human-readable display name, used in agent output and protocol documents |
 | `cdm` | Tells agents the expected table/column conventions. `pcornet`, `omop`, or `custom` |
 | `cdm_version` | Optional. Helps agents know which version of the CDM spec to reference |
 | `engine` | Determines SQL dialect: T-SQL for `mssql`, standard SQL for `duckdb`/`postgres` |
@@ -61,10 +65,12 @@ Key fields:
 | `schema_dump` | Path to generated schema dump file. Auto-generated if missing and online |
 | `data_profile` | Path to generated data profile. Auto-generated if missing and online |
 | `mpi_schema_dump` | Optional. Path to MPI schema dump for PCORnet CDWs with separate MPI databases |
+| `conventions` | Optional. Path to a markdown file documenting database-specific quirks, filters, and coding requirements that agents must follow. See "Database Conventions" section below |
 
 Example config for the existing secure CDW:
 
 ```yaml
+id: "secure_pcornet_cdw"
 name: "Secure PCORnet CDW"
 cdm: "pcornet"
 cdm_version: "6.1"
@@ -76,9 +82,10 @@ connection:
     con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
 
 schema_prefix: "CDW.dbo"
-schema_dump: "databases/schemas/secure_cdw_schema.txt"
-mpi_schema_dump: "databases/schemas/secure_cdw_mpi_schema.txt"
-data_profile: "databases/profiles/secure_cdw_profile.md"
+schema_dump: "databases/schemas/secure_pcornet_cdw_schema.txt"
+mpi_schema_dump: "databases/schemas/secure_pcornet_cdw_mpi_schema.txt"
+data_profile: "databases/profiles/secure_pcornet_cdw_profile.md"
+conventions: "databases/conventions/secure_pcornet_cdw_conventions.md"
 ```
 
 ### 2. R Execution MCP Server
@@ -141,9 +148,10 @@ Serves as the single source of truth for all available data sources.
 | Tool | Args | Returns |
 |------|------|---------|
 | `list_datasources(domain?, cdm?, online_only?)` | Optional filters | List of all data sources with key metadata |
-| `get_datasource_details(name)` | Data source name | Full details — for public datasets: registry info; for DBs: config + schema/profile paths |
-| `get_schema(name)` | Data source name | Schema dump file contents (reads the file at the config's `schema_dump` path) |
-| `get_profile(name)` | Data source name | Data profile file contents (reads the file at the config's `data_profile` path) |
+| `get_datasource_details(id)` | Data source id | Full details — for public datasets: registry info; for DBs: config + schema/profile paths |
+| `get_schema(id)` | Data source id | Schema dump file contents (reads the file at the config's `schema_dump` path) |
+| `get_profile(id)` | Data source id | Data profile file contents (reads the file at the config's `data_profile` path) |
+| `get_conventions(id)` | Data source id | Conventions file contents, or empty if no conventions file configured |
 
 #### Migration from pubmed_server.py
 
@@ -152,6 +160,81 @@ Serves as the single source of truth for all available data sources.
 - `pubmed_server.py` retains only PubMed search and abstract retrieval.
 - All `--allowedTools` references to `mcp__pubmed__query_dataset_registry` and
   `mcp__pubmed__get_dataset_details` change to `mcp__datasource__*` equivalents.
+
+### 3.5. Database Conventions
+
+Location: `databases/conventions/<id>_conventions.md`
+
+Each configured database can have an optional conventions file that documents
+database-specific quirks, required filters, and coding requirements. This is
+where institutional knowledge lives — things that are true about *this specific
+database* but not inherent to the CDM standard or SQL engine.
+
+Example content for `databases/conventions/secure_pcornet_cdw_conventions.md`:
+
+```markdown
+# Secure PCORnet CDW — Database Conventions
+
+## Required Filters
+
+- **Legacy Encounter filtering:** Every query that joins ENCOUNTER must include
+  `AND e.RAW_ENC_TYPE <> 'Legacy Encounter'`. The CDW contains re-imported
+  AllScripts-era records that cause double-counting if not excluded.
+
+- **Date bounds:** All queries on date columns must include explicit date range
+  bounds. The CDW contains junk dates from 1820 to 3019. Unbounded queries
+  will include garbage records.
+
+## Coding System Requirements
+
+- **ICD-9/10 transition:** The ICD-10 transition date is October 1, 2015. If
+  the study period extends before this date, queries must include both
+  `DX_TYPE = '09'` and `DX_TYPE = '10'`. If the study starts after Oct 2015,
+  `DX_TYPE = '10'` alone is sufficient.
+
+## SQL Patterns
+
+- **DEATH table deduplication:** Always use `ROW_NUMBER() OVER (PARTITION BY
+  PATID ORDER BY DEATH_DATE) AS rn ... WHERE rn = 1` when joining DEATH.
+  Some patients have duplicate death records.
+
+- **ODBC batch bug:** Do not combine `SELECT INTO #temp` and
+  `SELECT * FROM #temp` in the same `dbExecute()` / `dbGetQuery()` call.
+  The ODBC driver fails silently. Use separate calls.
+
+- **Table qualification:** All tables must be fully qualified as
+  `CDW.dbo.TABLE_NAME`, not bare `dbo.TABLE_NAME`.
+
+## Column Handling
+
+- **Case normalization:** After `dbGetQuery()`, always call
+  `names(df) <- tolower(names(df))` — SQL Server returns uppercase column names.
+
+- **Factor naming:** Create new factor columns with distinct names
+  (`sex_cat`, `race_cat`), not by overwriting the raw column.
+```
+
+#### How conventions flow through the pipeline
+
+The CDW-specific red flags and SQL conventions currently hardcoded in
+`COORDINATOR.md`, `WORKER.md`, and `REVIEW.md` are migrated into the
+conventions file for the secure CDW. The agent instruction files become generic:
+
+1. **Coordinator** — During Phase 0, reads the conventions file and confirms it
+   exists. Every sub-agent prompt includes: "Read the database conventions via
+   `get_conventions('<id>')` before writing any SQL or R code. Treat every
+   convention as a hard requirement."
+
+2. **Workers** — Call `get_conventions(id)` at the start of feasibility and
+   protocol generation phases. Apply every convention when writing SQL and R
+   code. If a convention is not applicable to the current query, document why.
+
+3. **Reviewers** — Call `get_conventions(id)` and use each convention as a
+   checklist item. Every SQL query and R code block is checked against every
+   applicable convention. Violations are flagged as REVISE items.
+
+This means adding a new database with its own quirks requires only writing a
+conventions file — no changes to the core agent instructions.
 
 ### 4. Pipeline Changes
 
@@ -167,7 +250,7 @@ New CLI interface:
 ./run.sh "atrial fibrillation" --db-config databases/synthetic_pcornet.yaml
 
 # Force offline even if config says online:
-./run.sh "atrial fibrillation" --db-config databases/secure_cdw.yaml --db-mode offline
+./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --db-mode offline
 
 # With custom max turns:
 ./run.sh "atrial fibrillation" --db-config databases/my_cdw.yaml 75
@@ -260,24 +343,34 @@ Updated protocol target logic:
   public datasets, or both, based on feasibility.
 
 Updated sub-agent prompts:
-- Workers are told the DB name, CDM type, engine, schema prefix, and whether
-  they have online access.
-- Workers are pointed to `get_schema(name)` and `get_profile(name)` instead of
-  hardcoded file paths like `CDW_DBO_database_schema.txt`.
+- Workers are told the DB id, name, CDM type, engine, schema prefix, and
+  whether they have online access.
+- Workers are pointed to `get_schema(id)`, `get_profile(id)`, and
+  `get_conventions(id)` instead of hardcoded file paths.
 - In online mode, workers are told they can use `execute_r()` and `query_db()`
   to validate their work.
+- Every sub-agent prompt includes: "Read the database conventions via
+  `get_conventions('<id>')` before writing any SQL or R code. Treat every
+  convention as a hard requirement."
 
 #### WORKER.md Changes
 
 New section on data source access:
-- Use `mcp__datasource__get_schema(name)` and `mcp__datasource__get_profile(name)`
-  to get schema and profile for any configured database.
+- Use `mcp__datasource__get_schema(id)`, `mcp__datasource__get_profile(id)`,
+  and `mcp__datasource__get_conventions(id)` to get schema, profile, and
+  conventions for any configured database.
 - Do not reference hardcoded file paths for schemas or profiles.
+
+New section on database conventions:
+- Call `get_conventions(id)` at the start of feasibility and protocol
+  generation phases.
+- Apply every convention when writing SQL and R code.
+- If a convention is not applicable to the current query, document why.
 
 New section on SQL dialect awareness:
 - Check the `engine` field from the DB config to determine SQL dialect.
 - `mssql`: T-SQL — `#temp` tables, `DATEADD`, `DATEDIFF`, `GETDATE()`,
-  `SELECT INTO`, tables qualified as `CDW.dbo.TABLE`.
+  `SELECT INTO`, tables qualified as `schema_prefix.TABLE`.
 - `duckdb`: Standard SQL — `CREATE TEMP TABLE ... AS SELECT`, `DATE_ADD`,
   `CURRENT_DATE`, no `#` prefix, schema prefix from config.
 - `postgres`: Standard SQL with PostgreSQL date functions.
@@ -292,10 +385,16 @@ New section on online mode validation:
 - If execution reveals data issues (empty cohorts, missing codes), update the
   protocol and document the findings.
 
-Existing CDW-specific SQL conventions remain but are reframed as
-engine-specific guidance that applies when `engine: mssql`.
+CDW-specific SQL conventions currently in WORKER.md are migrated to the
+conventions file for the secure CDW database. WORKER.md retains only generic
+engine-dialect guidance.
 
 #### REVIEW.md Changes
+
+New section on conventions-based review:
+- Call `get_conventions(id)` and use each convention as a checklist item.
+- Every SQL query and R code block is checked against every applicable
+  convention. Violations are flagged as REVISE items.
 
 New online-mode review criteria:
 - If the run was online, reviewer checks that the worker actually executed the
@@ -309,11 +408,15 @@ Files moved from root to `databases/`:
 
 | Old Location | New Location |
 |-------------|-------------|
-| `CDW_DBO_database_schema.txt` | `databases/schemas/secure_cdw_schema.txt` |
-| `MasterPatientIndex_DBO_database_schema.txt` | `databases/schemas/secure_cdw_mpi_schema.txt` |
-| `CDW_data_profile.md` | `databases/profiles/secure_cdw_profile.md` |
+| `CDW_DBO_database_schema.txt` | `databases/schemas/secure_pcornet_cdw_schema.txt` |
+| `MasterPatientIndex_DBO_database_schema.txt` | `databases/schemas/secure_pcornet_cdw_mpi_schema.txt` |
+| `CDW_data_profile.md` | `databases/profiles/secure_pcornet_cdw_profile.md` |
 
-A new `databases/secure_cdw.yaml` config file is created pointing to these paths.
+CDW-specific conventions extracted from `COORDINATOR.md`, `WORKER.md`, and
+`REVIEW.md` into `databases/conventions/secure_pcornet_cdw_conventions.md`.
+
+A new `databases/secure_pcornet_cdw.yaml` config file is created pointing to
+these paths.
 
 All references in `COORDINATOR.md`, `WORKER.md`, and `REVIEW.md` to the old
 file paths are updated to use datasource MCP tools instead.
@@ -328,11 +431,13 @@ automated pipeline.
 AutoTTE/
   databases/
     schemas/
-      secure_cdw_schema.txt
-      secure_cdw_mpi_schema.txt
+      secure_pcornet_cdw_schema.txt
+      secure_pcornet_cdw_mpi_schema.txt
     profiles/
-      secure_cdw_profile.md
-    secure_cdw.yaml
+      secure_pcornet_cdw_profile.md
+    conventions/
+      secure_pcornet_cdw_conventions.md
+    secure_pcornet_cdw.yaml
     synthetic_pcornet.yaml          (example)
   tools/
     pubmed_server.py                (modified — registry removed)
@@ -354,6 +459,8 @@ AutoTTE/
 `.gitignore` additions:
 - `databases/schemas/` — auto-generated, may contain sensitive schema info
 - `databases/profiles/` — auto-generated, may contain aggregate counts
+- `databases/conventions/` — may contain sensitive institutional details
+- `.mcp-session.json` — session-specific MCP config generated by `run.sh`
 
 Database config YAML files (`databases/*.yaml`) are tracked in git but should
 not contain credentials. Connection code should use environment variables or
