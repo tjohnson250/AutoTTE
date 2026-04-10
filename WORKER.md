@@ -10,8 +10,13 @@ perform. Focus on that task and do it well.
 - **search_pubmed** — Search PubMed via E-utilities API. Use this (not WebSearch)
   as your primary tool for finding clinical literature.
 - **fetch_abstracts** — Retrieve full abstracts for a list of PMIDs.
-- **query_dataset_registry** — Search a registry of public clinical datasets.
-- **get_dataset_details** — Get full details on a specific dataset.
+- **list_datasources** — List all available data sources (public datasets + configured databases).
+- **get_datasource_details** — Get full details for a specific data source.
+- **get_schema** — Get the database schema dump for a configured data source.
+- **get_profile** — Get the data profile for a configured data source.
+- **get_conventions** — Get database-specific conventions (required filters, SQL patterns, etc.).
+- **execute_r** — (Online mode only) Execute R code in a persistent session with DB connection.
+- **query_db** — (Online mode only) Run SQL queries against the connected database.
 - **WebSearch / WebFetch** — For non-PubMed searches (dataset docs, guidelines, etc.)
 - **Bash, Read, Write, Edit** — File I/O and shell access (e.g., running R scripts).
 
@@ -185,28 +190,59 @@ Each target trial emulation protocol should include:
 - The R code should use modern tidyverse style and established causal
   inference packages (WeightIt, cobalt, survival, EValue)
 
-## Protocol Targets: Public Data vs CDW
+## Data Source Access
 
-Protocols may target either **public datasets** (MIMIC-IV, NHANES, etc.) or
-the **PCORnet CDW** (our institutional Clinical Data Warehouse on MS SQL Server).
-The coordinator will tell you which target to use.
+The coordinator will tell you which data source to target. Use the datasource
+MCP tools to access database details:
 
-### When targeting the PCORnet CDW:
+- **`get_datasource_details(id)`** — Get config, CDM type, engine, paths
+- **`get_schema(id)`** — Read the full database schema (tables, columns, types)
+- **`get_profile(id)`** — Read the data profile (aggregate statistics, coverage)
+- **`get_conventions(id)`** — Read database-specific conventions (CRITICAL)
 
-Use `analysis_plan_template_cdw.R` as your structural reference. The reference
-files are in the project root:
-- `CDW_DBO_database_schema.txt` — full PCORnet CDM schema (column names, types, keys)
-- `CDW_data_profile.md` — **data profile with aggregate counts, coding systems,
-  temporal coverage, and condition/medication prevalence** (no PHI). Read this
-  BEFORE writing the feasibility assessment or protocol SQL. It tells you:
-  - How many years of data exist and which years use ICD-9 vs ICD-10
-  - Patient counts per condition and medication (realistic sample size estimates)
-  - Which lab LOINCs are well-populated vs. sparse
-  - Column completeness (NULL rates) so you don't rely on empty fields
-  - Demographic distributions for subgroup feasibility
-- `MasterPatientIndex_DBO_database_schema.txt` — MPI schema
+For public datasets, use `list_datasources()` and `get_datasource_details(id)`.
 
-**Key PCORnet CDM tables and how to use them:**
+### Database Conventions (MANDATORY)
+
+Before writing ANY SQL or R code for a configured database, you MUST call
+`get_conventions(id)` and read the entire conventions file. Conventions
+document database-specific quirks, required filters, and coding patterns.
+**Every convention is a hard requirement**, not a suggestion.
+
+If a convention is not applicable to your specific query, document why in
+the protocol.
+
+## SQL Dialect Awareness
+
+Check the `engine` field from the database config to determine SQL dialect:
+
+| Engine | Dialect | Temp Tables | Date Functions | Table Prefix |
+|--------|---------|-------------|----------------|-------------|
+| `mssql` | T-SQL | `#temp` | `DATEADD`, `DATEDIFF`, `GETDATE()` | From config `schema_prefix` (e.g., `CDW.dbo`) |
+| `duckdb` | Standard SQL | `CREATE TEMP TABLE ... AS` | `DATE_ADD`, `CURRENT_DATE` | From config `schema_prefix` (e.g., `main`) |
+| `postgres` | PostgreSQL | `CREATE TEMP TABLE ... AS` | `DATE_TRUNC`, `INTERVAL`, `NOW()` | From config `schema_prefix` |
+
+Always use the `schema_prefix` from the database config to qualify table names.
+
+## Online Mode Validation
+
+If the coordinator tells you that you have online database access, you can
+use `execute_r()` and `query_db()` to validate your work:
+
+1. After writing cohort-building SQL, execute key sections and verify temp
+   tables have rows.
+2. Check CONSORT counts are plausible (no step should increase patient count).
+3. Run the propensity score model and verify it converges.
+4. Fix any SQL errors or empty-result issues before declaring the protocol
+   complete.
+5. If execution reveals data issues (empty cohorts, missing codes), update
+   the protocol and document the findings.
+
+In offline mode, you write the code without executing it.
+
+## Key PCORnet CDM Tables
+
+When targeting a PCORnet CDM database, these are the standard tables:
 
 | Protocol Element | PCORnet Table | Key Columns |
 |-----------------|---------------|-------------|
@@ -224,371 +260,68 @@ files are in the project root:
 | Death cause | DEATH_CAUSE | DEATH_CAUSE, DEATH_CAUSE_CODE |
 | Enrollment | ENROLLMENT | ENR_START_DATE, ENR_END_DATE, ENR_BASIS |
 
-**SQL conventions for CDW protocols:**
-- Write T-SQL (MS SQL Server syntax) — use DATEADD, DATEDIFF, temp tables (#)
-- All tables must be fully qualified as `CDW.dbo.TABLE_NAME` (e.g., `CDW.dbo.PRESCRIBING`,
-  `CDW.dbo.DIAGNOSIS`, `CDW.dbo.ENCOUNTER`). Do NOT use bare `dbo.TABLE_NAME`.
-- PATID is the universal patient key (varchar)
-- ENCOUNTERID links encounters across tables
-- **Date quality — ALWAYS bound your study period explicitly.** The CDW contains
-  junk dates ranging from 1820 to 3019 due to EHR default values, data entry
-  errors, and placeholder dates. Key facts from `CDW_data_profile.md`:
-  - Year 1900 has ~40K patients — this is a default/unknown date, not real data.
-  - Pre-2000 data is sparse and unreliable (single-digit to low-hundreds volumes).
-  - Realistic clinical data begins around **2000** and reaches full volume ~**2005**.
-  - Future dates (2027+) include some scheduled appointments but mostly errors.
-  - **Every query that uses a date column** (ADMIT_DATE, PX_DATE, RX_ORDER_DATE,
-    RESULT_DATE, etc.) MUST include an explicit date range filter:
-    ```sql
-    WHERE e.ADMIT_DATE BETWEEN '2005-01-01' AND GETDATE()
-    ```
-  - Choose the study start date based on when data volume is sufficient for
-    your question. Check `CDW_data_profile.md` Section 2 for year-by-year
-    patient volumes.
-  - For the study period boundary, document your choice in the protocol and
-    justify it based on the data profile. Key data eras:
-    - **AllScripts era:** through ~2019-2020 (all data before Epic go-live)
-    - **Epic go-live:** ~2019-2020 (legacy encounter volume drops sharply after 2021)
-    - **Post-ICD-10 only:** 2016+ (ICD-10 transition was Oct 2015, separate from Epic)
-    - **Post-Epic + post-ICD-10:** ~2020+
-    Example: "Study period begins 2020 to ensure post-Epic, post-ICD-10
-    data" or "Study period begins 2016 for post-ICD-10 coverage, but note
-    this is still AllScripts-era data requiring legacy encounter filtering."
-- Use ICD-10 codes (DX_TYPE = '10') unless the study period requires ICD-9.
-  **Check `CDW_data_profile.md` Section 4** to see which years have ICD-9 vs
-  ICD-10 data in this CDW. If your lookback window extends before the ICD-10
-  transition (typically October 2015), you MUST include ICD-9 codes as well
-  (DX_TYPE = '09') or you will miss diagnoses from the earlier period
-- **Legacy encounters — DUPLICATE RECORD HAZARD (AllScripts → Epic migration):**
-  This CDW contains data from two EHR eras. When the institution transitioned
-  from AllScripts to Epic, some AllScripts records were imported into Epic.
-  Epic then re-fed those records into the CDW, creating **duplicates** of the
-  original AllScripts records. These duplicates are flagged as
-  `RAW_ENC_TYPE = 'Legacy Encounter'` in the ENCOUNTER table.
-  **Check `CDW_data_profile.md` Section 3** for the full breakdown.
-  - **Default: ALWAYS filter out legacy encounters** to avoid double-counting.
-    Add this condition to every ENCOUNTER join:
-    ```sql
-    AND e.RAW_ENC_TYPE <> 'Legacy Encounter'
-    ```
-  - **Exception — comorbidity lookback only:** You may KEEP legacy encounters
-    when building a binary "any prior diagnosis" indicator where double-counting
-    is harmless (e.g., `EXISTS (SELECT 1 FROM DIAGNOSIS WHERE DX LIKE 'I48%')`).
-    Even then, prefer filtering them out for consistency.
-  - **The `CDW_Source` column** on many tables indicates which feed produced
-    the record (e.g., 'GECBI' for Epic). Use this for additional verification
-    when needed, but `RAW_ENC_TYPE` on ENCOUNTER is the primary filter.
-  - **Always document your choice** in the protocol's "Emulation Using
-    Observational Data" section. State whether legacy encounters are included
-    or excluded and cite the data profile.
-- **Clinical code validation — MANDATORY for all code lists.** You have access
-  to MCP tools for looking up and validating clinical codes. **Every medication,
-  diagnosis, lab, and procedure code list in a protocol MUST be validated using
-  these tools before the protocol is finalized.** Incomplete code lists silently
-  exclude patients and bias results.
+PATID is the universal patient key (varchar). ENCOUNTERID links encounters
+across tables. Always verify column names against the actual schema dump via
+`get_schema(id)`, as local extensions may add or rename columns.
 
-  **RxNorm (medications — `mcp__rxnorm__*` tools):**
-  - For EVERY drug in the protocol, call `get_rxcuis_for_drug(ingredient, strength, dose_form)`
-    to get the COMPLETE set of SCD + SBD RXCUIs. Never manually curate a partial list.
-  - Include both SCD (generic) and SBD (branded) forms. EHRs record branded entries
-    (e.g., "Ecotrin" for aspirin, "Hemady" for dexamethasone 20mg, "Velcade" for bortezomib).
-  - For drug class queries (e.g., "all DOACs"), call `get_drug_class_members()`.
-  - Before finalizing, call `validate_rxcui_list()` on every RXCUI list in the SQL.
-  - Common pitfall: using ingredient-level CUIs (e.g., '11289' for warfarin). PCORnet
-    PRESCRIBING stores SCD/SBD-level CUIs — ingredient CUIs will match NOTHING.
+## Clinical Code Validation (MANDATORY)
 
-  **ICD-10-CM (diagnoses — `mcp__clinical_codes__search_icd10`, `get_icd10_hierarchy`):**
-  - For EVERY diagnosis in the protocol, call `get_icd10_hierarchy(code_prefix)` to
-    see all subcodes. A DX LIKE 'I82.4%' pattern is fine only if you've verified
-    what codes live underneath it.
-  - For condition searches, call `search_icd10(condition_name)` to catch codes you
-    might not know about (e.g., I82.A–C for axillary/subclavian/jugular DVT).
+You have access to MCP tools for looking up and validating clinical codes.
+**Every medication, diagnosis, lab, and procedure code list in a protocol
+MUST be validated using these tools before the protocol is finalized.**
 
-  **LOINC (labs — `mcp__clinical_codes__search_loinc`, `find_related_loincs`):**
-  - For EVERY lab test, call `search_loinc(test_name)` and then `find_related_loincs()`
-    on your primary LOINC to see all related codes for the same analyte.
-  - EHRs may use different LOINCs for serum vs plasma, calculated vs measured, etc.
-    Include all relevant variants.
+- **RxNorm** (`mcp__rxnorm__*`): Call `get_rxcuis_for_drug()` for COMPLETE
+  SCD + SBD sets. Include branded forms. Call `validate_rxcui_list()` before
+  finalizing.
+- **ICD-10-CM** (`mcp__clinical_codes__search_icd10`, `get_icd10_hierarchy`):
+  Verify all subcodes under a pattern.
+- **LOINC** (`mcp__clinical_codes__search_loinc`, `find_related_loincs`):
+  Find all related codes for the same analyte.
+- **HCPCS** (`mcp__clinical_codes__search_hcpcs`): Look up J-codes for
+  parenteral drugs. Multi-source detection required for injectables.
 
-  **HCPCS (procedures — `mcp__clinical_codes__search_hcpcs`):**
-  - For parenteral drugs (IV/SC), ALWAYS look up the corresponding J-codes using
-    `search_hcpcs(drug_name)`. Injectable drugs often appear in PROCEDURES rather
-    than PRESCRIBING. Multi-source detection (PRESCRIBING + PROCEDURES + MED_ADMIN)
-    is required for any parenteral agent.
+## R Code Best Practices
 
-- Medications: use RXNORM_CUI in PRESCRIBING, NDC in DISPENSING
-- Labs: use LOINC codes in LAB_RESULT_CM
-- Build temp tables step by step: #eligible → #treatment → #outcomes → #analytic_cohort
-- Always include a grace period around time zero for treatment assignment
-- The R script should use DBI + odbc to connect and execute the SQL
-- **Column name case:** SQL Server returns column names in unpredictable case.
-  Always call `names(cohort) <- tolower(names(cohort))` immediately after
-  `dbGetQuery()`. Then use **lowercase column names everywhere** in R code
-  (e.g., `sex` not `SEX`, `birth_date` not `BIRTH_DATE`). SQL aliases in
-  your SELECT statements can be lowercase to keep things consistent.
+These practices apply to ALL protocols regardless of the target database:
 
-### CONSORT Flow Diagram (required for all protocols)
+### CONSORT Flow Diagram (required)
 
-Every protocol **must** include a CONSORT-style flow diagram showing patient
-attrition at each step of the cohort-building pipeline. This is critical for
-debugging empty cohorts and for transparency in reporting.
+Every protocol must include a CONSORT-style flow diagram showing patient
+attrition at each cohort-building step. Include both `print_consort_table()`
+(text) and `render_consort_diagram()` (grid graphics). The CDW analysis
+template (`analysis_plan_template_cdw.R`) has reference implementations.
 
-**Implementation pattern:**
+### Propensity Score Formula
 
-1. After each `dbExecute()` step, count the rows in the resulting temp table
-   using `SELECT COUNT(*) AS n FROM #table_name`.
-2. For complex eligibility steps with sub-steps (e.g., `#first_doac` →
-   `#af_patients` → `#eligible`), store counts in a `#consort_counts` temp
-   table inside the SQL batch itself (see `protocol_01_analysis.qmd` for an
-   example).
-3. Attach the counts to the cohort as an attribute:
-   `attr(cohort, "consort") <- consort`
-4. Include two functions:
-   - `print_consort_table(consort)` — prints a text table to the console
-   - `render_consort_diagram(consort, output_path)` — draws a visual flow
-     diagram using `grid` graphics (no extra packages needed)
-5. Call both in `main()` immediately after `pull_analytic_cohort()`.
-
-The CDW analysis template (`analysis_plan_template_cdw.R`) already includes
-these functions. Adapt the step labels and exclusion reasons to match your
-protocol's specific cohort-building logic.
-
-### ODBC Multi-Statement Batching (critical)
-
-**NEVER combine `SELECT ... INTO #temp_table` and `SELECT * FROM #temp_table`
-in the same SQL batch passed to `dbGetQuery()`.** Some ODBC drivers return the
-row-affected count from the `SELECT INTO` instead of the actual query result,
-giving you a 0-row data frame with wrong/missing columns.
-
-Instead, split them:
-
-```r
-# Step 1: Create the temp table (no result set needed)
-dbExecute(con, sql_that_creates_analytic_cohort)
-
-# Step 2: Pull the data in a separate call
-cohort <- dbGetQuery(con, "SELECT * FROM #analytic_cohort")
-```
-
-This applies to the confounders step and any other step where you need data
-back in R. Steps that only create temp tables (eligibility, treatment, outcomes)
-should always use `dbExecute()`.
-
-### E-value Sensitivity Analysis
-
-When using `evalues.HR()` from the EValue package, you **must** specify the
-`rare` argument: `evalues.HR(hr, lo = ci_lo, hi = ci_hi, rare = TRUE)`.
-Set `rare = TRUE` when the outcome incidence is below ~15% within the
-follow-up window (typical for most TTE outcomes like stroke, bleeding,
-mortality). Set `rare = FALSE` otherwise. Omitting `rare` causes a runtime
-error.
-
-### Preventing Row Duplication in Confounder JOINs
-
-When building `#analytic_cohort` from `#outcomes` with LEFT JOINs to vitals,
-labs, and enrollment, you **must guarantee exactly 1 row per patient** from
-every joined subquery. Otherwise a patient with 2 vital records on the same
-date (or 2 overlapping enrollment spans, or 2 lab results on the same date)
-will duplicate rows via Cartesian product — turning 128 patients into 500+.
-
-**Always use `ROW_NUMBER() OVER (PARTITION BY PATID ORDER BY ... DESC)` and
-filter to `rn = 1`** in every subquery that returns patient-level data:
-
-```sql
-LEFT JOIN (
-  SELECT PATID, RESULT_NUM FROM (
-    SELECT l.PATID, l.RESULT_NUM,
-           ROW_NUMBER() OVER (PARTITION BY l.PATID ORDER BY l.RESULT_DATE DESC) AS rn
-    FROM CDW.dbo.LAB_RESULT_CM l
-    INNER JOIN #outcomes o4 ON l.PATID = o4.PATID
-    WHERE l.LAB_LOINC IN ('48642-3','62238-1')
-      AND l.RESULT_NUM IS NOT NULL
-      AND l.RESULT_DATE <= DATEADD(day, 7, o4.index_date)
-      AND l.RESULT_DATE >= DATEADD(day, -180, o4.index_date)
-  ) ranked WHERE rn = 1
-) lab_egfr ON o.PATID = lab_egfr.PATID
-```
-
-Do NOT use `MAX(date)` + self-join — that pattern returns duplicates when
-multiple records share the same max date. The medication subqueries are safe
-because they use `SELECT DISTINCT PATID`, and the comorbidity subquery is
-safe because it uses `GROUP BY PATID` with `MAX(CASE ...)`.
-
-**This applies to ALL JOINs, not just confounders.** In particular:
-
-- The **DEATH table** (`CDW.dbo.DEATH`) can have multiple records per patient.
-  Always wrap it in a `ROW_NUMBER()` subquery:
-  ```sql
-  LEFT JOIN (
-    SELECT d.PATID, d.DEATH_DATE,
-           ROW_NUMBER() OVER (PARTITION BY d.PATID ORDER BY d.DEATH_DATE) AS rn
-    FROM CDW.dbo.DEATH d
-  ) death ON t.PATID = death.PATID AND death.rn = 1
-  ```
-- The **`count_temp()` helper** must use `COUNT(DISTINCT PATID)`, not
-  `COUNT(*)`, so that any accidental duplication is invisible to the CONSORT.
-
-### Column Naming in R
-
-After `names(cohort) <- tolower(names(cohort))`, raw columns from SQL like
-`SEX`, `RACE`, `HISPANIC` become `sex`, `race`, `hispanic`. When creating
-derived factor variables in `mutate()`, use a **different name** to avoid
-overwriting the source column before it's fully evaluated:
-
-```r
-mutate(
-  sex_cat = factor(sex, levels = c("F", "M"), labels = c("Female", "Male")),
-  race_cat = case_when(race == "03" ~ "Black", ...),
-  hispanic_cat = factor(if_else(hispanic == "Y", "Hispanic", "Non-Hispanic"))
-)
-```
-
-Then use `sex_cat`, `race_cat`, `hispanic_cat` in the propensity score formula,
-subgroup filters, and Table 1 summaries.
-
-### Handling Single-Level Factors in Propensity Score Models
-
-With small or specific cohorts, some factor variables may have only one level
-(e.g., all patients are the same race, or all smoking statuses are "Unknown").
-`weightit()` / `bal.tab()` will error with "contrasts can only be applied to
-factors with 2 or more levels."
-
-**Always build the PS formula dynamically** by inspecting the data and dropping
-single-level factors and zero-variance numeric columns before fitting:
-
-```r
-build_ps_formula <- function(confounders, cohort) {
-  keep <- character()
-  for (v in confounders) {
-    col <- cohort[[v]]
-    if (is.factor(col) || is.character(col)) {
-      if (length(unique(na.omit(col))) < 2) next
-    } else {
-      if (sd(col, na.rm = TRUE) == 0 || all(is.na(col))) next
-    }
-    keep <- c(keep, v)
-  }
-  as.formula(paste("treatment ~", paste(keep, collapse = " + ")))
-}
-```
-
-Pass the `confounders` vector (not a pre-built formula) to `run_ipw_analysis`,
-`run_subgroup_analyses`, and `run_sensitivity` so each can rebuild the formula
-for its specific data subset. Subgroups are especially prone to losing factor
-levels.
-
-### Quarto Inline Rendering (no png files)
-
-**Never use `png()` / `dev.off()` in protocol code.** All plots must render
-inline in the Quarto HTML output. This means:
-
-1. **Functions that create plots** (e.g., `render_consort_diagram`,
-   `run_ipw_analysis`) should either draw directly to the active device or
-   store `ggplot` objects in the return list (e.g., `results$plots$love`,
-   `results$plots$km_stroke`).
-
-2. **`main()` returns everything** — results, consort, plots — but does NOT
-   write any files. Example:
-   ```r
-   return(list(results = results, consort = consort))
-   # where results$plots contains named ggplot objects
-   ```
-
-3. **Separate Quarto figure chunks** after `main()` render each plot:
-   ````
-   ```{r}
-   #| label: fig-consort
-   #| fig-cap: "CONSORT flow diagram showing patient attrition."
-   #| fig-width: 10
-   #| fig-height: 12
-   render_consort_diagram(all_results$consort)
-   ```
-
-   ```{r}
-   #| label: fig-love-plot
-   #| fig-cap: "Absolute standardized mean differences before and after IPW."
-   #| fig-width: 10
-   #| fig-height: 8
-   print(all_results$results$plots$love)
-   ```
-   ````
-
-4. **Grid-based plots** (like the CONSORT diagram) just draw directly —
-   Quarto captures the active device. **ggplot objects** should be stored
-   and then `print()`ed in the figure chunk.
-
-5. **Do NOT define `output_dir`** or use `file.path()` for plot output.
-   There should be zero `.png` file paths anywhere in the protocol code.
+Build the PS formula dynamically by inspecting the data and dropping
+single-level factors and zero-variance columns before fitting. Small or
+specific cohorts often have single-level factors that crash `weightit()`.
 
 ### Empty Cohort Guard
 
-`main()` must render the CONSORT diagram and bail out **before** calling
-`prepare_cohort()` when the cohort has 0 rows. Otherwise R will error on
-missing columns. Pattern:
-
+After pulling the analytic cohort, guard against 0 rows before proceeding:
 ```r
 if (nrow(cohort) == 0) {
   message("*** STOPPING: Analytic cohort has 0 patients. ***")
-  message("Review the CONSORT diagram to identify where patients were lost.")
-  return(list(results = NULL, consort = consort))
+  knitr::knit_exit()
 }
 ```
 
 ### Treatment Arms Guard
 
-Before calling `weightit()`, always verify the treatment variable has at least
-2 unique values. Small cohorts or aggressive eligibility criteria can eliminate
-an entire arm. Pattern:
+Before `weightit()`, verify the treatment variable has >= 2 values.
 
-```r
-n_arms <- length(unique(cohort$treatment))
-if (n_arms < 2) {
-  stop(sprintf("Cannot run IPW: treatment has only %d unique value(s).", n_arms),
-       call. = FALSE)
-}
-```
+### Quarto Layout
 
-For **sensitivity analyses** that trim the PS distribution, the same check
-applies to the trimmed cohort. Use a warning + `return(NULL)` instead of
-`stop()` so the rest of the analysis can still complete:
+Use a two-part `.qmd` layout:
+- **Part 1 (function definitions):** No visible output.
+- **Part 2 (execution sections):** Each section calls its function and
+  displays results inline.
 
-```r
-if (length(unique(cohort_trimmed$treatment)) < 2) {
-  message("WARNING: After PS trimming, only 1 arm remains. Skipping trimmed analysis.")
-  return(NULL)
-}
-```
+No monolithic `main()`. No `eval: false` chunks. All plots render inline
+via Quarto figure chunks — never use `png()`/`dev.off()`.
 
-### Quarto Document Structure
+### E-value Sensitivity Analysis
 
-The `.qmd` file must follow a **two-part layout**:
-
-**Part 1 — Function definitions** (sections 0–8):
-Define all helper functions and SQL builders. These chunks execute to register
-the functions but produce no visible output. Keep `build_cohort_sql()` in a
-single chunk (variables defined in one chunk are not in scope in another).
-
-**Part 2 — Execution & results** (sections 9+):
-Each section calls its function and displays results **inline**. This means:
-
-- Section 9: Connect, pull cohort, render CONSORT (text + diagram) inline.
-  Include an empty-cohort guard with `knitr::knit_exit()`.
-- Section 10: Prepare data, show Table 1 inline with `knitr::kable()`.
-- Section 11: Run IPW, show love plot and PS distribution inline.
-- Section 12: Show Cox model summaries and KM curves inline.
-- Section 13: Run subgroup analyses, show table inline.
-- Section 14: Run sensitivity analyses, show E-values and trimmed results inline.
-- Section 15: Show summary.
-
-**Do NOT use a monolithic `main()` function.** The old pattern of wrapping
-everything in `main()`, setting `eval: false`, and appending figure chunks at
-the end produces a document where all results are clumped at the bottom and
-the figure chunks fail because `main()` never ran.
-
-Instead, each section should have its own execution chunk that runs the
-relevant function and stores the result in a top-level variable (e.g.,
-`ipw_results`, `subgroup_results`), followed immediately by figure/table
-chunks that display those results.
-
-The global YAML should use `execute: eval: true` and no individual chunks
-should set `eval: false` (unless truly optional/placeholder code).
+When using `evalues.HR()`, specify the `rare` argument (`TRUE` when outcome
+incidence < ~15%). Omitting it causes a runtime error.
