@@ -153,6 +153,27 @@ MIMIC-IV and NHANES. No database connection required.
 
 Results appear in `results/atrial_fibrillation/`.
 
+## Quick Start (NHANES)
+
+To run against NHANES (National Health and Nutrition Examination Survey)
+data via the `nhanesA` R package:
+
+```bash
+# Install R packages (one-time)
+Rscript -e 'install.packages(c("nhanesA", "duckdb", "survey", "DBI"))'
+
+# Run
+./run.sh "type 2 diabetes" --db-config databases/nhanes.yaml
+```
+
+In online mode, agents lazy-load NHANES tables from the CDC website into an
+in-memory DuckDB database and can query them via SQL. Results appear in
+`results/type_2_diabetes/`.
+
+NHANES is cross-sectional, so the strongest target trial emulation designs
+use the linked mortality file for prospective follow-up. See
+`databases/conventions/nhanes_conventions.md` for full design constraints.
+
 ## Quick Start (Synthetic Test Database)
 
 To run against the bundled synthetic PCORnet database (requires R and the
@@ -307,6 +328,7 @@ Examples:
   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --db-mode offline
   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --resume-reports
   ./run.sh "type 2 diabetes" --db-config databases/my_db.yaml 75
+  ./run.sh "type 2 diabetes" --db-config databases/nhanes.yaml
 ```
 
 ## File Structure
@@ -324,6 +346,7 @@ AutoTTE/
 ├── analysis_plan_template.R           # R template for public datasets
 ├── analysis_plan_template_cdw.R       # R template for DB-targeted protocols
 ├── databases/
+│   ├── nhanes.yaml                    # Config: NHANES via nhanesA + DuckDB
 │   ├── secure_pcornet_cdw.yaml        # Config: institutional PCORnet CDW
 │   ├── synthetic_pcornet.yaml         # Config: synthetic DuckDB for testing
 │   ├── schemas/                       # Schema dumps (auto-generated or manual)
