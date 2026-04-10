@@ -151,9 +151,45 @@ If a database was configured in your initial prompt:
 - **Worker reads:** WORKER.md + feasibility results from Phase 2
 - **Worker produces:** `protocols/protocol_NN.md`, `protocols/protocol_NN_analysis.R`
 
+### Phase 4: Execution & Reporting
+
+**Online mode:**
+1. For each approved protocol with a `protocol_NN_analysis.R` file:
+   a. Launch an execution worker that runs the R script via `execute_r()`.
+   b. The worker executes the full script and verifies that
+      `protocol_NN_results.json` was created in the protocols/ directory.
+   c. If execution fails, the worker debugs and retries (max 2 attempts).
+2. For each protocol with a `protocol_NN_results.json` file:
+   a. Launch a report-writing worker.
+   b. Tell the worker to read `REPORT_WRITER.md` for instructions.
+   c. Provide the worker these input files:
+      - `protocols/protocol_NN.md`
+      - `protocols/protocol_NN_results.json`
+      - `01_literature_scan.md`
+      - `02_evidence_gaps.md`
+   d. The worker writes `protocols/protocol_NN_report.md`.
+   e. Report-writing workers need only `Read,Write,Edit` tools.
+
+**Offline mode:**
+1. Write `{results_dir}/NEXT_STEPS.md` with instructions for the user:
+   - List all protocol analysis scripts that need to be run
+   - Explain that each script saves a `_results.json` file
+   - Tell the user to copy the results files back and re-run with
+     `--resume-reports`
+2. Set `current_phase` to `"awaiting_results"` in agent_state.json.
+3. Log this in coordinator_log.md and stop the pipeline.
+
+**Resume mode (--resume-reports):**
+When the coordinator prompt says "Resume mode: REPORTS_ONLY":
+1. Skip Phases 0-3.
+2. Check for `protocol_NN_results.json` files in the protocols/ directory.
+3. For each results file found, launch a report-writing worker.
+4. If some protocols have no results file, log a warning and skip them.
+5. Then proceed to the Executive Summary phase.
+
 ### Final: Executive Summary
 - **Goal:** Synthesize everything into a summary document
-- **Worker reads:** All results files
+- **Worker reads:** All results files, including per-protocol reports if available
 - **Worker produces:** `summary.md`
 
 ## Your Decision-Making Process
@@ -294,6 +330,23 @@ consider it a credible starting point.
 - No mention of time zero or immortal time bias
 - Review is generic rather than specific to the protocol
 
+### Report Acceptance Criteria
+- [ ] All numeric values in the report match the results JSON exactly
+- [ ] CONSORT table is present and complete
+- [ ] Baseline characteristics table includes both treatment arms
+- [ ] Effect estimate is stated with CI and p-value
+- [ ] E-value sensitivity analysis is interpreted (if present in results)
+- [ ] Clinical interpretation is consistent with the effect direction
+- [ ] Limitations section exists and is substantive
+- [ ] At least 3 literature citations are included with PMIDs
+- [ ] Synthetic data caveat is present (if applicable)
+
+**Red flags requiring revision:**
+- Numbers in report don't match the results JSON
+- Claims of statistical significance when p > 0.05
+- Missing CONSORT or baseline characteristics table
+- No limitations section
+
 ## Guardrails
 
 - **Max 3 revision cycles per phase.** If work isn't acceptable after 3
@@ -320,7 +373,7 @@ Maintain `{results_dir}/agent_state.json` with:
 {
   "therapeutic_area": "...",
   "database": {"id": "...", "name": "...", "cdm": "...", "engine": "...", "mode": "online|offline"},
-  "current_phase": "discovery|feasibility|protocol|summary|done",
+  "current_phase": "discovery|feasibility|protocol|execution|reporting|awaiting_results|summary|done",
   "revision_counts": {"discovery": 0, "feasibility": 0, "protocol": 0},
   "backtrack_count": 0,
   "total_sub_agents_launched": 0,
