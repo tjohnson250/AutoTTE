@@ -3,3 +3,10 @@ results/*
 __pycache__/
 *.pyc
 .DS_Store
+databases/schemas/
+databases/profiles/
+databases/conventions/
+.mcp-session.json
+!databases/schemas/secure_pcornet_cdw_schema.txt
+!databases/schemas/secure_pcornet_cdw_mpi_schema.txt
+!databases/profiles/secure_pcornet_cdw_profile.md
