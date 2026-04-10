@@ -1,9 +1,24 @@
-NHANES Schema Reference — 2017-2018 Cycle (suffix _J)
-======================================================
+NHANES Schema Reference — 2013-2018 (3 cycles pooled by default)
+=================================================================
 
 Join key for all tables: SEQN (Respondent Sequence Number, INTEGER)
 Load via nhanesA: nhanes('TABLE_NAME')
 Full codebook: nhanesCodebook('TABLE_NAME')
+
+RECOMMENDED: Pool 3 cycles (2013-2014 + 2015-2016 + 2017-2018) for
+~28,000 examined participants. Divide 2-year weights by 3.
+
+Cycle suffixes (append to base table name):
+  _H = 2013-2014    e.g. DEMO_H, GHB_H, BMX_H
+  _I = 2015-2016    e.g. DEMO_I, GHB_I, BMX_I
+  _J = 2017-2018    e.g. DEMO_J, GHB_J, BMX_J
+  _P = 2017-Mar 2020 (pre-pandemic, overlaps _J — do NOT pool with _J)
+
+Tables below are shown with _J suffix. Replace _J with _H or _I to load
+other cycles. Column names are the same across these three cycles EXCEPT:
+  - Blood pressure: 2013-2016 uses BPX_H/BPX_I (auscultatory protocol),
+    2017-2018 uses BPXO_J (oscillometric). Variable names differ.
+    Cannot directly pool BP readings across this boundary.
 
 Note: This lists KEY variables per component. Each table has additional
 variables not listed here. Use nhanesCodebook() for the complete listing.

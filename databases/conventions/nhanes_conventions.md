@@ -130,39 +130,72 @@ df <- df |>
 Do NOT blindly recode all 77s and 99s — some variables legitimately have these
 values (e.g., lab results, continuous measures). Always check the codebook.
 
-## Cycle Combining
+## Multi-Cycle Pooling (DEFAULT)
 
-When pooling multiple 2-year cycles:
+**CRITICAL: Pool 3 cycles (2013-2014 + 2015-2016 + 2017-2018) by default.**
+A single NHANES cycle (~8,700 examined participants) is too small for most
+target trial emulation analyses, especially those with mortality outcomes.
+Pooling triples the sample size (~28,000) and, for mortality analyses, provides
+longer follow-up from earlier cycles (up to 6 years for 2013-2014 vs 2 years
+for 2017-2018).
 
-1. **Adjust weights:** Divide 2-year weights by the number of cycles pooled.
+**Only use a single cycle when:**
+- The research question is specifically about a single time period
+- A variable of interest is only available in one cycle
+- Blood pressure is the primary exposure or outcome (protocol changed in 2017-2018)
+
+### How to Pool
+
+1. **Load all three cycles and bind:**
 
 ```r
-# Two cycles (e.g., 2015-2016 + 2017-2018)
-combined$WTMEC4YR <- combined$WTMEC2YR / 2
-
-# Three cycles
-combined$WTMEC6YR <- combined$WTMEC2YR / 3
-```
-
-2. **Harmonize variable names:** Suffixes change per cycle. Strip or standardize.
-
-```r
-# Load and rename
+# Load each cycle
+demo_h <- nhanes("DEMO_H") |> mutate(cycle = "2013-2014")
 demo_i <- nhanes("DEMO_I") |> mutate(cycle = "2015-2016")
 demo_j <- nhanes("DEMO_J") |> mutate(cycle = "2017-2018")
-combined <- bind_rows(demo_i, demo_j)
+combined <- bind_rows(demo_h, demo_i, demo_j)
+
+# Repeat for each component table (GHB_H/I/J, BMX_H/I/J, etc.)
 ```
 
-3. **Check for variable changes:** Some variables are added, removed, or recoded
-   between cycles. Use `nhanesCodebook()` to compare. Common changes:
-   - Blood pressure protocol changed from auscultatory to oscillometric in
-     2017-2018 (BPX → BPXO). Cannot directly combine BP readings across this
-     boundary.
-   - Race variable RIDRETH3 (with NH Asian category) available from 2011-2012+.
-     Earlier cycles only have RIDRETH1.
+2. **Adjust weights:** Divide 2-year weights by the number of cycles pooled.
 
-4. **Use single-cycle data by default.** Only combine cycles when sample size
-   is insufficient for the research question.
+```r
+# 3-cycle pooling (REQUIRED)
+combined$WTMEC6YR <- combined$WTMEC2YR / 3
+combined$WTSAF6YR <- combined$WTSAF2YR / 3  # for fasting subsample
+
+# Use the adjusted weight in svydesign()
+des <- svydesign(
+  ids = ~SDMVPSU, strata = ~SDMVSTRA,
+  weights = ~WTMEC6YR, nest = TRUE, data = combined
+)
+```
+
+3. **Table name pattern:** Replace the suffix to load other cycles:
+   - `_H` = 2013-2014, `_I` = 2015-2016, `_J` = 2017-2018
+   - Example: `GHB_H`, `GHB_I`, `GHB_J` all have the same columns
+
+4. **SEQN is unique within a cycle but NOT across cycles.** When pooling,
+   create a composite key or add a cycle column to disambiguate.
+
+### Known Cross-Cycle Differences
+
+- **Blood pressure:** 2013-2016 uses BPX_H/BPX_I (auscultatory protocol with
+  variables BPXSY1-4, BPXDI1-4). 2017-2018 uses BPXO_J (oscillometric with
+  BPXOSY1-3, BPXODI1-3). Cannot directly pool BP readings across this boundary.
+  For hypertension studies, either use 2013-2016 only (auscultatory) or
+  2017-2018 only (oscillometric), or use self-reported hypertension (BPQ_H/I/J)
+  which is consistent across cycles.
+- **Race variable:** RIDRETH3 (with NH Asian category) available in all three
+  cycles (2013-2018). Earlier cycles (pre-2011) only have RIDRETH1.
+- **Some questionnaire items** are added or removed between cycles. Use
+  `nhanesCodebook()` to verify variable availability per cycle.
+
+### Do NOT Pool with _P
+
+The pre-pandemic cycle (_P, 2017-March 2020) overlaps with _J (2017-2018).
+Never pool _P with _J — this would double-count participants.
 
 ## Fasting Subsample
 
@@ -269,37 +302,40 @@ analytic <- demo |>
 
 ## R Code Patterns
 
-### Standard Analysis Setup
+### Standard Analysis Setup (3-Cycle Pooled)
 
 ```r
 library(nhanesA)
 library(survey)
 library(tidyverse)
 
-# 1. Load and merge tables
-load_nhanes("DEMO_J")
-load_nhanes("GHB_J")
-load_nhanes("BMX_J")
-load_nhanes("BPQ_J")
-load_nhanes("DIQ_J")
+# 1. Load and pool 3 cycles for each component
+load_3cycles <- function(base_name) {
+  suffixes <- c("_H", "_I", "_J")
+  cycles   <- c("2013-2014", "2015-2016", "2017-2018")
+  map2_dfr(suffixes, cycles, function(s, c) {
+    nhanes(paste0(base_name, s)) |> mutate(cycle = c)
+  })
+}
 
-analytic <- query_db("
-  SELECT d.SEQN, d.RIAGENDR, d.RIDAGEYR, d.RIDRETH3,
-         d.DMDEDUC2, d.INDFMPIR,
-         d.WTMEC2YR, d.SDMVSTRA, d.SDMVPSU,
-         g.LBXGH,
-         b.BMXBMI,
-         bpq.BPQ020, bpq.BPQ040A,
-         diq.DIQ010
-  FROM DEMO_J d
-  LEFT JOIN GHB_J g ON d.SEQN = g.SEQN
-  LEFT JOIN BMX_J b ON d.SEQN = b.SEQN
-  LEFT JOIN BPQ_J bpq ON d.SEQN = bpq.SEQN
-  LEFT JOIN DIQ_J diq ON d.SEQN = diq.SEQN
-  WHERE d.RIDSTATR = 2 AND d.RIDAGEYR >= 18
-")
+demo <- load_3cycles("DEMO") |> filter(RIDSTATR == 2, RIDAGEYR >= 18)
+ghb  <- load_3cycles("GHB")
+bmx  <- load_3cycles("BMX")
+bpq  <- load_3cycles("BPQ")
+diq  <- load_3cycles("DIQ")
 
-# 2. Recode missing data (per codebook)
+# 2. Merge on SEQN + cycle (SEQN is NOT unique across cycles)
+analytic <- demo |>
+  left_join(ghb, by = c("SEQN", "cycle")) |>
+  left_join(bmx, by = c("SEQN", "cycle")) |>
+  left_join(bpq, by = c("SEQN", "cycle")) |>
+  left_join(diq, by = c("SEQN", "cycle"))
+
+# 3. Adjust weights for 3-cycle pooling
+analytic <- analytic |>
+  mutate(WTMEC6YR = WTMEC2YR / 3)
+
+# 4. Recode missing data (per codebook)
 analytic <- analytic |>
   mutate(
     DMDEDUC2 = na_if(DMDEDUC2, 7) |> na_if(9),
@@ -308,13 +344,13 @@ analytic <- analytic |>
     DIQ010   = na_if(DIQ010, 7) |> na_if(9)
   )
 
-# 3. Create survey design
+# 5. Create survey design with pooled weight
 des <- svydesign(
   ids = ~SDMVPSU, strata = ~SDMVSTRA,
-  weights = ~WTMEC2YR, nest = TRUE, data = analytic
+  weights = ~WTMEC6YR, nest = TRUE, data = analytic
 )
 
-# 4. Survey-weighted analysis
+# 6. Survey-weighted analysis
 fit <- svyglm(outcome ~ treatment + RIDAGEYR + factor(RIAGENDR) +
                factor(RIDRETH3) + DMDEDUC2 + INDFMPIR + BMXBMI,
                design = des, family = quasibinomial())
@@ -392,13 +428,16 @@ analytic <- analytic |>
 
 ## Sample Size Considerations
 
-NHANES has ~8,700 examined participants per 2-year cycle. Key implications:
+With 3-cycle pooling (default), NHANES provides ~28,000 examined participants.
+Key implications:
 
-- Subgroup analyses (e.g., NH Asian females age 60+ with diabetes) can quickly
-  drop below meaningful sample sizes
+- Most common exposures and outcomes have adequate sample sizes with 3 cycles
+- Subgroup analyses (e.g., NH Asian females age 60+ with diabetes) can still
+  drop below meaningful sample sizes — check cell counts before proceeding
 - Survey variance estimation requires ≥2 PSUs per stratum. Dropping strata via
   aggressive subsetting can break `svydesign()`
-- For rare exposures/outcomes, consider pooling 2-3 cycles (with weight adjustment)
 - Treatment/control arms in TTE protocols may be imbalanced — check positivity
   before proceeding with propensity score methods
 - Rule of thumb: minimum ~100 participants per treatment arm for weighted analyses
+- For mortality outcomes, 3-cycle pooling is especially important: earlier cycles
+  contribute longer follow-up (up to 6 years) and more events

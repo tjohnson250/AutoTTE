@@ -1,10 +1,18 @@
 # NHANES — Data Profile
 
-Default cycle: 2017-2018 (suffix _J)
+Recommended: Pool 3 cycles (2013-2018) for maximum statistical power.
 Source: CDC National Center for Health Statistics
 Access: Public download via nhanesA R package (no credentials required)
 
 ## 1. Overall Sample Size
+
+**Pooled 3 cycles (2013-2018, RECOMMENDED):**
+- ~29,400 total participants
+- ~28,061 examined (MEC, RIDSTATR == 2)
+- ~13,710 fasting subsample
+- Weight adjustment: WTMEC6YR = WTMEC2YR / 3
+
+**Per cycle:**
 
 | Cycle | Suffix | Total Participants | Examined (MEC) | Fasting Subsample |
 |-------|--------|--------------------|----------------|-------------------|
@@ -14,7 +22,8 @@ Access: Public download via nhanesA R package (no credentials required)
 | 2017-Mar 2020 (pre-pandemic) | _P | ~15,560 | ~14,862 | ~7,080 |
 
 Note: Exact counts vary slightly by component. Use RIDSTATR == 2 to filter
-to participants who completed both interview and MEC examination.
+to participants who completed both interview and MEC examination. Do NOT
+pool _P with _J (overlapping time periods).
 
 ## 2. Age Distribution (2017-2018, RIDSTATR == 2)
 
@@ -131,9 +140,12 @@ Note: Unweighted N reflects oversampling. Weighted % reflects US population.
 
 Available from NCHS Public-Use Linked Mortality Files:
 - Separate download (not in nhanesA): https://www.cdc.gov/nchs/data-linkage/mortality-public.htm
-- For 2017-2018 cycle: follow-up through December 31, 2019
-- ~2-3 year maximum follow-up (short due to recent cycle)
-- Mortality rate: ~2-3% overall (higher in elderly subgroups)
+- Follow-up through December 31, 2019 for all cycles
+- Maximum follow-up by cycle: ~6 years (2013-2014), ~4 years (2015-2016), ~2 years (2017-2018)
+- **Pooled 3-cycle advantage**: Earlier cycles contribute longer follow-up and more
+  mortality events, substantially increasing statistical power for survival analyses
+- Mortality rate: ~2-3% per cycle overall (higher in elderly subgroups); pooling
+  triples the number of events
 - Cause of death available as recode categories (heart disease, cancer, diabetes, etc.)
 - Includes person-months of follow-up for survival analysis (PERMTH_INT, PERMTH_EXM)
 
@@ -145,8 +157,8 @@ Available from NCHS Public-Use Linked Mortality Files:
    changes over time within NHANES.
 3. **Self-reported medications**: 30-day recall, not pharmacy claims. Subject to
    recall bias and underreporting.
-4. **Small sample per cycle**: ~8,700 examined participants limits statistical
-   power for rare exposures or outcomes.
+4. **Small sample per cycle**: ~8,700 examined participants per cycle. Pool
+   3 cycles (~28,000 participants) for adequate power in most analyses.
 5. **Age top-coding**: Ages ≥80 coded as 80. Limits geriatric subgroup analyses.
 6. **No inpatient/claims data**: Cannot identify hospitalizations, procedures, or
    healthcare utilization details beyond self-report.
