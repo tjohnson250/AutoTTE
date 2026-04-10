@@ -111,22 +111,32 @@ npm install -g @anthropic-ai/claude-code
 # Python dependencies for MCP servers
 pip install mcp httpx lxml pyyaml
 
-# API key
+# API key (if using the Anthropic API directly)
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
+> **Using Claude Code with a subscription?** If you have a Claude Pro or Max
+> subscription, Claude Code works without an API key -- just run `claude` and
+> authenticate with your Anthropic account. No `ANTHROPIC_API_KEY` needed.
+> Sub-agents launched via `claude -p` inherit the same subscription billing.
+
 **For online database mode** (agents query a live database):
 
+[R](https://cran.r-project.org/) (≥ 4.1) must be installed and available on
+your `PATH`. Then open an R session and install the required packages:
+
 ```r
-# R with DBI + engine-specific driver
+# Core packages
 install.packages(c("DBI", "jsonlite"))
 
-# Plus the driver for your engine:
+# Plus the driver for your database engine:
 install.packages("duckdb")   # DuckDB
 install.packages("odbc")     # MS SQL Server, PostgreSQL via ODBC
 ```
 
 **For the synthetic test database** (used for development and testing):
+
+Run in R:
 
 ```r
 devtools::install_github("tjohnson250/PCORnet-CDM-Synthetic-DB")
@@ -142,6 +152,19 @@ MIMIC-IV and NHANES. No database connection required.
 ```
 
 Results appear in `results/atrial_fibrillation/`.
+
+## Quick Start (Synthetic Test Database)
+
+To run against the bundled synthetic PCORnet database (requires R and the
+`PCORnetCDMSyntheticDB` package from prerequisites above):
+
+```bash
+./run.sh "atrial fibrillation" --db-config databases/synthetic_pcornet.yaml
+```
+
+This runs in online mode -- agents query the synthetic DuckDB database,
+validate cohort sizes, and execute analysis scripts end-to-end. Results
+appear in `results/atrial_fibrillation/`.
 
 ## Database Mode
 
