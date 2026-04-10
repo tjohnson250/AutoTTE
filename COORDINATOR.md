@@ -117,7 +117,7 @@ If a database was configured in your initial prompt:
 ### Phase 2: Dataset Feasibility
 - **Goal:** Match approved questions to available data
 - **Worker reads:** WORKER.md + approved questions from Phase 1
-- For public datasets: worker uses `query_dataset_registry` / `get_dataset_details`
+- For public datasets: worker uses `list_datasources` / `get_datasource_details`
 - For configured database: worker uses `get_schema(id)`, `get_profile(id)`,
   and `get_conventions(id)` to map protocol elements to specific tables and columns
 - **Worker produces:** `03_feasibility.md`
