@@ -325,3 +325,143 @@ via Quarto figure chunks — never use `png()`/`dev.off()`.
 
 When using `evalues.HR()`, specify the `rare` argument (`TRUE` when outcome
 incidence < ~15%). Omitting it causes a runtime error.
+
+## Self-Contained Analysis Scripts
+
+Every analysis script MUST be runnable standalone with `Rscript protocol_NN_analysis.R`.
+The coordinator provides the database connection code from the DB config — embed it
+directly in the script's setup section.
+
+**Connection preamble pattern:**
+```r
+# ── Database Connection ──
+library(DBI)
+# Connection code from database config:
+[paste the exact connection R code from the coordinator's prompt]
+```
+
+Do NOT leave the connection as a comment like `# con <- dbs$cdw`. The script
+must create a working `con` object when run standalone.
+
+For DuckDB databases, this typically looks like:
+```r
+library(DBI)
+library(duckdb)
+con <- DBI::dbConnect(duckdb::duckdb(), "databases/data/pcornet_cdw.duckdb")
+```
+
+For SQL Server databases:
+```r
+library(DBI)
+library(odbc)
+con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+```
+
+Include `on.exit(DBI::dbDisconnect(con))` after the connection to ensure cleanup.
+
+## Structured Results Output (JSON)
+
+Every analysis script MUST save structured results to `protocol_NN_results.json`
+in the same directory as the script. This file is consumed by the report-writing
+agent to generate per-protocol analysis reports.
+
+**Required:** Add `library(jsonlite)` to the library block.
+
+**Results accumulation pattern:**
+
+Accumulate results throughout execution into a list, then save at the end:
+
+```r
+results <- list(
+  protocol_id = "protocol_01",
+  protocol_title = "...",
+  database = list(id = "...", name = "..."),
+  execution_timestamp = format(Sys.time(), "%Y-%m-%dT%H:%M:%S"),
+  execution_status = "success"
+)
+
+# After CONSORT:
+results$consort <- list(
+  steps = list(
+    list(step = 1, description = "Eligible population", n = nrow(eligible)),
+    list(step = 2, description = "Treatment assigned", n = nrow(treated))
+  ),
+  n_treated = sum(cohort$treatment == 1),
+  n_control = sum(cohort$treatment == 0)
+)
+
+# After baseline table:
+results$baseline_table <- list(
+  variables = lapply(baseline_vars, function(v) {
+    list(name = v, treated_mean = ..., control_mean = ..., smd = ...)
+  })
+)
+
+# After IPW:
+results$balance_diagnostics <- list(
+  pre_weighting_max_smd = max_smd_before,
+  post_weighting_max_smd = max_smd_after,
+  all_below_threshold = max_smd_after < 0.1,
+  threshold = 0.1
+)
+
+# After primary analysis:
+results$primary_analysis <- list(
+  method = "IPW-weighted Cox PH",
+  estimand = "ATE",
+  effect_measure = "HR",
+  point_estimate = exp(coef(model)),
+  ci_lower = exp(confint(model))[1],
+  ci_upper = exp(confint(model))[2],
+  p_value = summary(model)$coefficients[, "Pr(>|z|)"]
+)
+
+# After sensitivity:
+results$sensitivity_analyses <- list(
+  e_value = list(point = e_val$point, ci_bound = e_val$lower)
+)
+
+# After outcome counts:
+results$outcome_summary <- list(
+  total_events = sum(cohort$event),
+  events_treated = sum(cohort$event[cohort$treatment == 1]),
+  events_control = sum(cohort$event[cohort$treatment == 0]),
+  median_followup_days = median(cohort$followup_time)
+)
+```
+
+**Save at the end of the script:**
+
+```r
+# ── Save Results ──
+results_path <- file.path(
+  dirname(if (interactive()) rstudioapi::getActiveDocumentContext()$path else {
+    args <- commandArgs(trailingOnly = FALSE)
+    normalizePath(sub("--file=", "", args[grep("--file=", args)]))
+  }),
+  paste0(results$protocol_id, "_results.json")
+)
+# Fallback: save in current directory
+if (is.na(results_path)) results_path <- paste0(results$protocol_id, "_results.json")
+
+jsonlite::write_json(results, results_path, pretty = TRUE, auto_unbox = TRUE)
+message(sprintf("Results saved to: %s", results_path))
+```
+
+**Error handling:** Wrap the main analysis pipeline in `tryCatch`. On error,
+set `execution_status = "error"`, populate `results$errors`, and still call
+the save function. This ensures partial results are available even on failure.
+
+```r
+tryCatch({
+  # ... main analysis pipeline ...
+  results$execution_status <- "success"
+}, error = function(e) {
+  results$execution_status <<- "error"
+  results$errors <<- list(list(message = conditionMessage(e), call = deparse(conditionCall(e))))
+  message(sprintf("ERROR: %s", conditionMessage(e)))
+})
+
+# Always save, even on error
+jsonlite::write_json(results, results_path, pretty = TRUE, auto_unbox = TRUE)
+```
