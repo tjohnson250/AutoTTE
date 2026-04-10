@@ -159,3 +159,16 @@ def test_public_datasets_present():
     assert "NHANES" in names
     assert "MEPS" in names
     assert "Synthea" in names
+
+
+def test_nhanes_has_schema_profile_conventions():
+    """NHANES public dataset entry must have paths to support files."""
+    nhanes = get_details_by_id("nhanes", list(PUBLIC_DATASETS))
+    assert nhanes is not None
+    assert "schema_dump" in nhanes, "NHANES missing schema_dump path"
+    assert "data_profile" in nhanes, "NHANES missing data_profile path"
+    assert "conventions" in nhanes, "NHANES missing conventions path"
+    # Paths should be non-empty strings
+    assert nhanes["schema_dump"].endswith(".txt")
+    assert nhanes["data_profile"].endswith(".md")
+    assert nhanes["conventions"].endswith(".md")

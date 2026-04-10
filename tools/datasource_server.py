@@ -75,6 +75,9 @@ PUBLIC_DATASETS: list[dict[str, Any]] = [
         "strengths": ["Nationally representative", "Physical exam + lab data", "Mortality follow-up linkage"],
         "limitations": ["Cross-sectional (no longitudinal follow-up except mortality)", "Self-reported medications", "Small sample per cycle"],
         "url": "https://www.cdc.gov/nchs/nhanes/",
+        "schema_dump": "databases/schemas/nhanes_schema.txt",
+        "data_profile": "databases/profiles/nhanes_profile.md",
+        "conventions": "databases/conventions/nhanes_conventions.md",
     },
     {
         "id": "meps",
