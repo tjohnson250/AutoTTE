@@ -1,0 +1,16 @@
+id: "secure_pcornet_cdw"
+name: "Secure PCORnet CDW"
+cdm: "pcornet"
+cdm_version: "6.1"
+engine: "mssql"
+online: false
+
+connection:
+  r_code: |
+    con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+
+schema_prefix: "CDW.dbo"
+schema_dump: "databases/schemas/secure_pcornet_cdw_schema.txt"
+mpi_schema_dump: "databases/schemas/secure_pcornet_cdw_mpi_schema.txt"
+data_profile: "databases/profiles/secure_pcornet_cdw_profile.md"
+conventions: "databases/conventions/secure_pcornet_cdw_conventions.md"
