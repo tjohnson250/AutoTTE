@@ -138,9 +138,12 @@ config['mcpServers']['r_executor'] = {
 with open('.mcp-session.json', 'w') as f:
     json.dump(config, f, indent=2)
 "
+  MCP_CONFIG=".mcp-session.json"
   trap cleanup_session_config EXIT
   echo "Generated .mcp-session.json with r_executor for online mode."
   echo ""
+else
+  MCP_CONFIG=".mcp.json"
 fi
 
 # ---------------------------------------------------------------------------
@@ -193,6 +196,7 @@ cat <<PROMPT | claude -p \
   --verbose \
   --max-turns 200 \
   --output-format stream-json \
+  --mcp-config "$MCP_CONFIG" \
   --allowedTools "$COORDINATOR_TOOLS" \
   2>&1 | python3 tools/stream_viewer.py --label "Coordinator"
 You are the coordinator agent for the Auto-Protocol Designer.
@@ -203,11 +207,13 @@ Your configuration:
 - Therapeutic area: "$THERAPEUTIC_AREA"
 - Results directory: $RESULTS_DIR
 - Max turns per sub-agent: $MAX_TURNS (pass this as --max-turns to sub-agents)
+- MCP config: $MCP_CONFIG (pass this as --mcp-config to sub-agents)
 $DB_CONTEXT
 
 When launching sub-agents, always pipe through stream_viewer.py with a label:
 cat <<'SUBPROMPT' | claude -p --verbose --max-turns \$MAX_TURNS \\
   --output-format stream-json \\
+  --mcp-config $MCP_CONFIG \\
   --allowedTools "$WORKER_TOOLS" \\
   2>&1 | python3 tools/stream_viewer.py --label "Worker"
 [prompt for sub-agent]

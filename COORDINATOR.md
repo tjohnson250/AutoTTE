@@ -24,6 +24,7 @@ files you point it to, not your reasoning.
 echo "──── Launching worker: [description] ────" >&2
 cat <<'PROMPT' | claude -p --verbose --max-turns $MAX_TURNS \
   --output-format stream-json \
+  --mcp-config $MCP_CONFIG \
   --allowedTools "$WORKER_TOOLS" \
   2>&1 | python3 tools/stream_viewer.py --label "Worker"
 [your prompt here]
@@ -31,9 +32,9 @@ PROMPT
 echo "──── Worker complete ────" >&2
 ```
 
-`$WORKER_TOOLS` is set by `run.sh` based on the data source configuration.
-It always includes PubMed, Bash, Read, Write, Edit, WebSearch, and WebFetch.
-When a database is configured, it also includes the datasource MCP tools.
+`$WORKER_TOOLS` and `$MCP_CONFIG` are set by `run.sh` based on the data source
+configuration. `$MCP_CONFIG` points to `.mcp.json` (offline/public) or
+`.mcp-session.json` (online mode, includes r_executor).
 
 ### Reviewer agents (verify the work):
 
@@ -41,6 +42,7 @@ When a database is configured, it also includes the datasource MCP tools.
 echo "──── Launching reviewer: [description] ────" >&2
 cat <<'PROMPT' | claude -p --verbose --max-turns $MAX_TURNS \
   --output-format stream-json \
+  --mcp-config $MCP_CONFIG \
   --allowedTools "$REVIEWER_TOOLS" \
   2>&1 | python3 tools/stream_viewer.py --label "Reviewer"
 [your review prompt here]
@@ -53,11 +55,33 @@ echo "──── Reviewer complete ────" >&2
 **Critical rules for launching sub-agents:**
 - Always use `cat <<'PROMPT'` (with quotes around the delimiter)
   to prevent variable expansion in the sub-agent's prompt.
+- Always include `--mcp-config $MCP_CONFIG` so the sub-agent has access
+  to the MCP servers (PubMed, datasource registry, RxNorm, clinical codes,
+  and r_executor in online mode).
 - Always pipe through `python3 tools/stream_viewer.py --label "Worker"` or
   `--label "Reviewer"` so the user can see real-time progress and tell
   which agent is active.
 - Always print a banner before and after so the user knows which agent
   is running.
+
+### Waiting for sub-agents
+
+The bash command that launches a sub-agent will block until the worker
+finishes OR until the bash tool times out (whichever comes first). Workers
+often take longer than the timeout allows.
+
+**If the bash call returns before the worker finishes:**
+
+1. Check for the expected deliverable files (e.g., `01_literature_scan.md`,
+   `02_evidence_gaps.md`).
+2. If they don't exist yet, wait using longer intervals — NOT `sleep 1`.
+   Use this pattern:
+   ```bash
+   while [ ! -f results/{dir}/expected_file.md ]; do sleep 30; done
+   ```
+3. **Never poll with `sleep 1`** — this wastes your turn budget rapidly.
+   Use `sleep 30` minimum between checks.
+4. Check for ALL expected deliverables before evaluating, not just one.
 
 ## Data Sources
 
