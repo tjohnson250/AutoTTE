@@ -20,6 +20,7 @@ library(survival)     # time-to-event outcomes
 library(sandwich)     # robust SEs
 library(lmtest)       # coeftest with robust SEs
 library(EValue)       # sensitivity analysis
+library(jsonlite)     # JSON export for structured results
 
 
 # ─── 0. Configuration (filled by agent) ─────────────────────────────────────
@@ -41,13 +42,23 @@ config <- list(
 
 
 # ─── 1. Database Connection ─────────────────────────────────────────────────
-# The coordinator passes the exact connection code via the --db-connect flag.
-# Replace this placeholder with the connection code provided at runtime.
-
+# ── Database Connection ──────────────────────────────────────────────
+# Workers: Replace this with the exact connection code from the
+# coordinator's database configuration. The script must create a
+# working `con` object when run standalone with Rscript.
+#
+# Example for DuckDB:
+#   library(duckdb)
+#   con <- DBI::dbConnect(duckdb::duckdb(), "path/to/database.duckdb")
+#
+# Example for SQL Server:
+#   library(odbc)
+#   con <- DBI::dbConnect(odbc::odbc(), "YOUR_DSN")
+#
+# The coordinator will provide the exact connection code.
 connect_cdw <- function() {
-  # {{DB_CONNECT}} — replaced by agent with the connection code from the coordinator
-  # Example: con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
-  stop("DB connection not configured. The agent should replace this with the provided connection code.")
+  # PLACEHOLDER — workers must replace with actual connection code
+  stop("Replace connect_cdw() with the database connection code from the coordinator prompt.")
 }
 
 
@@ -284,6 +295,18 @@ count_temp <- function(con, tbl) {
   # Use COUNT(DISTINCT PATID) — COUNT(*) inflates if any JOIN duplicated rows
   res <- dbGetQuery(con, paste("SELECT COUNT(DISTINCT PATID) AS n FROM", tbl))
   res$n[1]
+}
+
+# ── Save Structured Results ──────────────────────────────────────────
+save_results <- function(results_list, protocol_id, output_dir = ".") {
+  results_list$execution_timestamp <- format(Sys.time(), "%Y-%m-%dT%H:%M:%S")
+  if (is.null(results_list$execution_status)) {
+    results_list$execution_status <- "success"
+  }
+  output_path <- file.path(output_dir, paste0(protocol_id, "_results.json"))
+  jsonlite::write_json(results_list, output_path, pretty = TRUE, auto_unbox = TRUE)
+  message(sprintf("Results saved to: %s", output_path))
+  invisible(output_path)
 }
 
 
@@ -640,8 +663,21 @@ main <- function() {
   run_sensitivity(results, confounders, config)
   message("Analysis complete.")
 
-  # Return all results — plots are stored in results$plots for
+  # ── Save Structured Results ──────────────────────────────────────────
+  # Assemble all results for JSON export
+  results_json <- list(
+    protocol_id = config$protocol_id %||% "protocol_01",
+    protocol_title = config$question,
+    database = list(id = config$db_id %||% "unknown", name = config$db_name %||% "unknown"),
+    consort = consort,
+    # Add baseline_table, balance_diagnostics, primary_analysis,
+    # sensitivity_analyses, outcome_summary as they are computed above
+    warnings = list(),
+    errors = list()
+  )
+  save_results(results_json, results_json$protocol_id)
 
+  # Return all results — plots are stored in results$plots for
   # Quarto figure chunks to render inline (no png()/dev.off()).
   return(list(results = results, consort = consort))
 }
