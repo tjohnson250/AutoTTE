@@ -8,7 +8,10 @@ online: true
 connection:
   r_code: |
     library(pcornet.synthetic)
-    dbs <- load_pcornet_database()
+    dbs <- load_pcornet_database(
+      cdw_path = "databases/data/pcornet_cdw.duckdb",
+      mpi_path = "databases/data/mpi.duckdb"
+    )
     con <- dbs$cdw
 
 schema_prefix: "main"

@@ -6,6 +6,7 @@ __pycache__/
 databases/schemas/
 databases/profiles/
 databases/conventions/
+databases/data/
 .mcp-session.json
 !databases/schemas/secure_pcornet_cdw_schema.txt
 !databases/schemas/secure_pcornet_cdw_mpi_schema.txt
