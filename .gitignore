@@ -10,6 +10,7 @@ databases/data/
 .mcp-session.json
 !databases/schemas/secure_pcornet_cdw_schema.txt
 !databases/schemas/secure_pcornet_cdw_mpi_schema.txt
+!databases/schemas/nhanes_schema.txt
 !databases/profiles/secure_pcornet_cdw_profile.md
 !databases/conventions/secure_pcornet_cdw_conventions.md
 Rplots.pdf
