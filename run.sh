@@ -9,6 +9,7 @@
 #   ./run.sh "atrial fibrillation"
 #   ./run.sh "atrial fibrillation" --db-config databases/synthetic_pcornet.yaml
 #   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --db-mode offline
+#   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --resume-reports
 #   ./run.sh "type 2 diabetes" --db-config databases/my_cdw.yaml 75
 #
 # Prerequisites:
@@ -25,6 +26,7 @@ THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--db-config <path>]
 # Parse optional flags
 DB_CONFIG=""
 DB_MODE=""
+RESUME_REPORTS=false
 MAX_TURNS="50"
 SKIP_NEXT=false
 for i in $(seq 2 $#); do
@@ -43,6 +45,9 @@ for i in $(seq 2 $#); do
       next_i=$((i + 1))
       DB_MODE="${!next_i}"
       SKIP_NEXT=true
+      ;;
+    --resume-reports)
+      RESUME_REPORTS=true
       ;;
     *)
       if [[ "$arg" =~ ^[0-9]+$ ]]; then
@@ -113,6 +118,9 @@ echo " Data sources:     Public datasets only"
 fi
 echo " Max turns/sub-agent: $MAX_TURNS"
 echo " Results: $RESULTS_DIR/"
+if [[ "$RESUME_REPORTS" == "true" ]]; then
+echo " Mode:             RESUME REPORTS (skipping Phases 0-3)"
+fi
 echo "============================================="
 echo ""
 
@@ -161,6 +169,7 @@ fi
 
 WORKER_TOOLS="${BASE_TOOLS},${DATASOURCE_TOOLS},${CODE_TOOLS},${FILE_TOOLS}${R_EXECUTOR_TOOLS}"
 REVIEWER_TOOLS="${BASE_TOOLS},${DATASOURCE_TOOLS},${CODE_TOOLS},${FILE_TOOLS}${R_EXECUTOR_TOOLS}"
+REPORT_WRITER_TOOLS="Read,Write,Edit"
 COORDINATOR_TOOLS="Bash,Read,Write,Edit"
 
 # ---------------------------------------------------------------------------
@@ -221,6 +230,7 @@ SUBPROMPT
 
 Use --label "Worker" for work agents, --label "Reviewer" for review agents.
 Use --allowedTools "$REVIEWER_TOOLS" for reviewers.
+For report-writing workers, use --allowedTools "Read,Write,Edit" (they don't need MCP tools).
 
 Note: Sub-agents have access to PubMed, datasource registry, RxNorm, clinical
 codes, and ICD-10 MCP tools. You (the coordinator) do not need those tools —
@@ -228,4 +238,12 @@ you work through sub-agents.
 
 Begin by reading COORDINATOR.md, then initialize your state files and start
 the pipeline.
+$([ "$RESUME_REPORTS" = "true" ] && echo "
+RESUME MODE: REPORTS ONLY
+Skip Phases 0-3. The protocols and analysis scripts already exist.
+Check for protocol_NN_results.json files in \$RESULTS_DIR/protocols/.
+For each results file found, launch a report-writing worker (read REPORT_WRITER.md).
+For each protocol WITHOUT a results file, log a warning and skip it.
+Then produce the executive summary.
+")
 PROMPT
