@@ -42,7 +42,7 @@ The coordinator will specify the exact path if it differs.
 
 ## Report Structure
 
-Every report has exactly 7 sections. Do not skip sections. If a section
+Every report has exactly 8 sections. Do not skip sections. If a section
 cannot be completed due to execution errors, say so explicitly and explain
 what is missing.
 
@@ -189,7 +189,42 @@ Brief summary — 1-2 paragraphs maximum. State the key finding, its
 confidence level, and what it implies for clinical practice or future
 research. Do not overstate.
 
-### Section 7: References
+### Section 7: STROBE Compliance Checklist
+
+For studies using public health datasets (NHANES, MIMIC-IV, MEPS, etc.),
+include a STROBE compliance checklist. Journal editors increasingly require
+this for observational studies.
+
+Use this format:
+
+| STROBE Item | Description | Location in Report |
+|-------------|-------------|-------------------|
+| 1a | Title: indicate study design | Title |
+| 1b | Abstract: informative, balanced summary | Section 1 |
+| 2 | Background: scientific rationale | Section 1 |
+| 3 | Objectives: state specific objectives | Section 1 |
+| 4 | Study design: present key elements | Section 2 |
+| 5 | Setting: dates, periods, locations | Section 2 |
+| 6a | Participants: eligibility criteria | Section 2, 3.1 |
+| 7 | Variables: define all variables | Section 2 |
+| 8 | Data sources: describe data source | Section 2 |
+| 12a | Statistical methods: describe all | Section 2 |
+| 12b | Subgroup and interaction analyses | Section 3.5 |
+| 12d | Sensitivity analyses | Section 3.5 |
+| 13a | Participant numbers at each stage | Section 3.1 (CONSORT) |
+| 14a | Descriptive data: characteristics | Section 3.2 (Table 1) |
+| 15 | Outcome data: events, follow-up | Section 3.4 |
+| 16a | Main results: unadjusted and adjusted | Section 3.4 |
+| 17 | Other analyses: subgroup, sensitivity | Section 3.5 |
+| 19 | Limitations: discuss sources of bias | Section 5 |
+| 22 | Funding/data source acknowledgment | Section 6 |
+
+For items not applicable to the study design, mark "N/A" with a brief
+explanation. For NHANES studies, always include: survey design description
+(STROBE 8), complex sampling methodology (STROBE 12a), and cross-sectional
+design limitations (STROBE 19).
+
+### Section 8: References
 
 List all PMIDs cited anywhere in the report. Use the citation format below.
 Draw citations ONLY from the literature scan file — do not invent references.
@@ -225,7 +260,7 @@ Use markdown tables for all tabular data. Format numbers consistently:
 
 ### Headings
 
-Use `#` for the report title, `##` for the 7 sections, `###` for
+Use `#` for the report title, `##` for the 8 sections, `###` for
 subsections within Results.
 
 ## Rules

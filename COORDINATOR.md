@@ -197,6 +197,12 @@ When the coordinator prompt says "Resume mode: REPORTS_ONLY":
 - **Goal:** Synthesize everything into a summary document
 - **Worker reads:** All results files, including per-protocol reports if available
 - **Worker produces:** `summary.md`
+- **Multiple comparison correction:** When the run produced multiple protocols,
+  the summary MUST report the total number of primary hypotheses tested and
+  apply Benjamini-Yekutieli FDR correction across all primary effect estimates.
+  Clearly distinguish findings that survive FDR correction from those that do
+  not. Individual protocol reports present uncorrected p-values; the summary
+  is where the cross-protocol correction is applied.
 
 ## Your Decision-Making Process
 
@@ -310,6 +316,11 @@ consider it a credible starting point.
 - [ ] R code is complete and uses appropriate packages
 - [ ] Limitations section acknowledges key threats to validity
 - [ ] No immortal time bias in the design
+- [ ] Confounder set includes established risk factors for the outcome
+      (not just age/sex/race) with DAG or domain-knowledge justification
+- [ ] Protocol is not a trivial variation of another protocol in the same run
+      (e.g., swapping predictor/outcome or testing the same predictor against
+      multiple similar outcomes)
 
 **Additional criteria for database-targeted protocols:**
 - [ ] Worker applied all conventions from `get_conventions(id)`
@@ -330,6 +341,10 @@ consider it a credible starting point.
 - Claiming to adjust for confounders the dataset doesn't have
 - SQL references tables or columns not in the schema
 - Protocol violates a convention from the database's conventions file
+- Confounder set is limited to basic demographics without domain justification
+- Protocol appears formulaic (single predictor against a complex condition
+  with minimal adjustment — see Suchak et al. 2025)
+- For NHANES: selective cycle usage without documented justification
 
 ### Protocol Review Acceptance Criteria
 - [ ] Reviewer checked each protocol against the TTE checklist in REVIEW.md

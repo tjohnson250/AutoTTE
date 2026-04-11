@@ -232,6 +232,99 @@ measure.
 - For elderly-focused protocols, document this ceiling effect as a limitation
 - `RIDAGEMN` (age in months) is only available for children under 24 months
 
+## Research Quality Safeguards
+
+NHANES's public accessibility and API-based extraction tools have led to an
+explosion of formulaic, low-quality research (Suchak et al. 2025, PLOS Biology,
+doi:10.1371/journal.pbio.3003152). Agents MUST avoid these documented pitfalls:
+
+### No Single-Factor Analyses of Multifactorial Conditions
+
+Conditions like depression, cardiovascular disease, diabetes, and cognitive
+decline are inherently multifactorial. Analyzing a single predictor (e.g.,
+"dietary selenium and depression") in isolation — adjusting for basic
+demographics but ignoring other known risk factors — produces misleading
+results. It cannot distinguish predictors specific to a condition from
+general markers of poor health.
+
+**Rule:** Every NHANES protocol MUST include a multifactorial confounder
+model that accounts for established risk factors for the outcome. A protocol
+studying X → Y must adjust for known predictors of Y, not just age, sex,
+and race. The confounder set must be justified with a DAG or domain-knowledge
+rationale, not selected purely by statistical significance.
+
+### Full Cycle Usage Required
+
+When multiple NHANES cycles are available for the study variables, agents
+MUST use all available cycles (default: 3-cycle pooling 2013-2018) unless
+subsetting is explicitly justified. Valid justifications include:
+
+- Measurement protocol changes across cycles (e.g., blood pressure
+  auscultatory vs. oscillometric across 2016-2017 boundary)
+- Variable only available in specific cycles
+- Sensitivity analysis comparing cycle subsets
+
+**Invalid justifications:** "We used 2017-2018 because it was most recent"
+without addressing why earlier cycles were excluded. Selective cycle usage
+without justification is a marker of data dredging (Suchak et al. 2025).
+
+### No Data Dredging or Post-Hoc Hypothesis Formation
+
+The automated nature of this system creates an elevated risk of generating
+questions that fit the data rather than testing meaningful hypotheses. Agents
+MUST:
+
+- Derive research questions from the literature review (Phase 1), not from
+  scanning NHANES variables for statistically significant associations
+- State the hypothesis BEFORE examining the data
+- Not reverse predictor and outcome to generate additional protocols without
+  independent physiological justification
+- Not generate multiple protocols that are minor variations of the same
+  question (e.g., "vitamin D and depression" and "vitamin D and anxiety"
+  and "vitamin D and cognitive decline") without acknowledging these as
+  multiple comparisons requiring correction
+
+### False Discovery Rate Correction Across Protocols
+
+When the system generates multiple protocols within a single therapeutic
+area, these collectively represent multiple hypothesis tests. The executive
+summary (Phase 5) MUST:
+
+- Report the total number of protocols tested
+- Apply Benjamini-Yekutieli FDR correction across all primary effect
+  estimates (accounts for potential dependence in NHANES survey data)
+- Distinguish findings that survive FDR correction from those that do not
+- Note that individual protocol reports present uncorrected p-values
+
+### STROBE Compliance Required
+
+All NHANES study reports MUST comply with the STROBE (Strengthening the
+Reporting of Observational Studies in Epidemiology) checklist for
+cross-sectional or cohort studies. Journal editors increasingly require
+STROBE compliance for publications using public health datasets.
+
+Key STROBE elements that agents must address:
+
+| STROBE Item | Requirement |
+|-------------|-------------|
+| 1. Title/abstract | Indicate study design in title |
+| 2. Background/rationale | Explain scientific rationale with references |
+| 3. Objectives | State specific objectives and pre-specified hypotheses |
+| 6. Participants | Describe eligibility criteria with NHANES cycle years |
+| 7. Variables | Define all variables: exposures, outcomes, confounders, effect modifiers |
+| 8. Data sources | Describe NHANES, survey design, weighting |
+| 12. Statistical methods | Describe confounder adjustment, survey weighting, missing data handling, subgroup analyses, sensitivity analyses |
+| 13. Participants | Report numbers at each stage (CONSORT flow) |
+| 14. Descriptive data | Table 1 with characteristics by exposure group |
+| 15. Outcome data | Report number of events, follow-up time |
+| 16. Main results | Report unadjusted and adjusted estimates with CIs |
+| 17. Other analyses | Report subgroup, sensitivity, and interaction analyses |
+| 19. Limitations | Discuss potential biases, confounding, generalizability |
+| 22. Funding | Acknowledge data source (NCHS/CDC) |
+
+The report writer MUST include a STROBE compliance section or checklist in
+every NHANES report.
+
 ## Target Trial Emulation Design Constraints
 
 NHANES is a cross-sectional survey. Exposure and outcome are typically measured

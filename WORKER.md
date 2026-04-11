@@ -190,6 +190,30 @@ Each target trial emulation protocol should include:
 - The R code should use modern tidyverse style and established causal
   inference packages (WeightIt, cobalt, survival, EValue)
 
+### Multifactorial Analysis Required
+
+Health conditions are multifactorial. A protocol studying exposure X and
+outcome Y MUST adjust for established risk factors for Y — not just
+age, sex, and race. The confounder set must be justified with a DAG or
+domain-knowledge rationale explaining why each confounder is included
+(common cause of exposure and outcome) and why omitted variables are
+acceptable to omit.
+
+Do NOT generate single-factor analyses that test one predictor in
+isolation against a complex outcome (e.g., "dietary selenium and
+depression" adjusting only for demographics). This is a documented
+pattern of low-quality NHANES research (Suchak et al. 2025).
+
+### No Formulaic Protocol Generation
+
+Do NOT generate multiple protocols that are trivial variations of the
+same question (e.g., swapping predictor and outcome, or testing the same
+predictor against depression, anxiety, and cognitive decline as separate
+protocols). Each protocol must address a distinct, literature-motivated
+clinical question. When generating multiple protocols in the same
+therapeutic area, note in the limitations that multiple comparisons
+increase false discovery risk.
+
 ## Data Source Access
 
 The coordinator will tell you which data source to target. Use the datasource
