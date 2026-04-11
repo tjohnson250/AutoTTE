@@ -158,13 +158,19 @@ If a database was configured in your initial prompt:
    a. Launch an execution worker that runs the R script via `execute_r()`.
    b. The worker executes the full script and verifies that
       `protocol_NN_results.json` was created in the protocols/ directory.
-   c. If execution fails, the worker debugs and retries (max 2 attempts).
+   c. The worker checks for publication output files (table1.html,
+      loveplot.pdf, km.pdf, etc.). Missing figures are a warning, not a
+      failure — the JSON results are the primary deliverable.
+   d. If execution fails, the worker debugs and retries (max 2 attempts).
 2. For each protocol with a `protocol_NN_results.json` file:
    a. Launch a report-writing worker.
    b. Tell the worker to read `REPORT_WRITER.md` for instructions.
    c. Provide the worker these input files:
       - `protocols/protocol_NN.md`
       - `protocols/protocol_NN_results.json`
+      - `protocols/protocol_NN_table1.html` (if exists)
+      - `protocols/protocol_NN_table2.html` (if exists)
+      - `protocols/protocol_NN_*.png` figure files (if exist)
       - `01_literature_scan.md`
       - `02_evidence_gaps.md`
    d. The worker writes `protocols/protocol_NN_report.md`.
@@ -311,6 +317,11 @@ consider it a credible starting point.
 - [ ] Grace period defined for treatment assignment around time zero
 - [ ] R code is structured and complete (not a skeleton)
 - [ ] CONSORT flow diagram included
+- [ ] R script includes `gtsummary`, `gt`, `survminer` in library block
+- [ ] `love.plot()` and `bal.tab()` calls use `un = TRUE` for pre-weighting SMDs
+- [ ] Publication output functions are appropriate for the study design
+      (e.g., KM curves for time-to-event, no KM for binary outcomes,
+      forest plot only if subgroups are pre-specified) and wrapped in `tryCatch()`
 
 **Red flags requiring revision:**
 - Time zero not explicitly defined
@@ -340,12 +351,15 @@ consider it a credible starting point.
 - [ ] Limitations section exists and is substantive
 - [ ] At least 3 literature citations are included with PMIDs
 - [ ] Synthetic data caveat is present (if applicable)
+- [ ] Report references all figure files listed in `figure_paths` in the
+      results JSON (only those actually generated — varies by protocol design)
 
 **Red flags requiring revision:**
 - Numbers in report don't match the results JSON
 - Claims of statistical significance when p > 0.05
 - Missing CONSORT or baseline characteristics table
 - No limitations section
+- Figures listed in `figure_paths` exist but report does not reference them
 
 ## Guardrails
 

@@ -21,6 +21,9 @@ library(sandwich)     # robust SEs
 library(lmtest)       # coeftest with robust SEs
 library(EValue)       # sensitivity analysis
 library(jsonlite)     # JSON export for structured results
+library(gtsummary)    # publication Table 1 (tbl_summary)
+library(gt)           # table formatting + export (gtsave)
+library(survminer)    # KM curves with risk tables (ggsurvplot)
 
 
 # ─── 0. Configuration (filled by agent) ─────────────────────────────────────
@@ -565,12 +568,14 @@ run_ipw_analysis <- function(cohort, confounders, config) {
     estimand = config$estimand
   )
 
-  # Balance diagnostics
-  bal <- bal.tab(weights, stats = c("m", "v"), thresholds = c(m = 0.1))
+  # Balance diagnostics (un = TRUE ensures pre-weighting SMDs are computed)
+  bal <- bal.tab(weights, stats = c("m", "v"), thresholds = c(m = 0.1), un = TRUE)
   print(bal)
-  love.plot(weights, threshold = 0.1, abs = TRUE,
+  love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE,
+            var.order = "unadjusted",
             title = "Covariate Balance (IPW)")
 
+  cohort$ps  <- weights$ps
   cohort$ipw <- weights$weights
 
   if (is.null(config$time_var)) {
@@ -632,7 +637,126 @@ run_sensitivity <- function(results, config) {
 }
 
 
-# ─── 7. Run Pipeline ────────────────────────────────────────────────────────
+# ─── 7. Publication Output Functions ─────────────────────────────────────────
+# These functions save publication-quality figures and tables alongside the
+# JSON results. Each is called from main() after the analysis completes,
+# wrapped in tryCatch() so failures do not prevent JSON results from saving.
+
+save_table1 <- function(cohort, treatment_var, confounders, protocol_id, output_dir) {
+  tbl <- cohort |>
+    select(all_of(c(treatment_var, confounders))) |>
+    tbl_summary(by = all_of(treatment_var),
+                statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                 all_categorical() ~ "{n} ({p}%)"),
+                missing = "ifany") |>
+    add_overall() |>
+    add_difference() |>
+    bold_labels() |>
+    as_gt() |>
+    tab_header(title = paste("Table 1: Baseline Characteristics"))
+  gtsave(tbl, file.path(output_dir, paste0(protocol_id, "_table1.html")))
+  message(sprintf("  Saved: %s_table1.html", protocol_id))
+}
+
+save_outcome_table <- function(results_list, protocol_id, output_dir) {
+  pa <- results_list$primary_analysis
+  outcome_df <- tibble::tibble(
+    Outcome = pa$comparison %||% "Primary",
+    Method = pa$method %||% "IPW",
+    `Effect Estimate (95% CI)` = sprintf("%.2f (%.2f\u2013%.2f)",
+      pa$point_estimate, pa$ci_lower, pa$ci_upper),
+    `P-value` = sprintf("%.4f", pa$p_value)
+  )
+  tbl <- gt::gt(outcome_df) |>
+    gt::tab_header(title = "Table 2: Outcome Results")
+  gt::gtsave(tbl, file.path(output_dir, paste0(protocol_id, "_table2.html")))
+  message(sprintf("  Saved: %s_table2.html", protocol_id))
+}
+
+save_love_plot <- function(weights, protocol_id, output_dir) {
+  p <- love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE,
+                 var.order = "unadjusted",
+                 title = "Covariate Balance: Before & After Weighting")
+  ggsave(file.path(output_dir, paste0(protocol_id, "_loveplot.pdf")),
+         p, width = 8, height = 6)
+  ggsave(file.path(output_dir, paste0(protocol_id, "_loveplot.png")),
+         p, width = 8, height = 6, dpi = 300)
+  message(sprintf("  Saved: %s_loveplot.pdf/png", protocol_id))
+}
+
+save_km_curves <- function(cohort, time_var, event_var, treatment_label_var,
+                           protocol_id, output_dir, weights_col = "ipw") {
+  km_formula <- as.formula(paste0(
+    "Surv(", time_var, ", ", event_var, ") ~ ", treatment_label_var))
+  km_fit <- survfit(km_formula, data = cohort, weights = cohort[[weights_col]])
+  p <- ggsurvplot(km_fit, data = cohort, risk.table = TRUE, pval = TRUE,
+                  xlab = "Days from Time Zero",
+                  ylab = "Event-Free Probability",
+                  palette = c("#2E9FDF", "#E7B800"),
+                  title = paste("Kaplan-Meier:", protocol_id))
+  pdf(file.path(output_dir, paste0(protocol_id, "_km.pdf")),
+      width = 8, height = 7)
+  print(p)
+  dev.off()
+  png(file.path(output_dir, paste0(protocol_id, "_km.png")),
+      width = 2400, height = 2100, res = 300)
+  print(p)
+  dev.off()
+  message(sprintf("  Saved: %s_km.pdf/png", protocol_id))
+}
+
+save_ps_distribution <- function(cohort, ps_col, treatment_label_col,
+                                 protocol_id, output_dir) {
+  p <- ggplot(cohort, aes(x = .data[[ps_col]],
+                          fill = .data[[treatment_label_col]])) +
+    geom_density(alpha = 0.5) +
+    labs(x = "Propensity Score", y = "Density",
+         title = "Propensity Score Distribution",
+         fill = "Treatment") +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+  ggsave(file.path(output_dir, paste0(protocol_id, "_ps_dist.pdf")),
+         p, width = 7, height = 5)
+  ggsave(file.path(output_dir, paste0(protocol_id, "_ps_dist.png")),
+         p, width = 7, height = 5, dpi = 300)
+  message(sprintf("  Saved: %s_ps_dist.pdf/png", protocol_id))
+}
+
+save_forest_plot <- function(subgroup_results, protocol_id, output_dir) {
+  df <- subgroup_results |> filter(!is.na(hr))
+  if (nrow(df) < 2) {
+    message("  Skipped forest plot: fewer than 2 estimable subgroups")
+    return(invisible(NULL))
+  }
+  p <- ggplot(df, aes(x = hr, y = forcats::fct_rev(subgroup))) +
+    geom_point(size = 3) +
+    geom_errorbarh(aes(xmin = ci_lower, xmax = ci_upper), height = 0.2) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +
+    scale_x_log10() +
+    labs(x = "Hazard Ratio (95% CI)", y = NULL,
+         title = paste("Subgroup Analysis:", protocol_id)) +
+    theme_minimal()
+  ggsave(file.path(output_dir, paste0(protocol_id, "_forest.pdf")),
+         p, width = 8, height = 5)
+  ggsave(file.path(output_dir, paste0(protocol_id, "_forest.png")),
+         p, width = 8, height = 5, dpi = 300)
+  message(sprintf("  Saved: %s_forest.pdf/png", protocol_id))
+}
+
+save_consort_figure <- function(consort, protocol_id, output_dir) {
+  pdf(file.path(output_dir, paste0(protocol_id, "_consort.pdf")),
+      width = 10, height = 12)
+  render_consort_diagram(consort)
+  dev.off()
+  png(file.path(output_dir, paste0(protocol_id, "_consort.png")),
+      width = 3000, height = 3600, res = 300)
+  render_consort_diagram(consort)
+  dev.off()
+  message(sprintf("  Saved: %s_consort.pdf/png", protocol_id))
+}
+
+
+# ─── 8. Run Pipeline ────────────────────────────────────────────────────────
 
 main <- function() {
   con    <- connect_cdw()
@@ -677,8 +801,41 @@ main <- function() {
   )
   save_results(results_json, results_json$protocol_id)
 
-  # Return all results — plots are stored in results$plots for
-  # Quarto figure chunks to render inline (no png()/dev.off()).
+  # ── Publication Outputs (non-fatal) ──────────────────────────────────
+  # Figures and tables are saved alongside the JSON. If any fail, the
+  # JSON results (already saved above) are not affected.
+  output_dir <- "."
+  pid <- results_json$protocol_id
+  tryCatch({
+    message("\n=== Generating Publication Outputs ===")
+    save_consort_figure(consort, pid, output_dir)
+    save_table1(cohort, "treatment_label", confounders, pid, output_dir)
+    save_love_plot(results$weights, pid, output_dir)
+    if (!is.null(config$time_var)) {
+      save_km_curves(cohort, config$time_var, config$outcome_var,
+                     "treatment_label", pid, output_dir)
+    }
+    save_ps_distribution(cohort, "ps", "treatment_label", pid, output_dir)
+    save_outcome_table(results_json, pid, output_dir)
+    # save_forest_plot(subgroup_results, pid, output_dir)  # uncomment when subgroups are computed
+
+    # Add figure paths to JSON and re-save
+    results_json$figure_paths <- list(
+      consort         = paste0(pid, "_consort.pdf"),
+      table1          = paste0(pid, "_table1.html"),
+      table2          = paste0(pid, "_table2.html"),
+      love_plot       = paste0(pid, "_loveplot.pdf"),
+      km_curve        = paste0(pid, "_km.pdf"),
+      ps_distribution = paste0(pid, "_ps_dist.pdf")
+    )
+    save_results(results_json, pid)
+    message("=== Publication outputs complete ===")
+  }, error = function(e) {
+    message(sprintf("WARNING: Publication output generation failed: %s",
+                    conditionMessage(e)))
+    message("JSON results were already saved successfully.")
+  })
+
   return(list(results = results, consort = consort))
 }
 

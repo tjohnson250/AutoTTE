@@ -25,6 +25,13 @@ The coordinator will tell you which files to read. Expect these:
 | `protocol_NN_results.json` | Structured execution results: CONSORT flow, baseline table, effect estimates, sensitivity analyses, warnings |
 | `01_literature_scan.md` | Literature search results with PMIDs, abstracts, and study classifications |
 | `02_evidence_gaps.md` | Evidence gap analysis with ranked questions and gap scores |
+| `protocol_NN_table1.html` | Publication Table 1: baseline characteristics with SMDs (if generated) |
+| `protocol_NN_table2.html` | Publication Table 2: outcome results (if generated) |
+| `protocol_NN_consort.png` | CONSORT flow diagram figure (if generated) |
+| `protocol_NN_loveplot.png` | Love plot: covariate balance before/after weighting (if generated) |
+| `protocol_NN_km.png` | Kaplan-Meier survival curves with risk tables (if generated) |
+| `protocol_NN_ps_dist.png` | Propensity score distribution by treatment group (if generated) |
+| `protocol_NN_forest.png` | Subgroup analysis forest plot (if generated) |
 
 Read ALL of these files before writing anything. You need the full picture.
 
@@ -81,11 +88,25 @@ with the number of patients remaining. Use a markdown table:
 | ... | ... |
 | Final analytic cohort | ... |
 
+If the CONSORT figure exists, embed it:
+
+```
+![CONSORT Flow Diagram](protocol_NN_consort.png)
+```
+
 #### 3.2 Baseline Characteristics
 
 Table with treated vs. control columns from the results JSON. Include all
 variables reported. Format: counts with percentages for categorical variables,
 mean (SD) for continuous variables.
+
+If the Table 1 HTML file exists, reference it:
+
+> **Table 1** (publication-quality) is available as a formatted HTML file:
+> `protocol_NN_table1.html`
+
+Still include a simplified markdown summary table in the report so the
+report is self-contained.
 
 #### 3.3 Covariate Balance
 
@@ -93,11 +114,34 @@ Pre- and post-weighting standardized mean differences (SMDs) from the results
 JSON. Note which covariates achieved adequate balance (SMD < 0.1) and which
 did not.
 
+If the love plot exists, embed it:
+
+```
+![Covariate Balance — Love Plot](protocol_NN_loveplot.png)
+```
+
+If the PS distribution figure exists, embed it:
+
+```
+![Propensity Score Distribution](protocol_NN_ps_dist.png)
+```
+
 #### 3.4 Primary Analysis
 
 Effect estimate (HR, OR, or RD as appropriate) with confidence interval and
 p-value. State the direction of effect plainly. If the result is not
 statistically notable (p > 0.05), say so directly — do not hedge or spin.
+
+If the Kaplan-Meier figure exists, embed it:
+
+```
+![Kaplan-Meier Survival Curves](protocol_NN_km.png)
+```
+
+If the Table 2 HTML file exists, reference it:
+
+> **Table 2** (publication-quality) is available as a formatted HTML file:
+> `protocol_NN_table2.html`
 
 #### 3.5 Secondary and Sensitivity Analyses
 
@@ -105,6 +149,12 @@ statistically notable (p > 0.05), say so directly — do not hedge or spin.
 - Subgroup analyses if present
 - Alternative model specifications if present
 - Any quantitative bias analysis results
+
+If the forest plot exists, embed it:
+
+```
+![Subgroup Analysis — Forest Plot](protocol_NN_forest.png)
+```
 
 ### Section 4: Interpretation
 
@@ -216,7 +266,11 @@ subsections within Results.
   statistical significance or clinical significance.
 - Do not invent citations. Every PMID must come from the literature scan.
 - Do not editorialize beyond what the data support.
-- Do not include figures or images — this is a markdown-only report.
+- Reference figure files produced by the analysis script using markdown
+  image syntax for `.png` versions. Only reference files listed in
+  `figure_paths` in the results JSON. If a figure file does not exist
+  in the protocols directory, do not reference it — check the results
+  JSON's `figure_paths` key to know which figures were generated.
 
 ## Working Style
 

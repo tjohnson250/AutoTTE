@@ -311,20 +311,139 @@ if (nrow(cohort) == 0) {
 
 Before `weightit()`, verify the treatment variable has >= 2 values.
 
-### Quarto Layout
+### Figure and Table File Generation
 
-Use a two-part `.qmd` layout:
-- **Part 1 (function definitions):** No visible output.
-- **Part 2 (execution sections):** Each section calls its function and
-  displays results inline.
-
-No monolithic `main()`. No `eval: false` chunks. All plots render inline
-via Quarto figure chunks — never use `png()`/`dev.off()`.
+Analysis scripts run standalone via `Rscript`. Use `ggsave()` for ggplot
+objects and `pdf()`/`png()` + `dev.off()` for grid graphics to save
+publication-quality figures to files. Wrap all figure generation in
+`tryCatch()` so figure failures do not prevent JSON results from being saved.
 
 ### E-value Sensitivity Analysis
 
 When using `evalues.HR()`, specify the `rare` argument (`TRUE` when outcome
 incidence < ~15%). Omitting it causes a runtime error.
+
+## Publication-Quality Figures and Tables (required)
+
+Every analysis script MUST produce publication-quality figures and tables
+alongside the structured JSON results. These are saved as sibling files
+in the same `protocols/` directory.
+
+**Which outputs to produce depends on the protocol design.** Choose from
+the menu below based on what the study actually needs — do not generate
+outputs that are irrelevant to the design.
+
+**Required packages** (add to the library block):
+
+```r
+library(gtsummary)    # publication Table 1 (tbl_summary / tbl_svysummary)
+library(gt)           # table formatting + export (gtsave)
+library(survminer)    # KM curves with risk tables (ggsurvplot)
+```
+
+### Always produce (every protocol)
+
+| Output | Filename | When to use |
+|--------|----------|-------------|
+| Table 1 (baseline characteristics) | `protocol_NN_table1.html` | Every protocol — characterizes the analytic cohort |
+| Love plot (covariate balance) | `protocol_NN_loveplot.pdf/png` | Every IPW or matching protocol |
+| PS distribution | `protocol_NN_ps_dist.pdf/png` | Every IPW protocol — shows overlap |
+| CONSORT flow diagram | `protocol_NN_consort.pdf/png` | Every protocol — documents cohort assembly |
+
+### Produce when applicable
+
+| Output | Filename | When to use |
+|--------|----------|-------------|
+| Table 2 (outcome results) | `protocol_NN_table2.html` | When there are multiple outcomes or comparisons to summarize in a single table |
+| Kaplan-Meier curves | `protocol_NN_km.pdf/png` | Time-to-event outcomes only — not for binary/continuous outcomes |
+| Forest plot (subgroups) | `protocol_NN_forest.pdf/png` | When ≥2 pre-specified subgroup analyses are estimable |
+| Cumulative incidence plot | `protocol_NN_cuminc.pdf/png` | Competing-risks designs |
+| Dose-response curve | `protocol_NN_dose_response.pdf/png` | Continuous or multi-level exposure studies |
+
+### Do NOT produce
+
+- KM curves for binary (non-time-to-event) outcomes
+- Forest plots when there are no pre-specified subgroups or only 0-1 are estimable
+- Figures that duplicate information already shown in another figure
+
+### Design-specific guidance
+
+**Time-to-event studies (most TTE protocols):** Table 1 + Love plot + PS
+distribution + KM curves + CONSORT. Add Table 2 if multiple outcomes
+(e.g., primary + secondary + safety). Add forest plot if subgroups are
+pre-specified.
+
+**Binary outcome studies:** Table 1 + Love plot + PS distribution +
+CONSORT. KM curves are not appropriate. Table 2 is useful if there are
+multiple outcomes or sensitivity analyses to summarize.
+
+**NHANES mortality studies:** Table 1 (via `tbl_svysummary()`) + Love
+plot + PS distribution + KM curves (using survey-weighted `survfit()`) +
+CONSORT. Consider forest plot for age/sex/race subgroups if sample size
+permits.
+
+**Multi-outcome protocols (e.g., efficacy + safety):** Table 2 becomes
+essential — one row per outcome. Generate separate KM curves for each
+time-to-event outcome (e.g., `protocol_01_km_stroke.pdf`,
+`protocol_01_km_bleed.pdf`).
+
+### Figure specifications
+
+- PDF for vector graphics (main manuscript), PNG at 300 DPI (markdown embedding)
+- Standard dimensions: 8x6 inches for most plots, 8x7 for KM with risk
+  tables, 10x12 for CONSORT
+- Use `ggsave()` for ggplot objects; `pdf()`/`png()` + `dev.off()` for
+  grid graphics
+
+### Implementation details
+
+**Table 1:**
+- For NHANES survey data: use `gtsummary::tbl_svysummary()` on a
+  `survey::svydesign` object
+- For CDW / non-survey data: use `gtsummary::tbl_summary()`
+- Always include `add_difference()` for the SMD column
+- Always include `add_overall()` for a combined column
+- Save with `gt::gtsave(tbl, "protocol_NN_table1.html")`
+
+**Love plot:**
+- MUST show both pre-weighting AND post-weighting SMDs
+- Call `love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE)`
+- The `un = TRUE` parameter is CRITICAL — without it, pre-weighting SMDs
+  appear as NA in both the plot and the JSON results
+
+**KM curves:**
+- Use `survminer::ggsurvplot()` with `risk.table = TRUE` and `pval = TRUE`
+- For NHANES: use weighted `survfit()` with combined survey x IPW weights
+- For CDW: use weighted `survfit()` with IPW weights
+
+**Forest plot:**
+- Use ggplot2 with `geom_point()` + `geom_errorbarh()` +
+  `geom_vline(xintercept = 1)`
+- Log scale x-axis (`scale_x_log10()`)
+
+### Saving publication outputs
+
+**Publication outputs are non-fatal.** Wrap all figure/table generation
+in a single `tryCatch()` block after `save_results()`. If any figure
+fails, the JSON results (already saved) are not affected.
+
+After generating figures, add a `figure_paths` key to the results JSON
+listing only the files that were actually generated, then re-save:
+
+```r
+results$figure_paths <- list(
+  consort         = "protocol_01_consort.pdf",
+  table1          = "protocol_01_table1.html",
+  love_plot       = "protocol_01_loveplot.pdf",
+  ps_distribution = "protocol_01_ps_dist.pdf",
+  km_curve        = "protocol_01_km.pdf"          # only if time-to-event
+  # table2, forest_plot, etc. — include only if generated
+)
+```
+
+The analysis plan templates (`analysis_plan_template.R` and
+`analysis_plan_template_cdw.R`) contain reference implementations of all
+publication output functions.
 
 ## Self-Contained Analysis Scripts
 
