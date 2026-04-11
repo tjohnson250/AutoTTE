@@ -174,6 +174,44 @@ NHANES is cross-sectional, so the strongest target trial emulation designs
 use the linked mortality file for prospective follow-up. See
 `databases/conventions/nhanes_conventions.md` for full design constraints.
 
+## Quick Start (MIMIC-IV)
+
+To run against MIMIC-IV (Medical Information Mart for Intensive Care)
+data from PhysioNet:
+
+```bash
+# Prerequisites: PhysioNet credentialed access (CITI training required)
+# Download MIMIC-IV v3.1 CSV files from https://physionet.org/content/mimiciv/3.1/
+
+# Install R packages (one-time)
+Rscript -e 'install.packages(c("duckdb", "DBI"))'
+
+# Load MIMIC-IV CSVs into DuckDB (one-time)
+Rscript -e '
+library(DBI); library(duckdb)
+con <- dbConnect(duckdb::duckdb(), "databases/data/mimic_iv.duckdb")
+for (f in list.files("path/to/mimiciv/3.1/hosp", pattern="\\.csv\\.gz$", full.names=TRUE)) {
+  tbl <- tools::file_path_sans_ext(tools::file_path_sans_ext(basename(f)))
+  dbExecute(con, sprintf("CREATE TABLE %s AS SELECT * FROM read_csv_auto(\"%s\")", tbl, f))
+}
+for (f in list.files("path/to/mimiciv/3.1/icu", pattern="\\.csv\\.gz$", full.names=TRUE)) {
+  tbl <- tools::file_path_sans_ext(tools::file_path_sans_ext(basename(f)))
+  dbExecute(con, sprintf("CREATE TABLE %s AS SELECT * FROM read_csv_auto(\"%s\")", tbl, f))
+}
+dbDisconnect(con)
+'
+
+# Run
+./run.sh "sepsis" --db-config databases/mimic_iv.yaml
+```
+
+MIMIC-IV provides timestamped treatments, labs, vitals, and outcomes for
+~300,000 hospital admissions and ~65,000 ICU stays at Beth Israel
+Deaconess Medical Center (2008-2022). It is ideal for ICU-focused target
+trial emulations such as vasopressor timing, ventilation strategies, and
+antibiotic initiation. See `databases/conventions/mimic_iv_conventions.md`
+for date shifting rules, join key hierarchy, and recommended TTE designs.
+
 ## Quick Start (Synthetic Test Database)
 
 To run against the bundled synthetic PCORnet database (requires R and the
@@ -329,6 +367,7 @@ Examples:
   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --resume-reports
   ./run.sh "type 2 diabetes" --db-config databases/my_db.yaml 75
   ./run.sh "type 2 diabetes" --db-config databases/nhanes.yaml
+  ./run.sh "sepsis" --db-config databases/mimic_iv.yaml
 ```
 
 ## File Structure
@@ -346,6 +385,7 @@ AutoTTE/
 ├── analysis_plan_template.R           # R template for public datasets
 ├── analysis_plan_template_cdw.R       # R template for DB-targeted protocols
 ├── databases/
+│   ├── mimic_iv.yaml                  # Config: MIMIC-IV via DuckDB
 │   ├── nhanes.yaml                    # Config: NHANES via nhanesA + DuckDB
 │   ├── secure_pcornet_cdw.yaml        # Config: institutional PCORnet CDW
 │   ├── synthetic_pcornet.yaml         # Config: synthetic DuckDB for testing
