@@ -1,0 +1,17 @@
+id: "mimic_iv"
+name: "MIMIC-IV v3.1"
+cdm: "mimic"
+cdm_version: "3.1"
+engine: "duckdb"
+online: true
+
+connection:
+  r_code: |
+    library(DBI)
+    library(duckdb)
+    con <- DBI::dbConnect(duckdb::duckdb(), "databases/data/mimic_iv.duckdb")
+
+schema_prefix: ""
+schema_dump: "databases/schemas/mimic_iv_schema.txt"
+data_profile: "databases/profiles/mimic_iv_profile.md"
+conventions: "databases/conventions/mimic_iv_conventions.md"
