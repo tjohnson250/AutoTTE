@@ -283,85 +283,169 @@ Medication-based NHANES TTEs are subject to three forms of prevalent-user bias:
    as "current statin users." Time-varying confounders accumulated during
    treatment are unmeasured.
 
-### Exposure Types by Design Strength
+### Well-Defined Interventions Requirement
 
-Not all NHANES exposures have the prevalent-user problem. Choose exposures
-based on design strength:
+Target trial emulation requires a **well-defined intervention** — a
+specific, manipulable action that could in principle be assigned in a
+randomized trial (Hernán & Robins, *Causal Inference*). This is not a
+technicality; it determines whether the consistency assumption holds.
 
-**Tier 1 — Strongest (no prevalent-user bias):**
-- Biomarker levels at exam (HbA1c, LDL, hs-CRP, eGFR, blood pressure)
-- Dietary intake (sodium, potassium, calories from 24-hour recall)
-- Physical activity level (PAQ questionnaire)
-- Anthropometric measures (BMI, waist circumference)
-- These are point-in-time measurements with no "initiation" concept.
-  The target trial is: "assign to biomarker level X vs. Y at baseline."
+**Why biomarker levels are NOT well-defined interventions:**
 
-**Tier 2 — Moderate (prevalent-user bias, but interpretable):**
-- Current medication use → mortality (with explicit prevalent-user label)
-- Vaccination status → mortality (healthy vaccinee bias is analogous)
-- Smoking status (current/former/never) → mortality
+"Assign HbA1c < 7%" is not a well-defined intervention because it does
+not specify *how* the target is achieved. Metformin, insulin, SGLT2
+inhibitors, and lifestyle modification all lower HbA1c but have different
+causal effects on mortality and cardiovascular outcomes. The same is true
+for "assign SBP < 130 mmHg" (which drug class? at what dose?) or "assign
+LDL < 100 mg/dL" (statin vs. ezetimibe vs. PCSK9 inhibitor).
 
-**Tier 3 — Weakest (cross-sectional, limited causal inference):**
-- Current medication use → same-visit biomarker (no temporal ordering)
-- Self-reported condition → self-reported outcome
+When the exposure is a biomarker level, the consistency assumption fails:
+the potential outcome under "HbA1c < 7%" depends on which version of that
+intervention is applied. Different patients achieved the same biomarker
+level through different mechanisms, making the causal contrast ill-defined.
+
+**Consequence for NHANES:** Biomarker-based studies using NHANES are
+valuable **prospective observational studies**, but they should NOT be
+framed as target trial emulations. Reserve TTE framing for exposures
+where the intervention is specific and manipulable.
+
+### Study Design Categories for NHANES
+
+**Category A — Legitimate TTE (with caveats):**
+
+These exposures are specific, manipulable interventions that could be
+assigned in a trial:
+
+- **Current medication use → mortality** (e.g., "take statin vs. not")
+  - The intervention is specific: use of a named drug or drug class
+  - Caveats: prevalent-user bias (see above), no new-user design possible
+  - **Must be labeled as a prevalent-user design**
+  - **Must discuss** all three forms of prevalent-user bias
+- **Vaccination → mortality** (e.g., "receive flu vaccine vs. not")
+  - The intervention is specific: get vaccinated or not
+  - Caveat: healthy vaccinee bias (healthier people are more likely to
+    get vaccinated, biasing toward apparent benefit)
+- **Smoking cessation** (current vs. former smoker → mortality)
+  - The intervention is specific: quit smoking
+  - Caveat: residual confounding, "former" includes recent and distant quitters
+
+**Category B — Prospective associational studies (NOT TTE):**
+
+These exposures have strong prospective designs (baseline measurement →
+mortality follow-up) but the "intervention" is not well-defined:
+
+- **Biomarker levels → mortality** (HbA1c, BP, LDL, eGFR, hs-CRP)
+- **Dietary exposure → mortality** (sodium intake, dietary pattern scores)
+- **Physical activity level → mortality**
+- **Anthropometric measures → mortality** (BMI, waist circumference)
+
+These are valuable epidemiologic studies. They benefit from NHANES's
+prospective mortality linkage and rich confounder data. But they should
+be framed as **"prospective cohort studies with confounding adjustment"**
+— not as target trial emulations.
+
+**Do NOT use target trial specification tables** for Category B studies.
+Instead, use standard epidemiologic methods framing (exposure, outcome,
+confounders, follow-up period, statistical approach).
+
+**Category C — Cross-sectional associations (neither TTE nor prospective):**
+
+- Same-visit exposure → same-visit outcome (no temporal ordering)
+- Self-reported condition → self-reported condition
 - Any design claiming incident outcomes from cross-sectional data
+- **Not recommended.** If unavoidable, frame as a cross-sectional
+  associational analysis, not a causal study.
 
 ### Legitimate TTE Designs with NHANES
 
-1. **Biomarker exposure → mortality (strongest design)**
-   - Example: HbA1c level → all-cause mortality, BP control → mortality
-   - Baseline: NHANES exam visit (biomarker = exposure, other measures = confounders)
-   - Follow-up: Linked mortality file (prospective outcome)
-   - Time-to-event: PERMTH_EXM from mortality file
-   - This is a true prospective design with no prevalent-user bias
-   - The target trial: "assign to biomarker level X vs. Y at baseline, follow for mortality"
+Only Category A exposures qualify for TTE framing:
 
-2. **Prevalent medication use → mortality (moderate design)**
+1. **Prevalent medication use → mortality**
    - Example: Current statin use → all-cause mortality
-   - Treatment: self-reported current use at exam
+   - Treatment: self-reported current use at NHANES exam (RXQ_RX)
    - Outcome: mortality follow-up via linked mortality file
-   - **Must be labeled as a prevalent-user design** in the protocol
+   - Time zero: NHANES exam visit (not treatment initiation)
+   - **Must be labeled as a prevalent-user design** in the protocol title
+     and methods section
    - **Must discuss** depletion of susceptibles, survivor selection, and
      confounding by treatment duration in the limitations section
    - Consider sensitivity analysis restricting to participants with recent
      diagnosis (e.g., diabetes diagnosed within past 5 years per DIQ) as
      a proxy for more recent treatment initiation
+   - The target trial being emulated: "Among people currently taking drug
+     X, compare mortality outcomes to similar people not taking drug X" —
+     NOT "initiate drug X vs. do not initiate"
 
-3. **Cross-sectional with temporal reasoning (weakest)**
-   - Example: "Ever diagnosed with diabetes" (past event) → current HbA1c
-   - Requires careful justification of temporal ordering
-   - Cannot establish when exposure began relative to outcome
-   - Generally not recommended for TTE — better framed as an associational study
+2. **Vaccination → mortality**
+   - Example: Flu vaccination in past 12 months → all-cause mortality
+   - Treatment: self-reported vaccination status (IMQ questionnaire)
+   - Outcome: mortality follow-up via linked mortality file
+   - **Must discuss healthy vaccinee bias** — vaccinated individuals tend
+     to be healthier and more health-seeking at baseline
+   - Consider negative control outcomes to assess residual confounding
+
+### Prospective Associational Studies with NHANES (NOT TTE)
+
+When the best available NHANES exposure is a biomarker or lifestyle
+measure, agents should frame the study as a prospective cohort study:
+
+- Example: "Prospective association of HbA1c level with all-cause
+  mortality in US adults: NHANES 2013-2018"
+- Use standard epidemiologic framing: exposure, outcome, confounders
+- Do NOT use a target trial specification table
+- Do NOT claim to emulate a trial
+- Use Cox proportional hazards or survey-weighted Cox models
+- Propensity score methods are appropriate for confounding adjustment
+  (the methods are the same; the *framing* differs)
+- This is still a valuable study design — it leverages NHANES's
+  nationally representative sample and prospective mortality follow-up
 
 ### Designs to AVOID
 
 - Biomarker → same-visit biomarker (no temporal ordering possible)
 - Self-reported condition → self-reported condition (both cross-sectional)
 - Any design claiming incident (new-onset) outcomes from cross-sectional data
-- Any design labeled as a "new-user" or "treatment initiation" study (NHANES
-  cannot support this — see above)
+- Any design labeled as a "new-user" or "treatment initiation" study
+  (NHANES cannot support this — see above)
+- Any biomarker study framed as a TTE (biomarker levels are not
+  well-defined interventions — see above)
+
+### Agent Guidance: Choosing Between TTE and Associational Framing
+
+When generating protocols for NHANES, agents must decide the framing
+based on the exposure type:
+
+- **If the exposure is a specific medication or vaccination:**
+  → Use TTE framing (Category A) with prevalent-user caveats
+- **If the exposure is a biomarker, dietary pattern, or lifestyle measure:**
+  → Use prospective associational framing (Category B), NOT TTE
+- **If the best question found in the literature requires a biomarker
+  exposure and the user specified NHANES:**
+  → Proceed with associational framing and note in the feasibility
+  assessment that NHANES cannot support TTE for this question. Suggest
+  MIMIC-IV or an EHR database as an alternative for TTE framing.
 
 ### Required Documentation
 
-Every NHANES TTE protocol MUST include:
+Every NHANES protocol MUST include:
 
-1. **Explicit identification of design type:** State whether the protocol
-   uses a biomarker exposure (Tier 1), prevalent medication use (Tier 2),
-   or cross-sectional association (Tier 3)
-2. **Target trial specification table** with honest description of what
-   trial is being emulated — not a hypothetical new-user trial that NHANES
-   cannot support
-3. **For medication exposures:** Label as "prevalent-user design" and
-   discuss all three forms of prevalent-user bias (depletion of
-   susceptibles, survivor selection, confounding by treatment duration)
-4. **Statement of cross-sectional design limitations** and how they
+1. **Explicit identification of study design category:** State whether
+   the protocol is Category A (TTE with prevalent-user caveats),
+   Category B (prospective associational), or Category C (cross-sectional)
+2. **For Category A (TTE):** Target trial specification table with honest
+   description of what trial is being emulated — including that time zero
+   is the exam visit, not treatment initiation
+3. **For Category A (TTE):** Label as "prevalent-user design" and discuss
+   all three forms of prevalent-user bias
+4. **For Category B (associational):** Do NOT include a target trial
+   specification table. Use standard epidemiologic methods framing.
+5. **Statement of cross-sectional design limitations** and how they
    constrain causal inference
-5. **Sensitivity analyses:** At minimum, E-value for unmeasured confounding.
-   For medication exposures, also consider restricting to recent diagnoses
-   as a proxy for more recent treatment initiation
-6. **TARGET guideline compliance note:** Explicitly state which TARGET
-   elements are fully satisfied and which are limited by the
-   cross-sectional design
+6. **Sensitivity analyses:** At minimum, E-value for unmeasured confounding.
+   For medication exposures, also consider restricting to recent diagnoses.
+   For biomarker exposures, consider dose-response analysis.
+7. **TARGET guideline compliance note (Category A only):** Explicitly
+   state which TARGET elements are satisfied and which are limited
 
 ## Prescription Medication Conventions
 
