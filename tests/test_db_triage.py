@@ -212,3 +212,72 @@ def test_triage_mode_override_offline_forces_offline(tmp_path):
         mode_override="offline",
     )
     assert result["effective_mode"] == "offline"
+
+
+from tools.db_triage import triage_selection
+
+
+def test_triage_selection_all_keyword(databases_dir, tmp_path):
+    # Touch the files each config references so both DBs come out RUN.
+    (tmp_path / "alpha_schema.txt").write_text("x")
+    (tmp_path / "alpha_profile.md").write_text("x")
+    (tmp_path / "alpha_conv.md").write_text("x")
+    (tmp_path / "beta_schema.txt").write_text("x")
+    (tmp_path / "beta_profile.md").write_text("x")
+    (tmp_path / "beta_conv.md").write_text("x")
+    # Override the relative paths in the config files.
+    for p in (databases_dir / "alpha.yaml", databases_dir / "beta.yaml"):
+        data = yaml.safe_load(p.read_text())
+        prefix = data["id"]
+        data["schema_dump"] = str(tmp_path / f"{prefix}_schema.txt")
+        data["data_profile"] = str(tmp_path / f"{prefix}_profile.md")
+        data["conventions"] = str(tmp_path / f"{prefix}_conv.md")
+        p.write_text(yaml.dump(data))
+    results = triage_selection(
+        selection="all",
+        databases_dir=str(databases_dir),
+        project_root=str(tmp_path),
+        mode_override="",
+    )
+    ids = sorted(r["id"] for r in results)
+    assert ids == ["alpha", "beta"]
+
+
+def test_triage_selection_csv_ids(databases_dir, tmp_path):
+    results = triage_selection(
+        selection="alpha",
+        databases_dir=str(databases_dir),
+        project_root=str(tmp_path),
+        mode_override="",
+    )
+    assert [r["id"] for r in results] == ["alpha"]
+
+
+def test_triage_selection_unknown_id_raises(databases_dir, tmp_path):
+    with pytest.raises(ValueError) as exc_info:
+        triage_selection(
+            selection="alpha,unknown_db",
+            databases_dir=str(databases_dir),
+            project_root=str(tmp_path),
+            mode_override="",
+        )
+    assert "unknown_db" in str(exc_info.value)
+    assert "alpha" in str(exc_info.value)  # valid IDs listed
+
+
+def test_triage_selection_relative_paths_resolved(databases_dir, tmp_path):
+    # Config has "databases/schemas/alpha_schema.txt" (relative).
+    # Create the file relative to tmp_path acting as project root.
+    (tmp_path / "databases" / "schemas").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "databases" / "schemas" / "alpha_schema.txt").write_text("x")
+    (tmp_path / "databases" / "profiles").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "databases" / "profiles" / "alpha_profile.md").write_text("x")
+    (tmp_path / "databases" / "conventions").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "databases" / "conventions" / "alpha_conventions.md").write_text("x")
+    results = triage_selection(
+        selection="alpha",
+        databases_dir=str(databases_dir),
+        project_root=str(tmp_path),
+        mode_override="",
+    )
+    assert results[0]["disposition"] == "RUN"

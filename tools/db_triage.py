@@ -114,3 +114,60 @@ def triage_one(
         ),
         "warnings": warnings,
     }
+
+
+def _resolve(project_root: str, p: str) -> str:
+    """Resolve *p* against *project_root* if it is relative."""
+    if not p:
+        return p
+    path = Path(p)
+    if path.is_absolute():
+        return str(path)
+    return str(Path(project_root) / path)
+
+
+def triage_selection(
+    selection: str,
+    databases_dir: str,
+    project_root: str,
+    mode_override: str,
+) -> list[dict[str, Any]]:
+    """Resolve *selection* into a list of per-DB triage results.
+
+    selection is either "all" or a comma-separated list of DB IDs.
+    Raises ValueError if any requested ID is not present in *databases_dir*.
+    """
+    known = discover_dbs(databases_dir)
+    known_by_id = {db["id"]: db for db in known}
+
+    if selection.strip() == "all":
+        selected = known
+    else:
+        ids = [s.strip() for s in selection.split(",") if s.strip()]
+        unknown = [i for i in ids if i not in known_by_id]
+        if unknown:
+            valid = ", ".join(sorted(known_by_id)) or "(none)"
+            raise ValueError(
+                f"Unknown DB id(s): {', '.join(unknown)}. Valid ids: {valid}"
+            )
+        selected = [known_by_id[i] for i in ids]
+
+    results: list[dict[str, Any]] = []
+    for db in selected:
+        cfg = db["config"]
+        triage = triage_one(
+            cfg,
+            schema_path=_resolve(project_root, cfg.get("schema_dump", "")),
+            profile_path=_resolve(project_root, cfg.get("data_profile", "")),
+            conventions_path=_resolve(project_root, cfg.get("conventions", "")),
+            mode_override=mode_override,
+        )
+        results.append({
+            "id": db["id"],
+            "name": cfg.get("name", db["id"]),
+            "cdm": cfg.get("cdm", ""),
+            "engine": cfg.get("engine", ""),
+            "yaml_path": db["yaml_path"],
+            **triage,
+        })
+    return results
