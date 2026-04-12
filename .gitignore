@@ -8,6 +8,7 @@ databases/profiles/
 databases/conventions/
 databases/data/
 .mcp-session.json
+.worktrees/
 !databases/schemas/secure_pcornet_cdw_schema.txt
 !databases/schemas/secure_pcornet_cdw_mpi_schema.txt
 !databases/schemas/nhanes_schema.txt
