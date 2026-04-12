@@ -281,3 +281,36 @@ def test_triage_selection_relative_paths_resolved(databases_dir, tmp_path):
         mode_override="",
     )
     assert results[0]["disposition"] == "RUN"
+
+
+def test_triage_selection_empty_raises(databases_dir, tmp_path):
+    with pytest.raises(ValueError) as exc:
+        triage_selection(
+            selection="",
+            databases_dir=str(databases_dir),
+            project_root=str(tmp_path),
+            mode_override="",
+        )
+    assert "empty" in str(exc.value).lower()
+
+
+def test_triage_selection_whitespace_only_raises(databases_dir, tmp_path):
+    with pytest.raises(ValueError):
+        triage_selection(
+            selection="   ,  ,",
+            databases_dir=str(databases_dir),
+            project_root=str(tmp_path),
+            mode_override="",
+        )
+
+
+def test_triage_selection_duplicate_ids_raises(databases_dir, tmp_path):
+    with pytest.raises(ValueError) as exc:
+        triage_selection(
+            selection="alpha,alpha",
+            databases_dir=str(databases_dir),
+            project_root=str(tmp_path),
+            mode_override="",
+        )
+    assert "duplicate" in str(exc.value).lower()
+    assert "alpha" in str(exc.value).lower()

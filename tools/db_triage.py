@@ -134,8 +134,26 @@ def triage_selection(
 ) -> list[dict[str, Any]]:
     """Resolve *selection* into a list of per-DB triage results.
 
-    selection is either "all" or a comma-separated list of DB IDs.
-    Raises ValueError if any requested ID is not present in *databases_dir*.
+    Args:
+        selection: either the literal "all" or a comma-separated list of DB ids.
+        databases_dir: directory containing the DB YAML files (passed to discover_dbs).
+        project_root: base path for resolving relative file paths inside each YAML.
+        mode_override: "online" / "offline" to override every config's own setting,
+            or "" to use each config's own `online` field.
+
+    Returns:
+        A list of dicts, one per selected DB, each with these keys:
+            id, name, cdm, engine, yaml_path         (from discovery / config)
+            disposition, effective_mode, reason, warnings   (from triage_one)
+
+        The disposition values are the RUN / RUN_AUTO_ONBOARD / SKIP constants
+        defined at module scope. This shape is the public contract consumed by
+        the tools.db_triage CLI and by run.sh; adding keys is backward-compatible,
+        renaming or removing them is a breaking change.
+
+    Raises:
+        ValueError: if selection is empty, if any id in the selection is not
+            present in databases_dir, or if the selection contains duplicates.
     """
     known = discover_dbs(databases_dir)
     known_by_id = {db["id"]: db for db in known}
@@ -144,6 +162,23 @@ def triage_selection(
         selected = known
     else:
         ids = [s.strip() for s in selection.split(",") if s.strip()]
+        if not ids:
+            raise ValueError(
+                "Empty selection. Pass 'all' or a comma-separated list of DB ids."
+            )
+        # Check for duplicates.
+        seen: set[str] = set()
+        dups: list[str] = []
+        for i in ids:
+            if i in seen:
+                dups.append(i)
+            else:
+                seen.add(i)
+        if dups:
+            raise ValueError(
+                f"Duplicate DB id(s) in selection: {', '.join(sorted(set(dups)))}"
+            )
+        # Check for unknown IDs.
         unknown = [i for i in ids if i not in known_by_id]
         if unknown:
             valid = ", ".join(sorted(known_by_id)) or "(none)"
