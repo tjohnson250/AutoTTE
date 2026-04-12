@@ -8,43 +8,36 @@ its own judgment, not hardcoded logic.
 
 ## Architecture
 
-```
-                 ┌──────────────────────────────┐
-                 │      Coordinator Agent        │
-                 │      (Claude Code session)    │
-                 │                               │
-                 │  Reads COORDINATOR.md         │
-                 │  Launches sub-agents          │
-                 │  Reads their output files     │
-                 │  Decides: advance / revise /  │
-                 │           backtrack           │
-                 └──┬──────────┬────────────┬────┘
-                    │          │            │
-        ┌───────────┘          │            └────────────┐
-        ▼                      ▼                         ▼
-┌────────────────┐   ┌─────────────────┐       ┌─────────────────┐
-│ Worker Agents  │   │ Reviewer Agents │       │ Report Writer   │
-│ (claude -p)    │   │ (claude -p)     │       │ (claude -p)     │
-│                │   │                 │       │                 │
-│ Read WORKER.md │   │ Read REVIEW.md  │       │ Read REPORT_    │
-│ Search PubMed  │   │ Verify PMIDs   │       │   WRITER.md     │
-│ Query databases│   │ Check methods  │       │ Read results    │
-│ Write protocols│──→│ Check SQL/R    │       │ Write per-      │
-│ Generate R code│   │ Write critiques│       │   protocol      │
-│ Run R scripts  │   │ Review conven- │       │   reports       │
-│  (online mode) │   │   tions usage  │       │                 │
-└────────────────┘   └────────────────┘       └─────────────────┘
-        │                                              │
-        │           ┌──────────────┐                   │
-        └──────────→│  MCP Servers │←──────────────────┘
-                    ├──────────────┤
-                    │ PubMed       │
-                    │ Datasource   │
-                    │ R Executor   │
-                    │ RxNorm       │
-                    │ Clinical     │
-                    │   Codes      │
-                    └──────────────┘
+```mermaid
+flowchart TB
+    classDef coord fill:#d4e6f1,stroke:#2874a6,stroke-width:2px,color:#000
+    classDef agent fill:#fdebd0,stroke:#b9770e,color:#000
+    classDef mcp fill:#d5f5e3,stroke:#239b56,color:#000
+    classDef files fill:#f4f6f6,stroke:#7b7d7d,stroke-dasharray: 3 3,color:#000
+
+    COORD["<b>Coordinator Agent</b><br/><i>long-lived Claude Code session</i><br/><br/>Reads COORDINATOR.md<br/>Launches sub-agents<br/>Reads output files<br/>Decides: advance / revise / backtrack"]:::coord
+
+    WORKER["<b>Worker Agents</b> · <i>claude -p</i><br/><br/>WORKER.md<br/>Search PubMed · Query DB<br/>Write protocols · Generate R<br/>Execute R (online mode)"]:::agent
+
+    REVIEWER["<b>Reviewer Agents</b> · <i>claude -p</i><br/><br/>REVIEW.md<br/>Verify PMIDs · Check methods<br/>Check SQL/R · Conventions<br/>Write critiques"]:::agent
+
+    REPORTER["<b>Report Writers</b> · <i>claude -p</i><br/><br/>REPORT_WRITER.md<br/>Read results JSON<br/>Write per-protocol reports"]:::agent
+
+    MCP["<b>MCP Servers</b><br/><br/>PubMed · Datasource Registry<br/>RxNorm · Clinical Codes (LOINC / HCPCS / ICD-10)<br/>R Executor <i>(online mode only)</i>"]:::mcp
+
+    FILES[("<b>Shared output files</b><br/>literature_scan · evidence_gaps<br/>feasibility · protocols/*<br/>coordinator_log · agent_state")]:::files
+
+    COORD -->|spawns| WORKER
+    COORD -->|spawns| REVIEWER
+    COORD -->|spawns| REPORTER
+
+    WORKER -->|writes| FILES
+    REVIEWER -->|writes| FILES
+    REPORTER -->|writes| FILES
+    FILES -->|reads| COORD
+
+    WORKER -.->|tool calls| MCP
+    REVIEWER -.->|tool calls| MCP
 ```
 
 **No hardcoded state machine.** The coordinator agent decides when work is
