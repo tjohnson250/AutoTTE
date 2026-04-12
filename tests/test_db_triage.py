@@ -314,3 +314,75 @@ def test_triage_selection_duplicate_ids_raises(databases_dir, tmp_path):
         )
     assert "duplicate" in str(exc.value).lower()
     assert "alpha" in str(exc.value).lower()
+
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _project_root() -> str:
+    return str(Path(__file__).resolve().parent.parent)
+
+
+def test_cli_list_dbs_prints_table(databases_dir, tmp_path):
+    env = {"PYTHONPATH": str(tmp_path.parent.parent.parent)}
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.db_triage", "list",
+         "--databases-dir", str(databases_dir)],
+        capture_output=True, text=True, cwd=_project_root(),
+    )
+    assert result.returncode == 0
+    assert "alpha" in result.stdout
+    assert "beta" in result.stdout
+    assert "ID" in result.stdout  # header row
+    assert "DEFAULT" in result.stdout
+
+
+def test_cli_show_db_prints_config(databases_dir, tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.db_triage", "show", "alpha",
+         "--databases-dir", str(databases_dir)],
+        capture_output=True, text=True, cwd=_project_root(),
+    )
+    assert result.returncode == 0
+    assert "alpha" in result.stdout
+    assert "Alpha DB" in result.stdout
+
+
+def test_cli_show_db_unknown_id_exits_nonzero(databases_dir, tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.db_triage", "show", "missing_id",
+         "--databases-dir", str(databases_dir)],
+        capture_output=True, text=True, cwd=_project_root(),
+    )
+    assert result.returncode != 0
+    assert "missing_id" in (result.stdout + result.stderr)
+
+
+def test_cli_triage_emits_json(databases_dir, tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.db_triage", "triage",
+         "--selection", "alpha",
+         "--databases-dir", str(databases_dir),
+         "--project-root", str(tmp_path)],
+        capture_output=True, text=True, cwd=_project_root(),
+    )
+    assert result.returncode == 0
+    parsed = json.loads(result.stdout)
+    assert isinstance(parsed, list)
+    assert parsed[0]["id"] == "alpha"
+    assert parsed[0]["disposition"] in ("RUN", "RUN_AUTO_ONBOARD", "SKIP")
+
+
+def test_cli_triage_unknown_id_exits_nonzero(databases_dir, tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.db_triage", "triage",
+         "--selection", "no_such_db",
+         "--databases-dir", str(databases_dir),
+         "--project-root", str(tmp_path)],
+        capture_output=True, text=True, cwd=_project_root(),
+    )
+    assert result.returncode != 0
+    assert "no_such_db" in (result.stdout + result.stderr)

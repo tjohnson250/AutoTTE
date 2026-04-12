@@ -206,3 +206,126 @@ def triage_selection(
             **triage,
         })
     return results
+
+
+import argparse
+import json
+import sys
+
+
+def format_list_table(dbs: list[dict[str, Any]], project_root: str) -> str:
+    """Return a plain-text table of all known DBs with file-presence flags."""
+    headers = ["ID", "NAME", "CDM", "ENGINE", "DEFAULT", "SCHEMA", "PROFILE", "CONVENTIONS"]
+    rows: list[list[str]] = [headers]
+    for db in dbs:
+        cfg = db["config"]
+        default_mode = "online" if cfg.get("online") else "offline"
+        schema_present = Path(_resolve(project_root, cfg.get("schema_dump", ""))).exists()
+        profile_present = Path(_resolve(project_root, cfg.get("data_profile", ""))).exists()
+        conv_present = Path(_resolve(project_root, cfg.get("conventions", ""))).exists()
+        rows.append([
+            db["id"],
+            cfg.get("name", db["id"]),
+            cfg.get("cdm", ""),
+            cfg.get("engine", ""),
+            default_mode,
+            "yes" if schema_present else "no",
+            "yes" if profile_present else "no",
+            "yes" if conv_present else "no",
+        ])
+
+    # Pad each column to its max width.
+    widths = [max(len(row[i]) for row in rows) for i in range(len(headers))]
+    lines = []
+    for row in rows:
+        lines.append("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
+    return "\n".join(lines)
+
+
+def format_show_db(db: dict[str, Any], project_root: str) -> str:
+    """Return a multi-line description of one DB + its file presence."""
+    cfg = db["config"]
+    lines = [
+        f"ID:        {db['id']}",
+        f"Name:      {cfg.get('name', db['id'])}",
+        f"CDM:       {cfg.get('cdm', '')}",
+        f"Engine:    {cfg.get('engine', '')}",
+        f"Default:   {'online' if cfg.get('online') else 'offline'}",
+        f"YAML:      {db['yaml_path']}",
+        "",
+        "Files:",
+    ]
+    for label, key in [
+        ("  schema_dump  ", "schema_dump"),
+        ("  data_profile ", "data_profile"),
+        ("  conventions  ", "conventions"),
+    ]:
+        path = cfg.get(key, "")
+        resolved = _resolve(project_root, path)
+        present = "present" if (resolved and Path(resolved).exists()) else "MISSING"
+        lines.append(f"{label}{path:<60} [{present}]")
+    return "\n".join(lines)
+
+
+def _cli_list(args: argparse.Namespace) -> int:
+    dbs = discover_dbs(args.databases_dir)
+    print(format_list_table(dbs, args.project_root))
+    return 0
+
+
+def _cli_show(args: argparse.Namespace) -> int:
+    dbs = discover_dbs(args.databases_dir)
+    match = next((db for db in dbs if db["id"] == args.id), None)
+    if match is None:
+        valid = ", ".join(sorted(db["id"] for db in dbs)) or "(none)"
+        print(f"No DB with id {args.id!r}. Valid ids: {valid}", file=sys.stderr)
+        return 1
+    print(format_show_db(match, args.project_root))
+    return 0
+
+
+def _cli_triage(args: argparse.Namespace) -> int:
+    try:
+        results = triage_selection(
+            selection=args.selection,
+            databases_dir=args.databases_dir,
+            project_root=args.project_root,
+            mode_override=args.mode or "",
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(json.dumps(results, indent=2))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="tools.db_triage")
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
+
+    # Create a parent parser with shared arguments for all subcommands.
+    parent_parser = argparse.ArgumentParser(add_help=False)
+    parent_parser.add_argument("--databases-dir", default="databases")
+    parent_parser.add_argument("--project-root", default=".")
+
+    subparsers.add_parser("list", parents=[parent_parser])
+
+    show = subparsers.add_parser("show", parents=[parent_parser])
+    show.add_argument("id")
+
+    triage = subparsers.add_parser("triage", parents=[parent_parser])
+    triage.add_argument("--selection", required=True)
+    triage.add_argument("--mode", choices=["online", "offline"], default="")
+
+    args = parser.parse_args(argv)
+    if args.cmd == "list":
+        return _cli_list(args)
+    if args.cmd == "show":
+        return _cli_show(args)
+    if args.cmd == "triage":
+        return _cli_triage(args)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
