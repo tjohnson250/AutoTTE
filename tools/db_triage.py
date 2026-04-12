@@ -43,3 +43,74 @@ def discover_dbs(databases_dir: str) -> list[dict[str, Any]]:
             "config": config,
         })
     return results
+
+
+# Disposition constants — these appear in db_triage.json and are checked
+# by run.sh and the coordinator prompt. Do not rename without updating
+# both consumers.
+RUN = "RUN"
+RUN_AUTO_ONBOARD = "RUN_AUTO_ONBOARD"
+SKIP = "SKIP"
+
+
+def _effective_mode(config: dict, mode_override: str) -> str:
+    if mode_override in ("online", "offline"):
+        return mode_override
+    return "online" if config.get("online") else "offline"
+
+
+def triage_one(
+    config: dict,
+    schema_path: str,
+    profile_path: str,
+    conventions_path: str,
+    mode_override: str,
+) -> dict[str, Any]:
+    """Triage one DB. Return {disposition, effective_mode, reason, warnings}.
+
+    disposition is one of RUN, RUN_AUTO_ONBOARD, SKIP.
+    reason is a human-readable string explaining a SKIP or auto-onboard.
+    warnings is a list of non-fatal issues (e.g. missing conventions).
+    """
+    effective_mode = _effective_mode(config, mode_override)
+    schema_present = Path(schema_path).exists() if schema_path else False
+    profile_present = Path(profile_path).exists() if profile_path else False
+    conventions_present = Path(conventions_path).exists() if conventions_path else False
+
+    warnings: list[str] = []
+    if not conventions_present:
+        warnings.append("Conventions file missing; protocols may miss DB-specific rules.")
+
+    missing_parts: list[str] = []
+    if not schema_present:
+        missing_parts.append("schema dump")
+    if not profile_present:
+        missing_parts.append("data profile")
+
+    if not missing_parts:
+        return {
+            "disposition": RUN,
+            "effective_mode": effective_mode,
+            "reason": "",
+            "warnings": warnings,
+        }
+
+    missing_str = " and ".join(missing_parts)
+    if effective_mode == "online":
+        warnings.append(f"{missing_str} missing; Phase 0 will generate via r_executor.")
+        return {
+            "disposition": RUN_AUTO_ONBOARD,
+            "effective_mode": effective_mode,
+            "reason": f"{missing_str} missing (will be auto-generated).",
+            "warnings": warnings,
+        }
+
+    return {
+        "disposition": SKIP,
+        "effective_mode": effective_mode,
+        "reason": (
+            f"Offline with no {missing_str}. Run in online mode once or "
+            "generate the files manually."
+        ),
+        "warnings": warnings,
+    }

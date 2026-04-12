@@ -65,3 +65,150 @@ def test_discover_dbs_skips_yaml_without_id(databases_dir):
     dbs = discover_dbs(str(databases_dir))
     ids = sorted(db["id"] for db in dbs)
     assert ids == ["alpha", "beta"]
+
+
+from tools.db_triage import triage_one
+
+
+def _make_config(online=True, **overrides):
+    base = {
+        "id": "example",
+        "name": "Example",
+        "cdm": "pcornet",
+        "engine": "duckdb",
+        "online": online,
+        "connection": {"r_code": "con <- NULL"},
+        "schema_dump": "databases/schemas/example_schema.txt",
+        "data_profile": "databases/profiles/example_profile.md",
+        "conventions": "databases/conventions/example_conventions.md",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_triage_online_profile_present(tmp_path):
+    (tmp_path / "schema.txt").write_text("x")
+    (tmp_path / "profile.md").write_text("x")
+    (tmp_path / "conv.md").write_text("x")
+    result = triage_one(
+        _make_config(online=True),
+        schema_path=str(tmp_path / "schema.txt"),
+        profile_path=str(tmp_path / "profile.md"),
+        conventions_path=str(tmp_path / "conv.md"),
+        mode_override="",
+    )
+    assert result["disposition"] == "RUN"
+    assert result["effective_mode"] == "online"
+    assert result["warnings"] == []
+
+
+def test_triage_online_profile_missing_is_auto_onboard(tmp_path):
+    (tmp_path / "schema.txt").write_text("x")
+    (tmp_path / "conv.md").write_text("x")
+    result = triage_one(
+        _make_config(online=True),
+        schema_path=str(tmp_path / "schema.txt"),
+        profile_path=str(tmp_path / "missing_profile.md"),
+        conventions_path=str(tmp_path / "conv.md"),
+        mode_override="",
+    )
+    assert result["disposition"] == "RUN_AUTO_ONBOARD"
+    assert result["effective_mode"] == "online"
+    assert any("profile missing" in w.lower() for w in result["warnings"])
+
+
+def test_triage_offline_profile_present(tmp_path):
+    (tmp_path / "schema.txt").write_text("x")
+    (tmp_path / "profile.md").write_text("x")
+    (tmp_path / "conv.md").write_text("x")
+    result = triage_one(
+        _make_config(online=False),
+        schema_path=str(tmp_path / "schema.txt"),
+        profile_path=str(tmp_path / "profile.md"),
+        conventions_path=str(tmp_path / "conv.md"),
+        mode_override="",
+    )
+    assert result["disposition"] == "RUN"
+    assert result["effective_mode"] == "offline"
+
+
+def test_triage_offline_profile_missing_is_skip(tmp_path):
+    (tmp_path / "schema.txt").write_text("x")
+    (tmp_path / "conv.md").write_text("x")
+    result = triage_one(
+        _make_config(online=False),
+        schema_path=str(tmp_path / "schema.txt"),
+        profile_path=str(tmp_path / "missing_profile.md"),
+        conventions_path=str(tmp_path / "conv.md"),
+        mode_override="",
+    )
+    assert result["disposition"] == "SKIP"
+    assert "offline" in result["reason"].lower()
+
+
+def test_triage_schema_missing_offline_is_skip(tmp_path):
+    (tmp_path / "profile.md").write_text("x")
+    (tmp_path / "conv.md").write_text("x")
+    result = triage_one(
+        _make_config(online=False),
+        schema_path=str(tmp_path / "missing_schema.txt"),
+        profile_path=str(tmp_path / "profile.md"),
+        conventions_path=str(tmp_path / "conv.md"),
+        mode_override="",
+    )
+    assert result["disposition"] == "SKIP"
+
+
+def test_triage_schema_missing_online_is_auto_onboard(tmp_path):
+    (tmp_path / "profile.md").write_text("x")
+    (tmp_path / "conv.md").write_text("x")
+    result = triage_one(
+        _make_config(online=True),
+        schema_path=str(tmp_path / "missing_schema.txt"),
+        profile_path=str(tmp_path / "profile.md"),
+        conventions_path=str(tmp_path / "conv.md"),
+        mode_override="",
+    )
+    assert result["disposition"] == "RUN_AUTO_ONBOARD"
+
+
+def test_triage_conventions_missing_warns_but_runs(tmp_path):
+    (tmp_path / "schema.txt").write_text("x")
+    (tmp_path / "profile.md").write_text("x")
+    result = triage_one(
+        _make_config(online=True),
+        schema_path=str(tmp_path / "schema.txt"),
+        profile_path=str(tmp_path / "profile.md"),
+        conventions_path=str(tmp_path / "missing_conv.md"),
+        mode_override="",
+    )
+    assert result["disposition"] == "RUN"
+    assert any("conventions" in w.lower() for w in result["warnings"])
+
+
+def test_triage_mode_override_online_forces_online(tmp_path):
+    (tmp_path / "schema.txt").write_text("x")
+    (tmp_path / "profile.md").write_text("x")
+    (tmp_path / "conv.md").write_text("x")
+    result = triage_one(
+        _make_config(online=False),
+        schema_path=str(tmp_path / "schema.txt"),
+        profile_path=str(tmp_path / "profile.md"),
+        conventions_path=str(tmp_path / "conv.md"),
+        mode_override="online",
+    )
+    assert result["effective_mode"] == "online"
+
+
+def test_triage_mode_override_offline_forces_offline(tmp_path):
+    (tmp_path / "schema.txt").write_text("x")
+    (tmp_path / "profile.md").write_text("x")
+    (tmp_path / "conv.md").write_text("x")
+    result = triage_one(
+        _make_config(online=True),
+        schema_path=str(tmp_path / "schema.txt"),
+        profile_path=str(tmp_path / "profile.md"),
+        conventions_path=str(tmp_path / "conv.md"),
+        mode_override="offline",
+    )
+    assert result["effective_mode"] == "offline"
