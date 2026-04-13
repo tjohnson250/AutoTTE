@@ -188,11 +188,11 @@ If a database was configured in your initial prompt:
 1. **Online mode:**
    a. Read the DB config YAML to understand the database.
    b. Check if the schema dump file exists at the path specified in the config.
-      If not, call `dump_schema()` via the R executor to generate it.
+      If not, call `dump_schema(db_id=…)` via the R executor to generate it.
    c. Check if the data profile file exists. If not:
       - Read the generated schema dump.
       - Determine appropriate profiling queries based on the CDM type.
-      - Write R profiling code and call `run_profiler(code)` to execute it.
+      - Write R profiling code and call `run_profiler(db_id=…, code=…)` to execute it.
    d. Log onboarding results to `{results_dir}/coordinator_log.md`.
 
 2. **Offline mode:**
@@ -225,7 +225,7 @@ If a database was configured in your initial prompt:
 
 **Online mode:**
 1. For each approved protocol with a `protocol_NN_analysis.R` file:
-   a. Launch an execution worker that runs the R script via `execute_r()`.
+   a. Launch an execution worker that runs the R script via `execute_r(db_id, code)`.
    b. The worker executes the full script and verifies that
       `protocol_NN_results.json` was created in the protocols/ directory.
    c. The worker checks for publication output files (table1.html,
