@@ -85,25 +85,95 @@ often take longer than the timeout allows.
 
 ## Data Sources
 
-Your initial prompt will specify the data source configuration:
+Your initial prompt lists the selected databases in one of three shapes:
 
-- **No database configured:** Protocols target public datasets only.
-  Workers use the datasource MCP tools to find suitable public datasets.
-- **Database configured (offline):** Protocols target the configured database.
-  Workers use `get_schema(id)`, `get_profile(id)`, and `get_conventions(id)`
-  from the datasource MCP server. They cannot query the database directly.
-- **Database configured (online):** Same as offline, plus workers can query
-  the live database via `execute_r()` and `query_db()` to validate feasibility
-  and test generated R code.
+- **Public datasets only:** no `--dbs` / `--db-config` was passed. Workers use
+  `list_datasources` / `get_datasource_details` to target public datasets.
+- **Single-DB run:** one DB id is listed. All feasibility / protocol /
+  execution / report work targets that one DB. Output lives under
+  `results/{ta}/{db_id}/`. Literature discovery remains at `results/{ta}/`.
+- **Multi-DB run:** two or more DB ids are listed in `db_triage.json`.
+  Literature discovery runs ONCE at `results/{ta}/`. Feasibility, protocol
+  generation, execution, and per-protocol reports branch per DB into
+  `results/{ta}/{db_id}/`. The executive summary synthesizes across all DBs.
 
-Public datasets are always available via the datasource registry regardless
-of whether a database is configured.
+### Reading `db_triage.json`
 
-When a database is configured, tell workers:
-1. The database ID, CDM type, engine, and schema prefix (from your initial prompt)
-2. To call `get_schema(id)`, `get_profile(id)`, and `get_conventions(id)`
-3. To read and apply ALL conventions before writing SQL or R code
-4. Whether they have online access (can use `execute_r()` / `query_db()`)
+At the start of every run that selected any DB, read
+`{results_dir}/db_triage.json`. It is a JSON array of entries:
+
+```json
+[
+  {
+    "id": "nhanes",
+    "name": "NHANES",
+    "cdm": "nhanes",
+    "engine": "duckdb",
+    "yaml_path": "databases/nhanes.yaml",
+    "disposition": "RUN" | "RUN_AUTO_ONBOARD" | "SKIP",
+    "effective_mode": "online" | "offline",
+    "reason": "…",
+    "warnings": ["…"]
+  }
+]
+```
+
+- `RUN` — the DB is ready. Proceed through every phase.
+- `RUN_AUTO_ONBOARD` — the DB is missing a schema dump or profile. During
+  Phase 0, generate the missing files via the r_executor.
+- `SKIP` — `run.sh` has already excluded this DB. It will not appear in
+  later phases; reflect the skip in `agent_state.json` and note it in the
+  executive summary.
+
+### Multi-DB phase orchestration (phase-major)
+
+Advance all active DBs through each phase before starting the next. Run
+phases in this order:
+
+1. **Phase 0 (per-DB, parallelizable):** For each `RUN_AUTO_ONBOARD` DB,
+   generate schema dump (if missing) then profile (if missing) via
+   `dump_schema(db_id=…)` and `run_profiler(db_id=…, code=…)`.
+2. **Phase 1 (shared, once):** Launch one discovery worker and one
+   reviewer. Outputs live at `results/{ta}/01_literature_scan.md` and
+   `02_evidence_gaps.md`. No DB awareness needed.
+3. **Phase 2 (per-DB, sequential):** Launch one feasibility worker per
+   active DB. Each worker writes to
+   `results/{ta}/{db_id}/03_feasibility.md`. After all report, read every
+   feasibility file and tag questions feasible on ≥2 DBs for later
+   replication analysis. Launch one reviewer per DB.
+4. **Phase 3 (per-DB, sequential):** Per DB, launch one protocol worker.
+   Protocol numbering restarts at 01 inside each DB's `protocols/` folder.
+   When the same PICO question is feasible on multiple DBs, each DB's
+   worker produces a protocol tailored to its own CDM and conventions
+   (peer protocols, not copies). Launch one reviewer per DB.
+5. **Phase 4 (per-DB, mode-dependent):** For each online DB, launch an
+   execution worker per protocol and then a report writer. For each
+   offline DB, write a per-DB `NEXT_STEPS.md` and transition that DB to
+   `awaiting_results`. Continue other DBs regardless.
+6. **Executive summary (shared):** Read every per-DB feasibility file and
+   every per-protocol report, then write `results/{ta}/summary.md`.
+
+### Failure isolation
+
+Failures are isolated per DB. Max 3 revisions per phase per DB, max 2
+backtracks across the whole run. When a DB fails beyond the revision
+guardrail, mark it `failed` in `agent_state.json` and drop it from later
+phases; other DBs continue unaffected. The summary records what failed.
+
+### Telling workers about their DB
+
+Every feasibility / protocol / execution / report sub-agent targets
+exactly one DB. In the worker prompt, include:
+
+1. The DB id (e.g. `'nhanes'`), name, CDM, engine, and `effective_mode`
+   from `db_triage.json`.
+2. Exact file paths: what to read and what to write, scoped to
+   `results/{ta}/{db_id}/`.
+3. A reminder that every r_executor call (`execute_r`, `query_db`,
+   `list_tables`, `describe_table`, `dump_schema`, `run_profiler`) takes
+   a required `db_id` argument that must match the DB the worker was
+   told to target.
+4. If this is a revision: the review notes.
 
 ## The Research Phases
 
@@ -413,6 +483,29 @@ Maintain `{results_dir}/agent_state.json` with:
 ```
 
 Update this after every sub-agent completes.
+
+In multi-DB runs, `agent_state.json` tracks shared and per-DB phases
+independently:
+
+```json
+{
+  "therapeutic_area": "...",
+  "current_phase": "discovery|feasibility|protocol|execution|reporting|summary|done",
+  "shared": {
+    "discovery": {"status": "accepted", "revision_count": 1}
+  },
+  "dbs": {
+    "nhanes":   {"mode": "online",  "phase": "reporting", "status": "running",
+                 "revision_counts": {"feasibility": 0, "protocol": 1},
+                 "protocols": 3, "protocols_completed": 2},
+    "mimic_iv": {"mode": "offline", "phase": "awaiting_results", "status": "paused"},
+    "foo":      {"status": "skipped", "reason": "offline_no_profile"}
+  },
+  "backtrack_count": 0,
+  "total_sub_agents_launched": 14,
+  "history": [ ... ]
+}
+```
 
 ## Handling Previous Runs
 
