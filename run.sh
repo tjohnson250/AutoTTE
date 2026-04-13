@@ -216,33 +216,60 @@ echo "============================================="
 echo ""
 
 # ---------------------------------------------------------------------------
-# Build MCP session config for online mode
+# Build MCP session config when any selected DB needs online r_executor.
 # ---------------------------------------------------------------------------
+
 MCP_CONFIG_FLAG=""
 cleanup_session_config() {
   rm -f "$SCRIPT_DIR/.mcp-session.json"
 }
 
-if [[ "$DB_ONLINE" == "true" && -n "$DB_CONFIG" ]]; then
-  # Generate session-specific MCP config with r_executor
-  python3 -c "
+ONLINE_YAML_PATHS=""
+if [[ -n "$TRIAGE_JSON" ]]; then
+  ONLINE_YAML_PATHS=$(python3 -c "
 import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+paths = [r['yaml_path'] for r in rows
+         if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')
+         and r['effective_mode'] == 'online']
+print('\n'.join(paths))
+")
+fi
+
+if [[ -n "$ONLINE_YAML_PATHS" ]]; then
+  python3 -c "
+import json, sys
+paths = '''$ONLINE_YAML_PATHS'''.strip().splitlines()
+mode = '${DB_MODE:-}'
 with open('.mcp.json') as f:
     config = json.load(f)
+args = ['tools/r_executor_server.py']
+for p in paths:
+    args += ['--config', p]
+if mode:
+    args += ['--mode', mode]
 config['mcpServers']['r_executor'] = {
     'command': 'python',
-    'args': ['tools/r_executor_server.py', '--config', '$DB_CONFIG'],
-    'env': {}
+    'args': args,
+    'env': {},
 }
 with open('.mcp-session.json', 'w') as f:
     json.dump(config, f, indent=2)
 "
   MCP_CONFIG=".mcp-session.json"
-  trap cleanup_session_config EXIT
-  echo "Generated .mcp-session.json with r_executor for online mode."
-  echo ""
+  if [[ "${AUTOTTE_DRY_RUN:-}" != "2" ]]; then
+    trap cleanup_session_config EXIT
+  fi
+  echo "Generated .mcp-session.json with r_executor for $(echo "$ONLINE_YAML_PATHS" | wc -l | tr -d ' ') online DB(s)."
 else
   MCP_CONFIG=".mcp.json"
+fi
+
+# Dry-run stage 2: stop after session config generation.
+if [[ "${AUTOTTE_DRY_RUN:-}" == "2" ]]; then
+  echo "AUTOTTE_DRY_RUN=2 — stopping after MCP session generation."
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------

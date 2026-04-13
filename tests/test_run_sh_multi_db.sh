@@ -78,6 +78,34 @@ OUT=$(AUTOTTE_DRY_RUN=1 ./run.sh "topic" 2>&1); RC=$?
 assert_exit_code 0 "$RC" "exit 0"
 assert_contains "Public datasets" "$OUT" "banner mentions public datasets"
 
+echo "Test 9: --dbs multi with online DBs writes multi-config r_executor to .mcp-session.json"
+OUT=$(AUTOTTE_DRY_RUN=2 ./run.sh "topic" --dbs nhanes,synthetic_pcornet --db-mode online 2>&1); RC=$?
+assert_exit_code 0 "$RC" "exit 0"
+if [[ -f ".mcp-session.json" ]]; then
+  SESSION_CONFIGS=$(python3 -c "
+import json
+with open('.mcp-session.json') as f:
+    c = json.load(f)
+args = c['mcpServers']['r_executor']['args']
+count = sum(1 for a in args if a == '--config')
+print(count)
+")
+  assert_contains "2" "$SESSION_CONFIGS" "two --config args in .mcp-session.json"
+  rm -f .mcp-session.json
+else
+  echo "  FAIL: .mcp-session.json not created"; FAIL=$((FAIL + 1))
+fi
+
+echo "Test 10: --dbs offline-only does NOT create .mcp-session.json"
+rm -f .mcp-session.json
+OUT=$(AUTOTTE_DRY_RUN=2 ./run.sh "topic" --dbs secure_pcornet_cdw 2>&1); RC=$?
+if [[ ! -f ".mcp-session.json" ]]; then
+  echo "  PASS: no .mcp-session.json written for offline-only run"; PASS=$((PASS + 1))
+else
+  echo "  FAIL: .mcp-session.json should not exist when no DB is online"; FAIL=$((FAIL + 1))
+  rm -f .mcp-session.json
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ "$FAIL" == "0" ]] && exit 0 || exit 1
