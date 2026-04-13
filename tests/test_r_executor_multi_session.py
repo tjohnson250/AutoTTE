@@ -223,3 +223,23 @@ def test_registry_load_configs_failure_preserves_prior_state(tmp_path):
         reg.load_configs([str(pa_dup)])
 
     assert reg.db_ids() == ["a"]
+
+
+def test_registry_drop_session_isolates_failures(two_configs):
+    """Dropping a failed session must not affect other sessions."""
+    reg = SessionRegistry()
+    reg.load_configs(two_configs)
+    s_alpha = reg.get_session("alpha")
+    s_beta = reg.get_session("beta")
+    assert reg.has_session("alpha") and reg.has_session("beta")
+
+    # Simulate a crash in alpha's session by dropping it.
+    reg.drop_session("alpha")
+
+    assert reg.has_session("alpha") is False
+    assert reg.has_session("beta") is True
+    # Beta is still the same object as before.
+    assert reg.get_session("beta") is s_beta
+    # Re-acquiring alpha creates a new session.
+    s_alpha_2 = reg.get_session("alpha")
+    assert s_alpha_2 is not s_alpha
