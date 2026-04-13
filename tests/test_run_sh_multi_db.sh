@@ -106,6 +106,23 @@ else
   rm -f .mcp-session.json
 fi
 
+echo "Test 11: AUTOTTE_DRY_RUN=3 prints the coordinator prompt with multi-DB context"
+rm -f .mcp-session.json
+OUT=$(AUTOTTE_DRY_RUN=3 ./run.sh "topic" --dbs nhanes,synthetic_pcornet --db-mode online 2>&1); RC=$?
+assert_exit_code 0 "$RC" "exit 0"
+assert_contains "db_triage.json" "$OUT" "prompt references db_triage.json"
+assert_contains "Multi-DB run" "$OUT" "prompt mentions Multi-DB run"
+assert_contains "nhanes" "$OUT" "prompt lists nhanes"
+assert_contains "synthetic_pcornet" "$OUT" "prompt lists synthetic_pcornet"
+rm -f .mcp-session.json
+
+echo "Test 12: AUTOTTE_DRY_RUN=3 for single DB still prints prompt"
+OUT=$(AUTOTTE_DRY_RUN=3 ./run.sh "topic" --dbs nhanes 2>&1); RC=$?
+assert_exit_code 0 "$RC" "exit 0"
+assert_contains "Single-DB run" "$OUT" "prompt mentions Single-DB run"
+assert_contains "nhanes" "$OUT" "prompt lists nhanes"
+rm -f .mcp-session.json
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ "$FAIL" == "0" ]] && exit 0 || exit 1

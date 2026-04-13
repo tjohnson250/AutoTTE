@@ -97,52 +97,11 @@ RESULTS_DIR="results/$(echo "$THERAPEUTIC_AREA" | tr ' ' '_' | tr '[:upper:]' '[
 mkdir -p "$RESULTS_DIR/protocols"
 
 # ---------------------------------------------------------------------------
-# Parse DB config if provided
-# ---------------------------------------------------------------------------
-DB_ID=""
-DB_NAME=""
-DB_CDM=""
-DB_ENGINE=""
-DB_SCHEMA_PREFIX=""
-DB_ONLINE="false"
-
-if [[ -n "$DB_CONFIG" ]]; then
-  if [[ ! -f "$DB_CONFIG" ]]; then
-    echo "ERROR: DB config file not found: $DB_CONFIG" >&2
-    exit 1
-  fi
-
-  # Parse YAML using Python (pyyaml is a dependency)
-  eval "$(python3 -c "
-import yaml, sys
-with open('$DB_CONFIG') as f:
-    c = yaml.safe_load(f)
-print(f'DB_ID={c.get(\"id\", \"\")}')
-print(f'DB_NAME=\"{c.get(\"name\", \"\")}\"')
-print(f'DB_CDM={c.get(\"cdm\", \"\")}')
-print(f'DB_ENGINE={c.get(\"engine\", \"\")}')
-print(f'DB_SCHEMA_PREFIX=\"{c.get(\"schema_prefix\", \"\")}\"')
-print(f'DB_ONLINE={str(c.get(\"online\", False)).lower()}')
-")"
-
-  # Apply mode override
-  if [[ -n "$DB_MODE" ]]; then
-    if [[ "$DB_MODE" == "offline" ]]; then
-      DB_ONLINE="false"
-    elif [[ "$DB_MODE" == "online" ]]; then
-      DB_ONLINE="true"
-    fi
-  fi
-fi
-
-# ---------------------------------------------------------------------------
 # Triage: resolve DB_IDS through tools.db_triage and capture disposition.
 # ---------------------------------------------------------------------------
 
 TRIAGE_JSON=""
 if [[ -n "$DB_IDS" ]]; then
-  RESULTS_DIR="results/$(echo "$THERAPEUTIC_AREA" | tr ' ' '_' | tr '[:upper:]' '[:lower:]')"
-  mkdir -p "$RESULTS_DIR"
 
   TRIAGE_JSON="$RESULTS_DIR/db_triage.json"
   if ! python3 -m tools.db_triage triage \
@@ -199,13 +158,10 @@ fi
 echo "============================================="
 echo " Auto-Protocol Designer"
 echo " Therapeutic area: $THERAPEUTIC_AREA"
-if [[ -n "$DB_CONFIG" ]]; then
-echo " Database:         $DB_NAME ($DB_ID)"
-echo " CDM:              $DB_CDM"
-echo " Engine:           $DB_ENGINE"
-echo " Mode:             $([ "$DB_ONLINE" = "true" ] && echo "ONLINE" || echo "OFFLINE")"
+if [[ -n "$TRIAGE_JSON" ]]; then
+  echo " Databases:        (see triage above / $TRIAGE_JSON)"
 else
-echo " Data sources:     Public datasets only"
+  echo " Data sources:     Public datasets only"
 fi
 echo " Max turns/sub-agent: $MAX_TURNS"
 echo " Results: $RESULTS_DIR/"
@@ -281,7 +237,7 @@ CODE_TOOLS="mcp__rxnorm__search_drug,mcp__rxnorm__get_all_related,mcp__rxnorm__g
 FILE_TOOLS="Bash,Read,Write,Edit,WebSearch,WebFetch"
 
 R_EXECUTOR_TOOLS=""
-if [[ "$DB_ONLINE" == "true" ]]; then
+if [[ -n "$ONLINE_YAML_PATHS" ]]; then
   R_EXECUTOR_TOOLS=",mcp__r_executor__execute_r,mcp__r_executor__query_db,mcp__r_executor__list_tables,mcp__r_executor__describe_table,mcp__r_executor__dump_schema,mcp__r_executor__run_profiler"
 fi
 
@@ -291,32 +247,71 @@ REPORT_WRITER_TOOLS="Read,Write,Edit"
 COORDINATOR_TOOLS="Bash,Read,Write,Edit"
 
 # ---------------------------------------------------------------------------
-# Build coordinator prompt
+# Build coordinator prompt context.
 # ---------------------------------------------------------------------------
-DB_CONTEXT=""
-if [[ -n "$DB_CONFIG" ]]; then
-  DB_CONTEXT="
-Database configuration:
-- Config file: $DB_CONFIG
-- Database ID: $DB_ID
-- Database name: $DB_NAME
-- CDM type: $DB_CDM
-- Engine: $DB_ENGINE
-- Schema prefix: $DB_SCHEMA_PREFIX
-- Mode: $([ "$DB_ONLINE" = "true" ] && echo "ONLINE (agents can query the database)" || echo "OFFLINE (agents work from schema dump and data profile)")
 
-When launching sub-agents for this database:
-- Tell workers the database ID ('$DB_ID'), CDM type, engine, and schema prefix.
-- Tell workers to call get_schema('$DB_ID'), get_profile('$DB_ID'), and
-  get_conventions('$DB_ID') from the datasource MCP server to get database
-  details. Do NOT reference hardcoded file paths.
-- Tell workers to read and apply ALL database conventions before writing any
-  SQL or R code. Conventions are hard requirements, not suggestions.
-$([ "$DB_ONLINE" = "true" ] && echo "- Tell workers they have online access and can use execute_r() and query_db()
-  to validate their work against the live database.
-- During Phase 0 (Data Source Onboarding), check if schema dump and data profile
-  exist. If not, use dump_schema() and run_profiler() to generate them." || echo "- Workers do NOT have online database access. They must work from the schema
-  dump and data profile files.")"
+DB_CONTEXT=""
+if [[ -n "$TRIAGE_JSON" ]]; then
+  # Count RUN/RUN_AUTO_ONBOARD entries.
+  LIVE_COUNT=$(python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+print(sum(1 for r in rows if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')))
+")
+
+  if [[ "$LIVE_COUNT" == "1" ]]; then
+    HEADER="Single-DB run"
+  else
+    HEADER="Multi-DB run across $LIVE_COUNT databases"
+  fi
+
+  DB_CONTEXT=$(python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+header = '$HEADER'
+lines = [f'{header}.', '']
+lines.append('Selected databases (from db_triage.json):')
+for r in rows:
+    lines.append(
+        f\"  - id={r['id']} name={r['name']!r} cdm={r['cdm']} engine={r['engine']} \"
+        f\"mode={r['effective_mode']} disposition={r['disposition']}\"
+    )
+    if r.get('reason'):
+        lines.append(f\"    reason: {r['reason']}\")
+    for w in r.get('warnings', []):
+        lines.append(f\"    warn: {w}\")
+lines += [
+    '',
+    'Triage file path: ' + '$TRIAGE_JSON',
+    'Read this file at startup to understand per-DB status and mode.',
+    '',
+    'For every sub-agent launch:',
+    '  - Tell workers the exact DB id they are targeting and its CDM/engine/mode.',
+    '  - Tell workers to call get_schema(id), get_profile(id), and get_conventions(id)',
+    '    from the datasource MCP server scoped to their DB id.',
+    '  - Tell workers that any r_executor call (execute_r, query_db, list_tables,',
+    '    describe_table, dump_schema, run_profiler) requires a db_id argument',
+    '    matching the DB they were told to target.',
+    '  - Feasibility, protocol, execution, and report workers each handle exactly',
+    '    one DB. Literature discovery is shared across all DBs (run once).',
+    '',
+    'Output layout:',
+    '  results/{ta}/{db_id}/ — per-DB feasibility, protocols, reports',
+    '  results/{ta}/         — shared literature, summary, coordinator_log, agent_state',
+]
+print('\n'.join(lines))
+")
+fi
+
+# Dry-run stage 3: stop after prompt context is built.
+if [[ "${AUTOTTE_DRY_RUN:-}" == "3" ]]; then
+  echo "AUTOTTE_DRY_RUN=3 — stopping after prompt context build."
+  echo "----- DB_CONTEXT -----"
+  echo "$DB_CONTEXT"
+  echo "----------------------"
+  exit 0
 fi
 
 cat <<PROMPT | claude -p \
