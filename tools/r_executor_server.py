@@ -316,48 +316,52 @@ class SessionRegistry:
 
 
 # ---------------------------------------------------------------------------
-# Global state
+# Global registry (used by MCP tools)
 # ---------------------------------------------------------------------------
 
-_config: dict = {}
-_mode_override: str = ""
-_session = RSession()
+_registry = SessionRegistry()
 
 
-def _ensure_connected() -> dict | None:
-    """Lazily start and connect the R session.
+def _ensure_connected(db_id: str) -> dict | None:
+    """Lazily start and connect the R session for *db_id*.
 
-    Returns an error dict if offline or connection fails, otherwise None.
+    Returns an error dict if the id is unknown, offline, or the connection
+    fails; otherwise None.
     """
-    if not is_online(_config, _mode_override):
-        db_name = _config.get("name", _config.get("id", "unknown"))
+    try:
+        config = _registry.get_config(db_id)
+    except KeyError:
+        return {"error": f"Unknown db_id {db_id!r}. Known: {sorted(_registry.db_ids())}"}
+
+    mode_override = _registry.get_mode_override(db_id)
+    if not is_online(config, mode_override):
+        db_name = config.get("name", db_id)
         return {
             "error": (
-                f"Database '{db_name}' is offline. "
-                "Set online: true in config or use --mode online."
+                f"Database '{db_name}' ({db_id}) is offline. "
+                "Set online: true in its YAML or pass --mode online."
             )
         }
 
-    if _session.connected:
-        return None  # Already connected
+    session = _registry.get_session(db_id)
+    if session.connected:
+        return None
 
-    # Start session if not running
-    if _session._proc is None:
+    if session._proc is None:
         try:
-            _session.start()
+            session.start()
         except FileNotFoundError:
             return {"error": "R executable not found. Ensure R is installed and on PATH."}
         except Exception as exc:
-            return {"error": f"Failed to start R session: {exc}"}
+            return {"error": f"Failed to start R session for {db_id}: {exc}"}
 
-    # Establish DB connection
-    r_code = get_connection_code(_config)
+    r_code = get_connection_code(config)
     if not r_code:
-        return {"error": "No connection.r_code configured."}
+        return {"error": f"No connection.r_code configured for {db_id}."}
 
-    result = _session.connect_db(r_code)
+    result = session.connect_db(r_code)
     if not result.get("success", False):
-        return {"error": f"DB connection failed: {result.get('stderr', '')}"}
+        return {"error": f"DB connection failed for {db_id}: {result.get('stderr', '')}"}
 
     return None
 

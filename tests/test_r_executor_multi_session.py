@@ -87,3 +87,30 @@ def test_registry_load_configs_rejects_duplicate_ids(tmp_path):
     with pytest.raises(ValueError) as exc:
         reg.load_configs([str(pa), str(pb)])
     assert "dup" in str(exc.value).lower()
+
+
+from tools.r_executor_server import _ensure_connected, _registry
+
+
+def test_ensure_connected_offline_returns_error(two_configs, monkeypatch):
+    # Rewrite one config to be offline.
+    import yaml
+    with open(two_configs[0]) as fh:
+        cfg = yaml.safe_load(fh)
+    cfg["online"] = False
+    with open(two_configs[0], "w") as fh:
+        yaml.dump(cfg, fh)
+
+    _registry.__init__()  # reset global registry
+    _registry.load_configs(two_configs)
+    err = _ensure_connected("alpha")
+    assert err is not None
+    assert "offline" in err["error"].lower()
+
+
+def test_ensure_connected_unknown_id_returns_error(two_configs):
+    _registry.__init__()
+    _registry.load_configs(two_configs)
+    err = _ensure_connected("no_such_db")
+    assert err is not None
+    assert "unknown" in err["error"].lower()
