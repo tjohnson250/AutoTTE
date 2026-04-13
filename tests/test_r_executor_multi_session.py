@@ -176,3 +176,50 @@ def test_main_applies_mode_override(two_configs, monkeypatch):
 
     rex_main(["--config", two_configs[0], "--mode", "offline"])
     assert rex._registry.get_mode_override("alpha") == "offline"
+
+
+def test_registry_load_configs_atomic_on_failure(tmp_path):
+    """If load_configs raises mid-batch, no partial state should be left behind."""
+    import yaml as _yaml
+
+    good_cfg = {
+        "id": "good", "name": "Good", "cdm": "x", "engine": "duckdb",
+        "online": True, "connection": {"r_code": ""},
+    }
+    pa = tmp_path / "good.yaml"
+    pa.write_text(_yaml.dump(good_cfg))
+
+    # Second file is a duplicate id (would raise mid-batch).
+    pb = tmp_path / "also_good.yaml"
+    pb.write_text(_yaml.dump(good_cfg))
+
+    reg = SessionRegistry()
+    with pytest.raises(ValueError):
+        reg.load_configs([str(pa), str(pb)])
+
+    # Failure must be atomic — no partial state.
+    assert reg.db_ids() == []
+
+
+def test_registry_load_configs_failure_preserves_prior_state(tmp_path):
+    """A second call that fails must leave the prior successful state intact."""
+    import yaml as _yaml
+
+    a_cfg = {
+        "id": "a", "name": "A", "cdm": "x", "engine": "duckdb",
+        "online": True, "connection": {"r_code": ""},
+    }
+    pa = tmp_path / "a.yaml"
+    pa.write_text(_yaml.dump(a_cfg))
+
+    reg = SessionRegistry()
+    reg.load_configs([str(pa)])
+    assert reg.db_ids() == ["a"]
+
+    # Now load a duplicate — should raise, and the prior "a" must still be there.
+    pa_dup = tmp_path / "a_dup.yaml"
+    pa_dup.write_text(_yaml.dump(a_cfg))  # same id
+    with pytest.raises(ValueError):
+        reg.load_configs([str(pa_dup)])
+
+    assert reg.db_ids() == ["a"]

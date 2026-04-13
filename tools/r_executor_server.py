@@ -268,17 +268,24 @@ class SessionRegistry:
         self._mode_overrides: dict[str, str] = {}
 
     def load_configs(self, config_paths: list[str]) -> None:
-        """Load every config path and register by its id field."""
+        """Load every config path and register by its id field.
+
+        Atomic on failure: if any config raises (file missing, malformed YAML,
+        missing id, or duplicate id across the batch or against already-loaded
+        entries), no new configs are added to the registry.
+        """
+        new_configs: dict[str, dict] = {}
         for path in config_paths:
             cfg = load_config(path)
             db_id = cfg.get("id")
             if not db_id:
                 raise ValueError(f"Config {path!r} missing 'id' field.")
-            if db_id in self._configs:
+            if db_id in self._configs or db_id in new_configs:
                 raise ValueError(
                     f"Duplicate DB id {db_id!r} across configs; ids must be unique."
                 )
-            self._configs[db_id] = cfg
+            new_configs[db_id] = cfg
+        self._configs.update(new_configs)
 
     def db_ids(self) -> list[str]:
         return list(self._configs.keys())
