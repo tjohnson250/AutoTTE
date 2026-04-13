@@ -251,6 +251,71 @@ class RSession:
 
 
 # ---------------------------------------------------------------------------
+# SessionRegistry — holds N configs and N lazy-initialized sessions keyed by db_id
+# ---------------------------------------------------------------------------
+
+
+class SessionRegistry:
+    """Holds YAML configs + R sessions for any number of DBs, keyed by id.
+
+    Sessions are created lazily on first access via get_session(). Configs
+    are loaded eagerly so unknown ids can be rejected at startup.
+    """
+
+    def __init__(self) -> None:
+        self._configs: dict[str, dict] = {}
+        self._sessions: dict[str, RSession] = {}
+        self._mode_overrides: dict[str, str] = {}
+
+    def load_configs(self, config_paths: list[str]) -> None:
+        """Load every config path and register by its id field."""
+        for path in config_paths:
+            cfg = load_config(path)
+            db_id = cfg.get("id")
+            if not db_id:
+                raise ValueError(f"Config {path!r} missing 'id' field.")
+            if db_id in self._configs:
+                raise ValueError(
+                    f"Duplicate DB id {db_id!r} across configs; ids must be unique."
+                )
+            self._configs[db_id] = cfg
+
+    def db_ids(self) -> list[str]:
+        return list(self._configs.keys())
+
+    def get_config(self, db_id: str) -> dict:
+        if db_id not in self._configs:
+            raise KeyError(
+                f"Unknown db_id {db_id!r}. Known: {sorted(self._configs)}"
+            )
+        return self._configs[db_id]
+
+    def has_session(self, db_id: str) -> bool:
+        return db_id in self._sessions
+
+    def get_session(self, db_id: str) -> "RSession":
+        if db_id not in self._configs:
+            raise KeyError(
+                f"Unknown db_id {db_id!r}. Known: {sorted(self._configs)}"
+            )
+        if db_id not in self._sessions:
+            self._sessions[db_id] = RSession()
+        return self._sessions[db_id]
+
+    def drop_session(self, db_id: str) -> None:
+        """Stop and remove a session (used after a crash to force restart)."""
+        sess = self._sessions.pop(db_id, None)
+        if sess is not None:
+            sess.stop()
+
+    def set_mode_override(self, db_id: str, mode: str) -> None:
+        self._mode_overrides[db_id] = mode
+
+    def get_mode_override(self, db_id: str) -> str:
+        return self._mode_overrides.get(db_id, "")
+
+
+# ---------------------------------------------------------------------------
 # Global state
 # ---------------------------------------------------------------------------
 
