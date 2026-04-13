@@ -372,34 +372,35 @@ def _ensure_connected(db_id: str) -> dict | None:
 
 
 @mcp.tool()
-async def execute_r(code: str) -> str:
-    """Execute arbitrary R code in the persistent R session.
+async def execute_r(db_id: str, code: str) -> str:
+    """Execute arbitrary R code in the persistent R session for *db_id*.
 
     Args:
+        db_id: The database id (e.g. 'nhanes', 'mimic_iv').
         code: R code to execute.
     """
-    err = _ensure_connected()
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
-    result = _session.execute(code)
-    return json.dumps(
-        {
-            "stdout": truncate_output(result["stdout"]),
-            "stderr": truncate_output(result["stderr"]),
-            "success": result["success"],
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(code)
+    return json.dumps({
+        "stdout": truncate_output(result["stdout"]),
+        "stderr": truncate_output(result["stderr"]),
+        "success": result["success"],
+    })
 
 
 @mcp.tool()
-async def query_db(sql: str) -> str:
-    """Run a SQL query via DBI and return results (up to 50 rows).
+async def query_db(db_id: str, sql: str) -> str:
+    """Run a SQL query against *db_id* via DBI and return results (up to 50 rows).
 
     Args:
+        db_id: The database id.
         sql: SQL query string.
     """
-    err = _ensure_connected()
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
@@ -416,23 +417,22 @@ local({{
   cat("DATA_END\\n")
 }})
 """
-    result = _session.execute(r_code)
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
     if not result["success"]:
         return json.dumps({"error": result["stderr"], "stdout": result["stdout"]})
 
-    return json.dumps(
-        {
-            "output": result["stdout"],
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": True,
-        }
-    )
+    return json.dumps({
+        "output": result["stdout"],
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": True,
+    })
 
 
 @mcp.tool()
-async def list_tables() -> str:
-    """List all tables in the connected database with row counts."""
-    err = _ensure_connected()
+async def list_tables(db_id: str) -> str:
+    """List all tables in the connected database for *db_id* with row counts."""
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
@@ -449,24 +449,24 @@ local({
   cat(format(.df, row.names=FALSE), "\n")
 })
 """
-    result = _session.execute(r_code)
-    return json.dumps(
-        {
-            "stdout": truncate_output(result["stdout"]),
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": result["success"],
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
+    return json.dumps({
+        "stdout": truncate_output(result["stdout"]),
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": result["success"],
+    })
 
 
 @mcp.tool()
-async def describe_table(table: str) -> str:
-    """Return column info and sample values for *table* (LIMIT 5).
+async def describe_table(db_id: str, table: str) -> str:
+    """Return column info and sample values for *table* in *db_id* (LIMIT 5).
 
     Args:
+        db_id: The database id.
         table: Table name to describe.
     """
-    err = _ensure_connected()
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
@@ -480,28 +480,28 @@ local({{
   print(.sample)
 }})
 """
-    result = _session.execute(r_code)
-    return json.dumps(
-        {
-            "stdout": truncate_output(result["stdout"]),
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": result["success"],
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
+    return json.dumps({
+        "stdout": truncate_output(result["stdout"]),
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": result["success"],
+    })
 
 
 @mcp.tool()
-async def dump_schema() -> str:
-    """Introspect the full DB schema and write it to the configured schema_dump path."""
-    err = _ensure_connected()
+async def dump_schema(db_id: str) -> str:
+    """Introspect *db_id* schema and write it to its configured schema_dump path."""
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
-    schema_path = _config.get("schema_dump", "")
-    engine = _config.get("engine", "").lower()
+    config = _registry.get_config(db_id)
+    schema_path = config.get("schema_dump", "")
+    engine = config.get("engine", "").lower()
 
     if not schema_path:
-        return json.dumps({"error": "No schema_dump path configured."})
+        return json.dumps({"error": f"No schema_dump path configured for {db_id}."})
 
     if engine == "duckdb":
         r_code = f"""
@@ -546,32 +546,32 @@ local({{
 }})
 """
 
-    result = _session.execute(r_code)
-    return json.dumps(
-        {
-            "stdout": result["stdout"],
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": result["success"],
-            "schema_path": schema_path,
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
+    return json.dumps({
+        "stdout": result["stdout"],
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": result["success"],
+        "schema_path": schema_path,
+    })
 
 
 @mcp.tool()
-async def run_profiler(code: str) -> str:
-    """Run agent-provided profiling R code, capturing output to the data_profile path.
+async def run_profiler(db_id: str, code: str) -> str:
+    """Run agent-provided profiling R code for *db_id*, capturing to its data_profile path.
 
     Args:
-        code: R profiling code to execute.  Output is captured via sink() to
-              the configured data_profile path.
+        db_id: The database id.
+        code: R profiling code to execute.
     """
-    err = _ensure_connected()
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
-    profile_path = _config.get("data_profile", "")
+    config = _registry.get_config(db_id)
+    profile_path = config.get("data_profile", "")
     if not profile_path:
-        return json.dumps({"error": "No data_profile path configured."})
+        return json.dumps({"error": f"No data_profile path configured for {db_id}."})
 
     r_code = f"""
 local({{
@@ -586,15 +586,14 @@ local({{
   cat("Profile written to {profile_path}\\n")
 }})
 """
-    result = _session.execute(r_code)
-    return json.dumps(
-        {
-            "stdout": result["stdout"],
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": result["success"],
-            "profile_path": profile_path,
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
+    return json.dumps({
+        "stdout": result["stdout"],
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": result["success"],
+        "profile_path": profile_path,
+    })
 
 
 # ---------------------------------------------------------------------------

@@ -114,3 +114,23 @@ def test_ensure_connected_unknown_id_returns_error(two_configs):
     err = _ensure_connected("no_such_db")
     assert err is not None
     assert "unknown" in err["error"].lower()
+
+
+import inspect
+
+from tools import r_executor_server as rex
+
+
+def test_tool_signatures_include_db_id():
+    """Every MCP tool must accept db_id as its first parameter."""
+    tool_names = ["execute_r", "query_db", "list_tables", "describe_table",
+                  "dump_schema", "run_profiler"]
+    for name in tool_names:
+        fn = getattr(rex, name)
+        # Unwrap if possible (decorated tools may have __wrapped__).
+        target = getattr(fn, "__wrapped__", fn)
+        sig = inspect.signature(target)
+        params = list(sig.parameters)
+        assert params[0] == "db_id", (
+            f"Tool {name} must take db_id as its first parameter, got {params}"
+        )
