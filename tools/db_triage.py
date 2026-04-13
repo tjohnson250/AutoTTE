@@ -11,6 +11,9 @@ tested thoroughly without needing mcp or a live R installation.
 """
 from __future__ import annotations
 
+import argparse
+import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -208,11 +211,6 @@ def triage_selection(
     return results
 
 
-import argparse
-import json
-import sys
-
-
 def format_list_table(dbs: list[dict[str, Any]], project_root: str) -> str:
     """Return a plain-text table of all known DBs with file-presence flags."""
     headers = ["ID", "NAME", "CDM", "ENGINE", "DEFAULT", "SCHEMA", "PROFILE", "CONVENTIONS"]
@@ -285,6 +283,10 @@ def _cli_show(args: argparse.Namespace) -> int:
 
 
 def _cli_triage(args: argparse.Namespace) -> int:
+    # Validate mode if provided
+    if args.mode is not None and args.mode and args.mode not in ("online", "offline"):
+        print(f"error: argument --mode: invalid choice: {args.mode!r} (choose from 'online', 'offline')", file=sys.stderr)
+        return 2
     try:
         results = triage_selection(
             selection=args.selection,
@@ -315,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
 
     triage = subparsers.add_parser("triage", parents=[parent_parser])
     triage.add_argument("--selection", required=True)
-    triage.add_argument("--mode", choices=["online", "offline"], default="")
+    triage.add_argument("--mode", default=None)
 
     args = parser.parse_args(argv)
     if args.cmd == "list":

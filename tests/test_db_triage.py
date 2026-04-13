@@ -1,6 +1,11 @@
 """Tests for tools/db_triage.py."""
-import yaml
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
+import yaml
 
 from tools.db_triage import discover_dbs
 
@@ -316,12 +321,6 @@ def test_triage_selection_duplicate_ids_raises(databases_dir, tmp_path):
     assert "alpha" in str(exc.value).lower()
 
 
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-
 def _project_root() -> str:
     return str(Path(__file__).resolve().parent.parent)
 
@@ -359,6 +358,9 @@ def test_cli_show_db_unknown_id_exits_nonzero(databases_dir, tmp_path):
     )
     assert result.returncode != 0
     assert "missing_id" in (result.stdout + result.stderr)
+    # Lock in the clean-error UX: reject tracebacks that happen to mention the id.
+    assert "Valid ids:" in result.stderr
+    assert "Traceback" not in (result.stdout + result.stderr)
 
 
 def test_cli_triage_emits_json(databases_dir, tmp_path):
@@ -376,6 +378,28 @@ def test_cli_triage_emits_json(databases_dir, tmp_path):
     assert parsed[0]["disposition"] in ("RUN", "RUN_AUTO_ONBOARD", "SKIP")
 
 
+def test_cli_triage_empty_mode_is_equivalent_to_omitted(databases_dir, tmp_path):
+    """Passing --mode '' must not be rejected by argparse; it should behave like omitting --mode."""
+    # Touch the files so alpha comes out RUN.
+    (tmp_path / "databases" / "schemas").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "databases" / "schemas" / "alpha_schema.txt").write_text("x")
+    (tmp_path / "databases" / "profiles").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "databases" / "profiles" / "alpha_profile.md").write_text("x")
+    (tmp_path / "databases" / "conventions").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "databases" / "conventions" / "alpha_conventions.md").write_text("x")
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.db_triage", "triage",
+         "--selection", "alpha",
+         "--databases-dir", str(databases_dir),
+         "--project-root", str(tmp_path),
+         "--mode", ""],
+        capture_output=True, text=True, cwd=_project_root(),
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    parsed = json.loads(result.stdout)
+    assert parsed[0]["id"] == "alpha"
+
+
 def test_cli_triage_unknown_id_exits_nonzero(databases_dir, tmp_path):
     result = subprocess.run(
         [sys.executable, "-m", "tools.db_triage", "triage",
@@ -386,3 +410,4 @@ def test_cli_triage_unknown_id_exits_nonzero(databases_dir, tmp_path):
     )
     assert result.returncode != 0
     assert "no_such_db" in (result.stdout + result.stderr)
+    assert "Traceback" not in (result.stdout + result.stderr)
