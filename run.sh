@@ -135,13 +135,61 @@ print(f'DB_ONLINE={str(c.get(\"online\", False)).lower()}')
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Triage: resolve DB_IDS through tools.db_triage and capture disposition.
+# ---------------------------------------------------------------------------
+
+TRIAGE_JSON=""
+if [[ -n "$DB_IDS" ]]; then
+  RESULTS_DIR="results/$(echo "$THERAPEUTIC_AREA" | tr ' ' '_' | tr '[:upper:]' '[:lower:]')"
+  mkdir -p "$RESULTS_DIR"
+
+  TRIAGE_JSON="$RESULTS_DIR/db_triage.json"
+  if ! python3 -m tools.db_triage triage \
+        --selection "$DB_IDS" \
+        --project-root "$(pwd)" \
+        --mode "${DB_MODE:-}" > "$TRIAGE_JSON" 2> "$RESULTS_DIR/db_triage.err"; then
+    cat "$RESULTS_DIR/db_triage.err" >&2
+    rm -f "$TRIAGE_JSON" "$RESULTS_DIR/db_triage.err"
+    exit 1
+  fi
+  rm -f "$RESULTS_DIR/db_triage.err"
+
+  # Print a human-readable summary.
+  python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+for r in rows:
+    tag = {'RUN': '[OK]', 'RUN_AUTO_ONBOARD': '[WARN]', 'SKIP': '[SKIP]'}.get(r['disposition'], '[???]')
+    print(f\"{tag} {r['id']} — {r['effective_mode']}; {r['disposition']}\")
+    if r.get('reason'):
+        print(f\"       reason: {r['reason']}\")
+    for w in r.get('warnings', []):
+        print(f\"       warn: {w}\")
+"
+
+  # Count live DBs (RUN or RUN_AUTO_ONBOARD).
+  LIVE_COUNT=$(python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+print(sum(1 for r in rows if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')))
+")
+  if [[ "$LIVE_COUNT" == "0" ]]; then
+    echo "ERROR: every selected DB was skipped. Nothing to run." >&2
+    exit 1
+  fi
+fi
+
 # Dry-run stage 1: stop after argument parsing.
 if [[ "${AUTOTTE_DRY_RUN:-}" == "1" ]]; then
   echo "AUTOTTE_DRY_RUN — stopping after parse. DB_IDS='$DB_IDS' DB_CONFIG='$DB_CONFIG' MODE='$DB_MODE'"
   if [[ -z "$DB_IDS" && -z "$DB_CONFIG" ]]; then
     echo "Public datasets only."
+  elif [[ -n "$TRIAGE_JSON" && -s "$TRIAGE_JSON" ]]; then
+    echo "triage written to $TRIAGE_JSON"
   fi
-  echo "triage: not yet implemented"
   exit 0
 fi
 
