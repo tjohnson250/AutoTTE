@@ -7,10 +7,12 @@
 #
 # Usage:
 #   ./run.sh "atrial fibrillation"
-#   ./run.sh "atrial fibrillation" --db-config databases/synthetic_pcornet.yaml
-#   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --db-mode offline
-#   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --resume-reports
-#   ./run.sh "type 2 diabetes" --db-config databases/my_cdw.yaml 75
+#   ./run.sh "atrial fibrillation" --dbs nhanes,mimic_iv
+#   ./run.sh "atrial fibrillation" --dbs all --db-mode offline
+#   ./run.sh "atrial fibrillation" --db-config databases/my_cdw.yaml
+#   ./run.sh "atrial fibrillation" --dbs all --resume-reports
+#   ./run.sh --list-dbs
+#   ./run.sh --show-db nhanes
 #
 # Prerequisites:
 #   - Claude Code CLI installed (npm install -g @anthropic-ai/claude-code)
@@ -21,44 +23,75 @@
 
 set -euo pipefail
 
-THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--db-config <path>] [--db-mode online|offline] [max_turns]}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Parse optional flags
+# Handle discovery subcommands first (do not require a therapeutic area).
+case "${1:-}" in
+  --list-dbs)
+    exec python3 -m tools.db_triage list --project-root "$(pwd)"
+    ;;
+  --show-db)
+    shift
+    [[ -n "${1:-}" ]] || { echo "Usage: --show-db <id>" >&2; exit 2; }
+    exec python3 -m tools.db_triage show "$1" --project-root "$(pwd)"
+    ;;
+esac
+
+THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--dbs <id,id,...>|all] [--db-config <path>] [--db-mode online|offline] [--resume-reports] [max_turns]}"
+shift
+
+# Parse optional flags.
 DB_CONFIG=""
+DB_IDS=""
 DB_MODE=""
 RESUME_REPORTS=false
 MAX_TURNS="50"
-SKIP_NEXT=false
-for i in $(seq 2 $#); do
-  if $SKIP_NEXT; then
-    SKIP_NEXT=false
-    continue
-  fi
-  arg="${!i}"
-  case "$arg" in
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --db-config)
-      next_i=$((i + 1))
-      DB_CONFIG="${!next_i}"
-      SKIP_NEXT=true
+      DB_CONFIG="$2"; shift 2
+      ;;
+    --dbs)
+      DB_IDS="$2"; shift 2
       ;;
     --db-mode)
-      next_i=$((i + 1))
-      DB_MODE="${!next_i}"
-      SKIP_NEXT=true
+      DB_MODE="$2"; shift 2
       ;;
     --resume-reports)
-      RESUME_REPORTS=true
+      RESUME_REPORTS=true; shift
+      ;;
+    [0-9]*)
+      MAX_TURNS="$1"; shift
       ;;
     *)
-      if [[ "$arg" =~ ^[0-9]+$ ]]; then
-        MAX_TURNS="$arg"
-      fi
+      echo "Unknown argument: $1" >&2; exit 2
       ;;
   esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+if [[ -n "$DB_CONFIG" && -n "$DB_IDS" ]]; then
+  echo "Error: cannot combine --db-config and --dbs. Use one or the other." >&2
+  exit 2
+fi
+
+# Legacy --db-config path: resolve to a single DB id via python.
+if [[ -n "$DB_CONFIG" ]]; then
+  if [[ ! -f "$DB_CONFIG" ]]; then
+    echo "ERROR: DB config file not found: $DB_CONFIG" >&2
+    exit 1
+  fi
+  DB_IDS=$(python3 -c "
+import sys, yaml
+with open('$DB_CONFIG') as f:
+    c = yaml.safe_load(f)
+id = c.get('id')
+if not id:
+    sys.stderr.write('Config missing id field\n'); sys.exit(1)
+print(id)
+") || exit 1
+fi
 
 RESULTS_DIR="results/$(echo "$THERAPEUTIC_AREA" | tr ' ' '_' | tr '[:upper:]' '[:lower:]')"
 mkdir -p "$RESULTS_DIR/protocols"
@@ -100,6 +133,16 @@ print(f'DB_ONLINE={str(c.get(\"online\", False)).lower()}')
       DB_ONLINE="true"
     fi
   fi
+fi
+
+# Dry-run stage 1: stop after argument parsing.
+if [[ "${AUTOTTE_DRY_RUN:-}" == "1" ]]; then
+  echo "AUTOTTE_DRY_RUN — stopping after parse. DB_IDS='$DB_IDS' DB_CONFIG='$DB_CONFIG' MODE='$DB_MODE'"
+  if [[ -z "$DB_IDS" && -z "$DB_CONFIG" ]]; then
+    echo "Public datasets only."
+  fi
+  echo "triage: not yet implemented"
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
