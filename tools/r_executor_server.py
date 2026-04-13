@@ -601,19 +601,27 @@ local({{
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    global _config, _mode_override
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="R Executor MCP Server")
-    parser.add_argument("--config", required=True, help="Path to database config YAML")
+    parser.add_argument(
+        "--config",
+        required=True,
+        action="append",
+        help="Path to a database config YAML. Repeat to serve multiple DBs.",
+    )
     parser.add_argument(
         "--mode",
         choices=["online", "offline"],
         default="",
-        help="Override online/offline mode from config",
+        help="Override online/offline mode from every config uniformly.",
     )
-    args = parser.parse_args()
-    _config = load_config(args.config)
-    _mode_override = args.mode
+    args = parser.parse_args(argv)
+
+    _registry.load_configs(args.config)
+    if args.mode:
+        for db_id in _registry.db_ids():
+            _registry.set_mode_override(db_id, args.mode)
+
     mcp.run()
 
 

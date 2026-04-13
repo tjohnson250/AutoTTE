@@ -134,3 +134,45 @@ def test_tool_signatures_include_db_id():
         assert params[0] == "db_id", (
             f"Tool {name} must take db_id as its first parameter, got {params}"
         )
+
+
+from tools.r_executor_server import main as rex_main
+
+
+def test_main_accepts_multiple_configs(two_configs, monkeypatch):
+    """Running main() with two --config args should populate the registry."""
+    called = {}
+
+    def fake_run():
+        called["ran"] = True
+
+    monkeypatch.setattr("tools.r_executor_server.mcp.run", fake_run)
+    # Reset the global registry.
+    rex._registry = rex.SessionRegistry()
+
+    argv = ["--config", two_configs[0], "--config", two_configs[1]]
+    rex_main(argv)
+
+    assert called.get("ran") is True
+    assert sorted(rex._registry.db_ids()) == ["alpha", "beta"]
+
+
+def test_main_rejects_zero_configs(monkeypatch):
+    def fake_run():
+        pass
+
+    monkeypatch.setattr("tools.r_executor_server.mcp.run", fake_run)
+    rex._registry = rex.SessionRegistry()
+    with pytest.raises(SystemExit):
+        rex_main([])
+
+
+def test_main_applies_mode_override(two_configs, monkeypatch):
+    def fake_run():
+        pass
+
+    monkeypatch.setattr("tools.r_executor_server.mcp.run", fake_run)
+    rex._registry = rex.SessionRegistry()
+
+    rex_main(["--config", two_configs[0], "--mode", "offline"])
+    assert rex._registry.get_mode_override("alpha") == "offline"
