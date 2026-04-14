@@ -540,6 +540,11 @@ Each section calls its function and displays results **inline**. This means:
 - Section 9: Connect, pull cohort, render CONSORT (text + diagram) inline.
   Include an empty-cohort guard with `knitr::knit_exit()`.
 - Section 10: Prepare data, show Table 1 inline with `knitr::kable()`.
+  **CRITICAL:** When building Table 1 with `pivot_longer()`, every column
+  must be the same type (character). `N = n()` returns an integer, but
+  `sprintf()` columns return character — this type mismatch causes
+  `pivot_longer()` to error. Use `N = as.character(n())` so all columns
+  are character before pivoting.
 - Section 11: Run IPW, show love plot and PS distribution inline.
 - Section 12: Show Cox model summaries and KM curves inline.
 - Section 13: Run subgroup analyses, show table inline.

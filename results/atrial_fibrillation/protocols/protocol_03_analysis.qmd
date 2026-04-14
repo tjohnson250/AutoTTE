@@ -1641,7 +1641,7 @@ message(sprintf("Prepared cohort: %d patients (%d OAC, %d No OAC)",
 table1_data <- cohort |>
   group_by(treatment_label) |>
   summarise(
-    N = n(),
+    N = as.character(n()),
     `Age (mean +/- SD)` = sprintf("%.1f +/- %.1f", mean(age_at_index), sd(age_at_index)),
     `Female (%)` = sprintf("%.1f", 100 * mean(sex_cat == "Female")),
     `White (%)` = sprintf("%.1f", 100 * mean(race_cat == "White")),

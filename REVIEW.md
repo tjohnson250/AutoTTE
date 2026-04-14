@@ -168,6 +168,10 @@ that all three passes were actually performed:
   function and display results inline (CONSORT, Table 1, love plot, KM curves,
   etc.) in the section where they belong. There should be **no monolithic
   `main()` function** and no `eval: false` chunks that block downstream output.
+- Does the Table 1 `summarise()` block use consistent column types before
+  `pivot_longer()`? `N = n()` returns integer while `sprintf()` returns
+  character — mixing them causes `pivot_longer()` to fail. Verify
+  `N = as.character(n())` is used. **Flag as REVISE if not.**
 - Do ALL LEFT JOINs (vitals, labs, enrollment, **DEATH**) use
   `ROW_NUMBER() OVER (PARTITION BY PATID ...) ... WHERE rn = 1`
   to guarantee exactly 1 row per patient? This applies to **every step**,

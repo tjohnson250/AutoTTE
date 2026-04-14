@@ -1608,7 +1608,7 @@ if (n_arms < 2) {
 table1_data <- cohort |>
   group_by(treatment_label) |>
   summarise(
-    N = n(),
+    N = as.character(n()),
     `Age (mean +/- SD)` = sprintf("%.1f +/- %.1f", mean(age_at_index), sd(age_at_index)),
     `Age 80-84 (%)` = sprintf("%.1f", 100 * mean(age_group == "80-84")),
     `Age >= 85 (%)` = sprintf("%.1f", 100 * mean(age_group == "85+")),
