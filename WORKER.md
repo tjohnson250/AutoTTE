@@ -445,11 +445,48 @@ time-to-event outcome (e.g., `protocol_01_km_stroke.pdf`,
 
 ### Figure specifications
 
-- PDF for vector graphics (main manuscript), PNG at 300 DPI (markdown embedding)
+- **Every figure MUST be saved twice — once as PDF and once as PNG.** The PDF
+  is for manuscript embedding / LaTeX-rendered PDFs; the PNG (300 DPI) is for
+  markdown embedding, HTML, and Word rendering. The coordinator renders
+  `protocol_NN_report.md` to both PDF and DOCX after the report is accepted,
+  and the PNG is the format that survives every rendering path.
+  **Exception:** `.html` tables (`protocol_NN_table1.html`, `_table2.html`)
+  are the only non-dual output — they're reference-linked, not embedded.
 - Standard dimensions: 8x6 inches for most plots, 8x7 for KM with risk
-  tables, 10x12 for CONSORT
+  tables, 10x12 for CONSORT.
 - Use `ggsave()` for ggplot objects; `pdf()`/`png()` + `dev.off()` for
-  grid graphics
+  grid graphics.
+
+**Dual-save helper.** Define this once near the top of the analysis script
+and call it for every figure:
+
+```r
+save_fig <- function(plot_or_fn, basename, width = 8, height = 6) {
+  # plot_or_fn: either a ggplot object OR a zero-arg function that draws
+  #             grid graphics (e.g., CONSORT, love.plot base output).
+  for (ext in c("pdf", "png")) {
+    path <- file.path(out_dir, sprintf("%s.%s", basename, ext))
+    if (ext == "pdf") { grDevices::pdf(path, width = width, height = height) }
+    else              { grDevices::png(path, width = width, height = height, units = "in", res = 300) }
+    tryCatch({
+      if (inherits(plot_or_fn, "ggplot")) print(plot_or_fn) else plot_or_fn()
+    }, finally = grDevices::dev.off())
+  }
+}
+```
+
+Usage:
+
+```r
+save_fig(love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE, stars = "std"),
+         "protocol_01_loveplot")
+
+save_fig(function() grid.newpage() ; render_consort_diagram(consort),
+         "protocol_01_consort", width = 10, height = 12)
+```
+
+CONSORT is the figure that is most often saved as PDF only — use `save_fig`
+for it too. The report embedding expects `protocol_NN_consort.png` to exist.
 
 ### Implementation details
 
@@ -488,15 +525,21 @@ in a single `tryCatch()` block after `save_results()`. If any figure
 fails, the JSON results (already saved) are not affected.
 
 After generating figures, add a `figure_paths` key to the results JSON
-listing only the files that were actually generated, then re-save:
+listing only the files that were actually generated. Record BOTH the `.pdf`
+and `.png` paths for every figure so downstream rendering paths (PDF via
+LaTeX, HTML/DOCX via pandoc) each have the format they can embed:
 
 ```r
 results$figure_paths <- list(
-  consort         = "protocol_01_consort.pdf",
-  table1          = "protocol_01_table1.html",
-  love_plot       = "protocol_01_loveplot.pdf",
-  ps_distribution = "protocol_01_ps_dist.pdf",
-  km_curve        = "protocol_01_km.pdf"          # only if time-to-event
+  consort         = list(pdf = "protocol_01_consort.pdf",
+                         png = "protocol_01_consort.png"),
+  table1          = "protocol_01_table1.html",    # single-file: HTML only
+  love_plot       = list(pdf = "protocol_01_loveplot.pdf",
+                         png = "protocol_01_loveplot.png"),
+  ps_distribution = list(pdf = "protocol_01_ps_dist.pdf",
+                         png = "protocol_01_ps_dist.png"),
+  km_curve        = list(pdf = "protocol_01_km.pdf",
+                         png = "protocol_01_km.png")     # only if time-to-event
   # table2, forest_plot, etc. — include only if generated
 )
 ```

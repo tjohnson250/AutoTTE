@@ -264,6 +264,26 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
       - `02_evidence_gaps.md`
    d. The worker writes `protocols/protocol_NN_report.md`.
    e. Report-writing workers need only `Read,Write,Edit` tools.
+3. **Render each accepted report to PDF and Word.** After the report-writing
+   worker's output is accepted (either first-pass or after revisions), run
+   Quarto from Bash to produce shareable copies alongside the markdown source.
+   The working directory must be the per-DB protocols folder so the PNG
+   references in the report resolve correctly:
+   ```bash
+   cd results/{ta}/{db_id}/protocols && \
+     quarto render protocol_NN_report.md --to pdf --quiet && \
+     quarto render protocol_NN_report.md --to docx --quiet
+   ```
+   Produces `protocol_NN_report.pdf` and `protocol_NN_report.docx` next to
+   the markdown. If `quarto` is not on PATH, log a warning to
+   `coordinator_log.md` and skip — the markdown remains the authoritative
+   source and the user can render manually.
+   **Pre-requisite:** PDF rendering needs TinyTeX or a system LaTeX; DOCX
+   does not. If the PDF step fails but DOCX succeeds, keep the DOCX.
+   **Why PNG embedding matters here:** the report must reference `.png`
+   figures (per REPORT_WRITER.md), not `.pdf`. Quarto can embed PNGs into
+   both PDF and DOCX; it cannot embed PDFs into DOCX cleanly. WORKER.md
+   already requires analysis scripts to save every figure as both formats.
 
 **Offline mode:**
 1. Write `{results_dir}/NEXT_STEPS.md` with instructions for the user:
@@ -279,8 +299,10 @@ When the coordinator prompt says "Resume mode: REPORTS_ONLY":
 1. Skip Phases 0-3.
 2. Check for `protocol_NN_results.json` files in each per-DB `{db_id}/protocols/` folder (i.e., `$RESULTS_DIR/*/protocols/`).
 3. For each results file found, launch a report-writing worker.
-4. If some protocols have no results file, log a warning and skip them.
-5. Then proceed to the Executive Summary phase.
+4. After each accepted report, render it to PDF and Word (see step 3 of the
+   online mode flow above).
+5. If some protocols have no results file, log a warning and skip them.
+6. Then proceed to the Executive Summary phase.
 
 ### Final: Executive Summary
 - **Goal:** Synthesize everything into a summary document
