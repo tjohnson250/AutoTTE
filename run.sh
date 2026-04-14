@@ -55,6 +55,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dbs)
       DB_IDS="$2"; shift 2
+      if [[ -z "$DB_IDS" ]]; then
+        echo "Error: --dbs requires a value (a DB id, CSV list, or 'all')." >&2
+        exit 2
+      fi
       ;;
     --db-mode)
       DB_MODE="$2"; shift 2
@@ -93,8 +97,12 @@ print(id)
 ") || exit 1
 fi
 
-RESULTS_DIR="results/$(echo "$THERAPEUTIC_AREA" | tr ' ' '_' | tr '[:upper:]' '[:lower:]')"
-mkdir -p "$RESULTS_DIR/protocols"
+RESULTS_DIR="results/$(echo "$THERAPEUTIC_AREA" | tr ' ' '_' | tr '[:upper:]' '[:lower:]' | tr -d "'\"\\\\")"
+# Public-datasets-only runs use the flat layout; DB-backed runs nest per-DB.
+mkdir -p "$RESULTS_DIR"
+if [[ -z "$DB_IDS" && -z "$DB_CONFIG" ]]; then
+  mkdir -p "$RESULTS_DIR/protocols"
+fi
 
 # ---------------------------------------------------------------------------
 # Triage: resolve DB_IDS through tools.db_triage and capture disposition.
@@ -354,7 +362,8 @@ the pipeline.
 $([ "$RESUME_REPORTS" = "true" ] && echo "
 RESUME MODE: REPORTS ONLY
 Skip Phases 0-3. The protocols and analysis scripts already exist.
-Check for protocol_NN_results.json files in \$RESULTS_DIR/protocols/.
+Check for protocol_NN_results.json files in \$RESULTS_DIR/*/protocols/
+(iterating every per-DB subdirectory).
 For each results file found, launch a report-writing worker (read REPORT_WRITER.md).
 For each protocol WITHOUT a results file, log a warning and skip it.
 Then produce the executive summary.

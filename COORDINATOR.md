@@ -258,7 +258,7 @@ If a database was configured in your initial prompt:
 **Resume mode (--resume-reports):**
 When the coordinator prompt says "Resume mode: REPORTS_ONLY":
 1. Skip Phases 0-3.
-2. Check for `protocol_NN_results.json` files in the protocols/ directory.
+2. Check for `protocol_NN_results.json` files in each per-DB `{db_id}/protocols/` folder (i.e., `$RESULTS_DIR/*/protocols/`).
 3. For each results file found, launch a report-writing worker.
 4. If some protocols have no results file, log a warning and skip them.
 5. Then proceed to the Executive Summary phase.

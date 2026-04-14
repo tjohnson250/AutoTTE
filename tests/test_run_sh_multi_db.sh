@@ -123,6 +123,19 @@ assert_contains "Single-DB run" "$OUT" "prompt mentions Single-DB run"
 assert_contains "nhanes" "$OUT" "prompt lists nhanes"
 rm -f .mcp-session.json
 
+echo "Test 13: therapeutic area with apostrophe does not crash"
+rm -f .mcp-session.json
+OUT=$(AUTOTTE_DRY_RUN=3 ./run.sh "today's topic" --dbs nhanes 2>&1); RC=$?
+assert_exit_code 0 "$RC" "exit 0 despite apostrophe in TA"
+assert_contains "nhanes" "$OUT" "DB still recognized"
+rm -rf "results/todays_topic" .mcp-session.json
+
+echo "Test 14: empty --dbs value is rejected"
+OUT=$(./run.sh "topic" --dbs "" 2>&1); RC=$?
+[[ "$RC" != "0" ]] && { echo "  PASS: rejected"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL: should have errored"; FAIL=$((FAIL + 1)); }
+assert_contains "requires a value" "$OUT" "error explains the issue"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ "$FAIL" == "0" ]] && exit 0 || exit 1
