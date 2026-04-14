@@ -1,0 +1,364 @@
+NHANES Schema Reference — 2013-2018 (3 cycles pooled by default)
+=================================================================
+
+Join key for all tables: SEQN (Respondent Sequence Number, INTEGER)
+Load via nhanesA: nhanes('TABLE_NAME')
+Full codebook: nhanesCodebook('TABLE_NAME')
+
+RECOMMENDED: Pool 3 cycles (2013-2014 + 2015-2016 + 2017-2018) for
+~28,000 examined participants. Divide 2-year weights by 3.
+
+Cycle suffixes (append to base table name):
+  _H = 2013-2014    e.g. DEMO_H, GHB_H, BMX_H
+  _I = 2015-2016    e.g. DEMO_I, GHB_I, BMX_I
+  _J = 2017-2018    e.g. DEMO_J, GHB_J, BMX_J
+  _P = 2017-Mar 2020 (pre-pandemic, overlaps _J — do NOT pool with _J)
+
+Tables below are shown with _J suffix. Replace _J with _H or _I to load
+other cycles. Column names are the same across these three cycles EXCEPT:
+  - Blood pressure: 2013-2016 uses BPX_H/BPX_I (auscultatory protocol),
+    2017-2018 uses BPXO_J (oscillometric). Variable names differ.
+    Cannot directly pool BP readings across this boundary.
+
+Note: This lists KEY variables per component. Each table has additional
+variables not listed here. Use nhanesCodebook() for the complete listing.
+
+======================================================================
+DEMOGRAPHICS
+======================================================================
+
+TABLE: DEMO_J (Demographics)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  RIDSTATR        INTEGER   Interview/exam status (1=Interview only, 2=Both)
+  RIAGENDR        INTEGER   Gender (1=Male, 2=Female)
+  RIDAGEYR        INTEGER   Age in years at screening (0-80, top-coded at 80)
+  RIDRETH1        INTEGER   Race/Hispanic origin (1=Mexican American, 2=Other Hispanic, 3=NH White, 4=NH Black, 5=Other/Multi)
+  RIDRETH3        INTEGER   Race/Hispanic origin w/ NH Asian (1=Mexican American, 2=Other Hispanic, 3=NH White, 4=NH Black, 6=NH Asian, 7=Other/Multi)
+  DMDBORN4        INTEGER   Country of birth (1=Born in US, 2=Other)
+  DMDEDUC2        INTEGER   Education level - adults 20+ (1=<9th grade, 2=9-11th, 3=HS/GED, 4=Some college/AA, 5=College+)
+  DMDMARTZ        INTEGER   Marital status (1=Married/Living w/ partner, 2=Widowed/Divorced/Separated, 3=Never married, 77=Refused, 99=DK)
+  INDHHIN2        INTEGER   Annual household income (1-10 range codes, 14=$75k-$100k, 15=$100k+, 77=Refused, 99=DK)
+  INDFMPIR        DOUBLE    Ratio of family income to poverty (0.00-5.00, capped at 5)
+  RIDEXMON        INTEGER   Six-month time period (1=Nov-Apr, 2=May-Oct)
+  WTINT2YR        DOUBLE    Full sample 2-year interview weight
+  WTMEC2YR        DOUBLE    Full sample 2-year MEC exam weight
+  SDMVPSU         INTEGER   Masked variance pseudo-PSU
+  SDMVSTRA        INTEGER   Masked variance pseudo-stratum
+
+======================================================================
+EXAMINATION
+======================================================================
+
+TABLE: BPXO_J (Blood Pressure - Oscillometric)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  BPXOSY1         INTEGER   Systolic BP - 1st reading (mmHg)
+  BPXODI1         INTEGER   Diastolic BP - 1st reading (mmHg)
+  BPXOSY2         INTEGER   Systolic BP - 2nd reading (mmHg)
+  BPXODI2         INTEGER   Diastolic BP - 2nd reading (mmHg)
+  BPXOSY3         INTEGER   Systolic BP - 3rd reading (mmHg)
+  BPXODI3         INTEGER   Diastolic BP - 3rd reading (mmHg)
+  BPXOPLS1        INTEGER   Pulse - 1st reading (bpm)
+  BPXOPLS2        INTEGER   Pulse - 2nd reading (bpm)
+  BPXOPLS3        INTEGER   Pulse - 3rd reading (bpm)
+
+TABLE: BMX_J (Body Measures)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  BMXWT           DOUBLE    Weight (kg)
+  BMXHT           DOUBLE    Standing height (cm)
+  BMXBMI          DOUBLE    Body mass index (kg/m^2)
+  BMXWAIST        DOUBLE    Waist circumference (cm)
+  BMXHIP          DOUBLE    Hip circumference (cm)
+  BMXARML         DOUBLE    Upper arm length (cm)
+  BMXARMC         DOUBLE    Arm circumference (cm)
+
+======================================================================
+LABORATORY
+======================================================================
+
+TABLE: GHB_J (Glycohemoglobin / HbA1c)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXGH           DOUBLE    Glycohemoglobin (%)
+
+TABLE: TCHOL_J (Total Cholesterol)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXTC           DOUBLE    Total cholesterol (mg/dL)
+
+TABLE: HDL_J (HDL Cholesterol)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBDHDD          DOUBLE    Direct HDL-cholesterol (mg/dL)
+
+TABLE: TRIGLY_J (Triglycerides) [FASTING SUBSAMPLE]
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXTR           DOUBLE    Triglycerides (mg/dL)
+  LBDLDL          DOUBLE    LDL-cholesterol (Friedewald, mg/dL)
+  WTSAF2YR        DOUBLE    Fasting subsample 2-year MEC weight
+
+TABLE: GLU_J (Plasma Fasting Glucose) [FASTING SUBSAMPLE]
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXGLU          DOUBLE    Fasting glucose (mg/dL)
+  WTSAF2YR        DOUBLE    Fasting subsample 2-year MEC weight
+
+TABLE: INS_J (Insulin) [FASTING SUBSAMPLE]
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXIN           DOUBLE    Insulin (uU/mL)
+  WTSAF2YR        DOUBLE    Fasting subsample 2-year MEC weight
+
+TABLE: BIOPRO_J (Standard Biochemistry Profile)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXSATSI        DOUBLE    Alanine aminotransferase ALT (U/L)
+  LBXSASSI        DOUBLE    Aspartate aminotransferase AST (U/L)
+  LBXSAPSI        DOUBLE    Alkaline phosphatase ALP (U/L)
+  LBXSAL          DOUBLE    Albumin (g/dL)
+  LBXSBU          DOUBLE    Blood urea nitrogen (mg/dL)
+  LBXSCR          DOUBLE    Creatinine (mg/dL)
+  LBXSGL          DOUBLE    Glucose (mg/dL) — NOT fasting; use GLU_J for fasting
+  LBXSTP          DOUBLE    Total protein (g/dL)
+  LBXSTB          DOUBLE    Total bilirubin (mg/dL)
+  LBXSUA          DOUBLE    Uric acid (mg/dL)
+  LBXSPH          DOUBLE    Phosphorus (mg/dL)
+  LBXSC3SI        DOUBLE    Bicarbonate (mmol/L)
+  LBXSNASI        DOUBLE    Sodium (mmol/L)
+  LBXSKSI         DOUBLE    Potassium (mmol/L)
+  LBXSCLSI        DOUBLE    Chloride (mmol/L)
+  LBXSGB          DOUBLE    Globulin (g/dL)
+  LBXSOSSI        DOUBLE    Osmolality (mmol/Kg)
+  LBXSCA          DOUBLE    Total calcium (mg/dL)
+  LBXSCH          DOUBLE    Cholesterol (mg/dL) — same as TCHOL
+  LBXSGTSI        DOUBLE    GGT (U/L)
+  LBXSIR          DOUBLE    Iron (ug/dL)
+  LBXSLDSI        DOUBLE    LDH (U/L)
+
+TABLE: CBC_J (Complete Blood Count)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXWBCSI        DOUBLE    White blood cell count (1000 cells/uL)
+  LBXRBCSI        DOUBLE    Red blood cell count (million cells/uL)
+  LBXHGB          DOUBLE    Hemoglobin (g/dL)
+  LBXHCT          DOUBLE    Hematocrit (%)
+  LBXMCVSI        DOUBLE    Mean cell volume (fL)
+  LBXPLTSI        DOUBLE    Platelet count (1000 cells/uL)
+  LBXMPSI         DOUBLE    Mean platelet volume (fL)
+  LBXNEPCT        DOUBLE    Segmented neutrophils percent (%)
+  LBXLYPCT        DOUBLE    Lymphocyte percent (%)
+  LBXMOPCT        DOUBLE    Monocyte percent (%)
+  LBXEOPCT        DOUBLE    Eosinophil percent (%)
+  LBXBAPCT        DOUBLE    Basophil percent (%)
+
+TABLE: ALB_CR_J (Albumin & Creatinine, Urine)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  URXUMA          DOUBLE    Albumin, urine (ug/mL)
+  URXUCR          DOUBLE    Creatinine, urine (mg/dL)
+  URDACT          DOUBLE    Albumin-creatinine ratio (mg/g)
+
+TABLE: HSCRP_J (High-Sensitivity C-Reactive Protein)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXHSCRP        DOUBLE    hs-CRP (mg/L)
+
+TABLE: COT_J (Cotinine - Smoking Biomarker)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXCOT          DOUBLE    Serum cotinine (ng/mL)
+  LBXHCO          DOUBLE    Serum hydroxycotinine (ng/mL)
+
+TABLE: FERTIN_J (Ferritin)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXFER          DOUBLE    Ferritin (ng/mL)
+
+TABLE: FETIB_J (Transferrin Receptor)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  LBXTFR          DOUBLE    Transferrin receptor (mg/L)
+
+======================================================================
+QUESTIONNAIRE
+======================================================================
+
+TABLE: SMQ_J (Smoking - Cigarette Use)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  SMQ020          INTEGER   Smoked at least 100 cigarettes in life (1=Yes, 2=No)
+  SMQ040          INTEGER   Do you now smoke cigarettes (1=Every day, 2=Some days, 3=Not at all)
+  SMD641          INTEGER   # cigarettes smoked per day (when smoking every day)
+  SMD650          INTEGER   Avg # cigarettes per day during past 30 days
+
+TABLE: ALQ_J (Alcohol Use)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  ALQ111          INTEGER   Ever had a drink of alcohol (1=Yes, 2=No)
+  ALQ121          INTEGER   Past 12 mo how often drink (0=Never, 1-10 frequency codes)
+  ALQ130          INTEGER   Avg # alcoholic drinks/day past 12 months
+  ALQ142          INTEGER   # days have 4/5+ drinks past 12 mo
+
+TABLE: BPQ_J (Blood Pressure & Cholesterol)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  BPQ020          INTEGER   Ever told you had high BP (1=Yes, 2=No)
+  BPQ040A         INTEGER   Taking prescription for hypertension (1=Yes, 2=No)
+  BPQ080          INTEGER   Doctor told you - high cholesterol (1=Yes, 2=No)
+  BPQ090D         INTEGER   Told to take prescription for cholesterol (1=Yes, 2=No)
+  BPQ100D         INTEGER   Now taking prescribed medicine (1=Yes, 2=No)
+
+TABLE: DIQ_J (Diabetes)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  DIQ010          INTEGER   Doctor told you have diabetes (1=Yes, 2=No, 3=Borderline)
+  DIQ050          INTEGER   Taking insulin now (1=Yes, 2=No)
+  DIQ070          INTEGER   Taking diabetic pills to lower blood sugar (1=Yes, 2=No)
+  DIQ160          INTEGER   Ever told you have prediabetes (1=Yes, 2=No)
+  DIQ170          INTEGER   Ever told at risk for diabetes (1=Yes, 2=No)
+  DIQ175A-G       INTEGER   Family history type flags
+
+TABLE: MCQ_J (Medical Conditions)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  MCQ160A         INTEGER   Doctor ever said you had arthritis (1=Yes, 2=No)
+  MCQ160B         INTEGER   Ever told had congestive heart failure (1=Yes, 2=No)
+  MCQ160C         INTEGER   Ever told you had coronary heart disease (1=Yes, 2=No)
+  MCQ160D         INTEGER   Ever told you had angina/angina pectoris (1=Yes, 2=No)
+  MCQ160E         INTEGER   Ever told you had heart attack (1=Yes, 2=No)
+  MCQ160F         INTEGER   Ever told you had a stroke (1=Yes, 2=No)
+  MCQ160L         INTEGER   Ever told you had any liver condition (1=Yes, 2=No)
+  MCQ160O         INTEGER   Ever told you had COPD (1=Yes, 2=No)
+  MCQ220          INTEGER   Ever told you had cancer/malignancy (1=Yes, 2=No)
+  MCQ160M         INTEGER   Ever told you had thyroid problem (1=Yes, 2=No)
+  MCQ160N         INTEGER   Ever told you had gout (1=Yes, 2=No)
+  MCQ160P         INTEGER   Ever told you had COPD, emphysema, ChB (1=Yes, 2=No)
+
+TABLE: PAQ_J (Physical Activity)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  PAQ605          INTEGER   Vigorous work activity (1=Yes, 2=No)
+  PAQ620          INTEGER   Moderate work activity (1=Yes, 2=No)
+  PAQ635          INTEGER   Walk or bicycle (1=Yes, 2=No)
+  PAQ650          INTEGER   Vigorous recreational activities (1=Yes, 2=No)
+  PAQ665          INTEGER   Moderate recreational activities (1=Yes, 2=No)
+  PAD680          INTEGER   Minutes sedentary activity per day
+
+TABLE: RXQ_RX_J (Prescription Medications - 30 Day)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  RXDUSE          INTEGER   Taken prescription medicine past month (1=Yes, 2=No)
+  RXDDRUG         VARCHAR   Generic drug name
+  RXDDRGID        VARCHAR   Generic drug code (Lexicon Plus)
+  RXDRSC1         INTEGER   ICD-10-CM code 1 (reason for use)
+  RXDRSC2         INTEGER   ICD-10-CM code 2 (reason for use)
+  RXDRSC3         INTEGER   ICD-10-CM code 3 (reason for use)
+  RXDCOUNT        INTEGER   Number of prescription medicines taken
+  Note: Multiple rows per participant (one per medication). Join on SEQN.
+
+TABLE: DPQ_J (Mental Health - Depression Screener PHQ-9)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  DPQ010          INTEGER   Little interest in doing things (0=Not at all, 1=Several days, 2=More than half, 3=Nearly every day)
+  DPQ020          INTEGER   Feeling down, depressed, hopeless (0-3)
+  DPQ030          INTEGER   Trouble sleeping or sleeping too much (0-3)
+  DPQ040          INTEGER   Feeling tired or having little energy (0-3)
+  DPQ050          INTEGER   Poor appetite or overeating (0-3)
+  DPQ060          INTEGER   Feeling bad about yourself (0-3)
+  DPQ070          INTEGER   Trouble concentrating (0-3)
+  DPQ080          INTEGER   Moving/speaking slowly or being fidgety (0-3)
+  DPQ090          INTEGER   Thoughts of self-harm (0-3)
+  DPQ100          INTEGER   Difficulty these problems have caused (0-3)
+  Note: PHQ-9 total score = sum of DPQ010-DPQ090 (range 0-27).
+
+TABLE: KIQ_U_J (Kidney Conditions - Urology)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  KIQ022          INTEGER   Ever told you had weak/failing kidneys (1=Yes, 2=No)
+  KIQ025          INTEGER   Received dialysis in past 12 months (1=Yes, 2=No)
+  KIQ005          INTEGER   How often have urinary leakage (1-5 scale)
+
+TABLE: CDQ_J (Cardiovascular Health)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  CDQ001          INTEGER   Get pain/discomfort in chest on exertion (1=Yes, 2=No)
+  CDQ002          INTEGER   Short of breath on stairs/incline (1=Yes, 2=No)
+  CDQ004          INTEGER   Get chest pain walking on level (1=Yes, 2=No)
+  CDQ008          INTEGER   Severe chest pain lasting 30+ min (1=Yes, 2=No)
+  CDQ010          INTEGER   Shortness of breath lying down at night (1=Yes, 2=No)
+
+TABLE: SLQ_J (Sleep Disorders)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  SLD012          DOUBLE    Sleep hours - weekdays/workdays
+  SLD013          DOUBLE    Sleep hours - weekends
+  SLQ050          INTEGER   Ever told doctor trouble sleeping (1=Yes, 2=No)
+  SLQ120          INTEGER   How often feel overly sleepy during day (0-4 scale)
+
+TABLE: HIQ_J (Health Insurance)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  HIQ011          INTEGER   Covered by health insurance (1=Yes, 2=No)
+  HIQ031A         INTEGER   Covered by private insurance (1=Yes)
+  HIQ031B         INTEGER   Covered by Medicare (1=Yes)
+  HIQ031D         INTEGER   Covered by Medicaid/CHIP (1=Yes)
+  HIQ031AA        INTEGER   No coverage (1=Yes)
+
+TABLE: HUQ_J (Hospital Utilization & Access to Care)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  HUQ010          INTEGER   General health condition (1=Excellent, 2=Very good, 3=Good, 4=Fair, 5=Poor)
+  HUQ020          INTEGER   Health now compared to 1 yr ago (1=Better, 2=Same, 3=Worse)
+  HUQ030          INTEGER   Routine place to go for healthcare (1=Clinic, 2=Dr office, 3=ER, etc.)
+  HUQ051          INTEGER   # times receive healthcare over past year (0=None, 1=1, 2=2-3, etc.)
+  HUQ071          INTEGER   Overnight hospital patient in past year (1=Yes, 2=No)
+
+======================================================================
+DIETARY
+======================================================================
+
+TABLE: DR1TOT_J (Dietary Interview - Total Nutrient Intakes, Day 1)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  DR1TKCAL        DOUBLE    Energy (kcal)
+  DR1TPROT        DOUBLE    Protein (gm)
+  DR1TCARB        DOUBLE    Carbohydrate (gm)
+  DR1TTFAT        DOUBLE    Total fat (gm)
+  DR1TSFAT        DOUBLE    Total saturated fatty acids (gm)
+  DR1TFIBE        DOUBLE    Dietary fiber (gm)
+  DR1TSUGR        DOUBLE    Total sugars (gm)
+  DR1TSODI        DOUBLE    Sodium (mg)
+  DR1TALCO        DOUBLE    Alcohol (gm)
+  DR1TCAFF        DOUBLE    Caffeine (mg)
+  WTDRD1          DOUBLE    Dietary day 1 sample weight
+
+TABLE: DR2TOT_J (Dietary Interview - Total Nutrient Intakes, Day 2)
+  Same structure as DR1TOT_J with DR2 prefix. Use WTDR2D for day 2 weight.
+
+TABLE: DBQ_J (Diet Behavior & Nutrition)
+  Variable        Type      Description
+  SEQN            INTEGER   Respondent sequence number
+  DBD895          INTEGER   # meals not home prepared past 7 days
+  DBD900          INTEGER   # meals from fast food past 7 days
+  DBD905          INTEGER   # ready-to-eat foods past 30 days
+  DBD910          INTEGER   # frozen meals/pizza past 30 days
+
+======================================================================
+MORTALITY (Separate from nhanesA — download from NCHS)
+======================================================================
+
+TABLE: NHANES_2017_2018_MORT_2019_PUBLIC (Linked Mortality)
+  Variable              Type      Description
+  SEQN                  INTEGER   Respondent sequence number
+  ELIGSTAT              INTEGER   Eligibility status for mortality follow-up (1=Eligible, 2=Under age 18, 3=Ineligible)
+  MORTSTAT              INTEGER   Final mortality status (0=Assumed alive, 1=Assumed deceased)
+  UCOD_LEADING          VARCHAR   Underlying cause of death (recode)
+  DIABETES              INTEGER   Diabetes flag (0=No, 1=Yes)
+  HYPERTEN              INTEGER   Hypertension flag (0=No, 1=Yes)
+  PERMTH_INT            INTEGER   Person-months of follow-up from interview
+  PERMTH_EXM            INTEGER   Person-months of follow-up from MEC exam
+  Note: Download from https://www.cdc.gov/nchs/data-linkage/mortality-public.htm
+  Load as CSV. Merge on SEQN.

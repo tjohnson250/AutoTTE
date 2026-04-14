@@ -1,0 +1,20 @@
+id: "synthetic_pcornet"
+name: "PCORnet Synthetic CDW"
+cdm: "pcornet"
+cdm_version: "6.0"
+engine: "duckdb"
+online: true
+
+connection:
+  r_code: |
+    library(pcornet.synthetic)
+    dbs <- load_pcornet_database(
+      cdw_path = "databases/data/pcornet_cdw.duckdb",
+      mpi_path = "databases/data/mpi.duckdb"
+    )
+    con <- dbs$cdw
+
+schema_prefix: "main"
+schema_dump: "databases/schemas/synthetic_pcornet_schema.txt"
+data_profile: "databases/profiles/synthetic_pcornet_profile.md"
+conventions: "databases/conventions/synthetic_pcornet_conventions.md"

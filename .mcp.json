@@ -14,6 +14,11 @@
       "command": "python",
       "args": ["tools/clinical_codes_server.py"],
       "env": {}
+    },
+    "datasource": {
+      "command": "python",
+      "args": ["tools/datasource_server.py"],
+      "env": {}
     }
   }
 }

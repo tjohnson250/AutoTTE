@@ -1,0 +1,283 @@
+MIMIC-IV v3.1 Schema Reference
+==================================================
+Source: PhysioNet, Beth Israel Deaconess Medical Center
+Engine: DuckDB (local)
+Modules: hosp (hospital-wide), icu (ICU-specific)
+
+Join key hierarchy:
+  subject_id (patient) → hadm_id (admission) → stay_id (ICU stay)
+
+==================================================
+MODULE: hosp (Hospital-Wide Tables)
+==================================================
+
+TABLE: patients
+  Column            Type        Description
+  subject_id        INTEGER     Unique patient identifier (PK)
+  gender            VARCHAR     M or F
+  anchor_age        INTEGER     Age at anchor_year (>89 coded as 91)
+  anchor_year       INTEGER     Shifted year of first admission
+  anchor_year_group VARCHAR     Real-world era range (e.g., '2017 - 2019')
+  dod               DATE        Date of death (NULL if alive or unknown; includes post-discharge deaths)
+
+TABLE: admissions
+  Column              Type        Description
+  subject_id          INTEGER     FK to patients
+  hadm_id             INTEGER     Unique hospital admission ID (PK)
+  admittime           TIMESTAMP   Admission datetime
+  dischtime           TIMESTAMP   Discharge datetime
+  deathtime           TIMESTAMP   In-hospital death datetime (NULL if survived)
+  admission_type      VARCHAR     ELECTIVE, URGENT, EMERGENCY, etc.
+  admit_provider_id   VARCHAR     Admitting provider
+  admission_location  VARCHAR     Where admitted from (EMERGENCY ROOM, TRANSFER, etc.)
+  discharge_location  VARCHAR     Where discharged to (HOME, SNF, DEAD/EXPIRED, etc.)
+  insurance           VARCHAR     Medicare, Medicaid, Other
+  language            VARCHAR     Primary language
+  marital_status      VARCHAR     MARRIED, SINGLE, DIVORCED, WIDOWED, etc.
+  race                VARCHAR     Race/ethnicity (WHITE, BLACK, ASIAN, HISPANIC, OTHER, UNKNOWN)
+  edregtime           TIMESTAMP   ED registration time (NULL if no ED visit)
+  edouttime           TIMESTAMP   ED departure time
+  hospital_expire_flag INTEGER    1 = died in hospital, 0 = survived to discharge
+
+TABLE: transfers
+  Column        Type        Description
+  subject_id    INTEGER     FK to patients
+  hadm_id       INTEGER     FK to admissions
+  transfer_id   INTEGER     Unique transfer ID (PK)
+  eventtype     VARCHAR     admit, transfer, discharge
+  careunit      VARCHAR     Care unit name (Medical ICU, Surgical ICU, etc.)
+  intime        TIMESTAMP   Transfer in time
+  outtime       TIMESTAMP   Transfer out time
+
+TABLE: diagnoses_icd
+  Column        Type        Description
+  subject_id    INTEGER     FK to patients
+  hadm_id       INTEGER     FK to admissions
+  seq_num       INTEGER     Diagnosis priority (1 = primary)
+  icd_code      VARCHAR     ICD code (no dots, e.g., 'E119' not 'E11.9')
+  icd_version   INTEGER     9 or 10
+
+TABLE: d_icd_diagnoses
+  Column        Type        Description
+  icd_code      VARCHAR     ICD code (PK with icd_version)
+  icd_version   INTEGER     9 or 10
+  long_title    VARCHAR     Full description
+
+TABLE: procedures_icd
+  Column        Type        Description
+  subject_id    INTEGER     FK to patients
+  hadm_id       INTEGER     FK to admissions
+  seq_num       INTEGER     Procedure priority
+  icd_code      VARCHAR     ICD procedure code
+  icd_version   INTEGER     9 or 10
+  chartdate     DATE        Date of procedure
+
+TABLE: d_icd_procedures
+  Column        Type        Description
+  icd_code      VARCHAR     ICD procedure code (PK with icd_version)
+  icd_version   INTEGER     9 or 10
+  long_title    VARCHAR     Full description
+
+TABLE: labevents
+  Column            Type        Description
+  labevent_id       INTEGER     Unique lab event ID (PK)
+  subject_id        INTEGER     FK to patients
+  hadm_id           INTEGER     FK to admissions (may be NULL for outpatient labs)
+  specimen_id       INTEGER     Specimen identifier
+  itemid            INTEGER     FK to d_labitems
+  charttime         TIMESTAMP   Specimen collection time
+  storetime         TIMESTAMP   Result available time
+  value             VARCHAR     Result as text (includes non-numeric like 'POSITIVE')
+  valuenum          DOUBLE      Numeric result (NULL for non-numeric results)
+  valueuom          VARCHAR     Unit of measure
+  ref_range_lower   DOUBLE      Reference range lower bound
+  ref_range_upper   DOUBLE      Reference range upper bound
+  flag              VARCHAR     'abnormal' if out of range, NULL otherwise
+  priority          VARCHAR     ROUTINE, STAT
+  comments          VARCHAR     Free text comments
+
+TABLE: d_labitems
+  Column        Type        Description
+  itemid        INTEGER     Unique lab item ID (PK)
+  label         VARCHAR     Lab test name (e.g., 'Creatinine')
+  fluid         VARCHAR     Specimen type (Blood, Urine, CSF, etc.)
+  category      VARCHAR     Lab category (Chemistry, Hematology, etc.)
+  loinc_code    VARCHAR     LOINC code (may be NULL for some items)
+
+TABLE: prescriptions
+  Column            Type        Description
+  subject_id        INTEGER     FK to patients
+  hadm_id           INTEGER     FK to admissions
+  pharmacy_id       INTEGER     FK to pharmacy
+  poe_id            VARCHAR     Provider order entry ID
+  starttime         TIMESTAMP   Prescription start time
+  stoptime          TIMESTAMP   Prescription stop time
+  drug_type         VARCHAR     MAIN, ADDITIVE, BASE
+  drug              VARCHAR     Drug name (text)
+  prod_strength     VARCHAR     Product strength
+  form_rx           VARCHAR     Form (tablet, injection, etc.)
+  dose_val_rx       VARCHAR     Prescribed dose value
+  dose_unit_rx      VARCHAR     Dose unit
+  form_val_disp     VARCHAR     Dispensed form value
+  form_unit_disp    VARCHAR     Dispensed form unit
+  doses_per_24_hrs  DOUBLE      Frequency
+  route             VARCHAR     Administration route (IV, PO, etc.)
+  ndc               VARCHAR     National Drug Code
+
+TABLE: pharmacy
+  Column        Type        Description
+  subject_id    INTEGER     FK to patients
+  hadm_id       INTEGER     FK to admissions
+  pharmacy_id   INTEGER     Unique pharmacy ID (PK)
+  medication    VARCHAR     Medication name
+  gsn           VARCHAR     Generic Sequence Number
+  ndc           VARCHAR     National Drug Code
+  rxnorm        INTEGER     RxNorm CUI (may be NULL)
+
+TABLE: emar
+  Column        Type        Description
+  subject_id    INTEGER     FK to patients
+  hadm_id       INTEGER     FK to admissions
+  emar_id       VARCHAR     Unique eMAR ID (PK)
+  charttime     TIMESTAMP   Administration time
+  medication    VARCHAR     Medication name
+  event_txt     VARCHAR     Event type (Administered, Applied, Held, Refused, etc.)
+
+TABLE: emar_detail
+  Column              Type        Description
+  subject_id          INTEGER     FK to patients
+  emar_id             VARCHAR     FK to emar
+  parent_field_ordinal VARCHAR    Field ordering
+  pharmacy_id         INTEGER     FK to pharmacy
+  administration_type VARCHAR     Type of administration
+  dose_due            VARCHAR     Dose that was due
+  dose_due_unit       VARCHAR     Unit of due dose
+  dose_given          VARCHAR     Dose actually given
+  dose_given_unit     VARCHAR     Unit of given dose
+  route               VARCHAR     Route of administration
+
+TABLE: microbiologyevents
+  Column                Type        Description
+  micro_specimen_id     INTEGER     Unique specimen ID (PK)
+  subject_id            INTEGER     FK to patients
+  hadm_id               INTEGER     FK to admissions
+  chartdate             DATE        Specimen collection date
+  charttime             TIMESTAMP   Specimen collection time (may be NULL)
+  spec_type_desc        VARCHAR     Specimen type (BLOOD CULTURE, URINE, etc.)
+  test_name             VARCHAR     Test performed
+  org_name              VARCHAR     Organism identified (NULL if no growth)
+  ab_name               VARCHAR     Antibiotic tested
+  dilution_text         VARCHAR     Dilution result
+  dilution_comparison   VARCHAR     Comparison operator
+  dilution_value        DOUBLE      Dilution numeric value
+  interpretation        VARCHAR     S (sensitive), R (resistant), I (intermediate)
+
+TABLE: omr
+  Column        Type        Description
+  subject_id    INTEGER     FK to patients
+  chartdate     DATE        Measurement date
+  seq_num       INTEGER     Sequence within date
+  result_name   VARCHAR     Measure name (BMI, Blood Pressure, Height, Weight)
+  result_value  VARCHAR     Measure value (text)
+
+TABLE: services
+  Column          Type        Description
+  subject_id      INTEGER     FK to patients
+  hadm_id         INTEGER     FK to admissions
+  transfertime    TIMESTAMP   Time of service change
+  prev_service    VARCHAR     Previous service (e.g., MED, SURG)
+  curr_service    VARCHAR     Current service
+
+TABLE: poe
+  Column              Type        Description
+  poe_id              VARCHAR     Provider order entry ID (PK)
+  subject_id          INTEGER     FK to patients
+  hadm_id             INTEGER     FK to admissions
+  ordertime           TIMESTAMP   Order time
+  order_type          VARCHAR     Order type
+  order_subtype       VARCHAR     Order subtype
+  transaction_type    VARCHAR     Order, Cancel, etc.
+
+==================================================
+MODULE: icu (ICU-Specific Tables)
+==================================================
+
+TABLE: icustays
+  Column          Type        Description
+  subject_id      INTEGER     FK to patients
+  hadm_id         INTEGER     FK to admissions
+  stay_id         INTEGER     Unique ICU stay ID (PK)
+  first_careunit  VARCHAR     First ICU unit (Medical Intensive Care Unit, etc.)
+  last_careunit   VARCHAR     Last ICU unit (if transferred within ICU)
+  intime          TIMESTAMP   ICU admission time
+  outtime         TIMESTAMP   ICU discharge time
+  los             DOUBLE      ICU length of stay (days, decimal)
+
+TABLE: chartevents
+  Column        Type        Description
+  subject_id    INTEGER     FK to patients
+  hadm_id       INTEGER     FK to admissions
+  stay_id       INTEGER     FK to icustays
+  charttime     TIMESTAMP   Time of measurement
+  itemid        INTEGER     FK to d_items
+  value         VARCHAR     Text value
+  valuenum      DOUBLE      Numeric value (NULL for non-numeric)
+  valueuom      VARCHAR     Unit of measure
+  WARNING: ~330M rows. ALWAYS filter by itemid AND time range.
+
+TABLE: d_items
+  Column            Type        Description
+  itemid            INTEGER     Unique item ID (PK)
+  label             VARCHAR     Item name (e.g., 'Heart Rate', 'Arterial BP Systolic')
+  abbreviation      VARCHAR     Short name
+  category          VARCHAR     Category (Routine Vital Signs, Labs, etc.)
+  unitname          VARCHAR     Default unit
+  param_type        VARCHAR     Numeric, Text, etc.
+  lownormalvalue    DOUBLE      Normal range lower bound
+  highnormalvalue   DOUBLE      Normal range upper bound
+
+TABLE: inputevents
+  Column                      Type        Description
+  subject_id                  INTEGER     FK to patients
+  hadm_id                     INTEGER     FK to admissions
+  stay_id                     INTEGER     FK to icustays
+  starttime                   TIMESTAMP   Infusion/bolus start time
+  endtime                     TIMESTAMP   Infusion/bolus end time
+  itemid                      INTEGER     FK to d_items (drug/fluid)
+  amount                      DOUBLE      Amount given
+  amountuom                   VARCHAR     Amount unit (ml, mg, etc.)
+  rate                        DOUBLE      Infusion rate
+  rateuom                     VARCHAR     Rate unit (mL/hour, mcg/kg/min, etc.)
+  orderid                     INTEGER     Order identifier
+  linkorderid                 INTEGER     Linked order (for dose changes)
+  ordercategoryname           VARCHAR     Category (Continuous Med, Bolus, etc.)
+  secondaryordercategoryname  VARCHAR     Secondary category
+  patientweight               DOUBLE      Patient weight at time of order (kg)
+  totalamount                 DOUBLE      Total amount in bag
+  statusdescription           VARCHAR     FinishedRunning, Stopped, Paused, etc.
+  originalamount              DOUBLE      Original ordered amount
+  originalrate                DOUBLE      Original ordered rate
+
+TABLE: outputevents
+  Column        Type        Description
+  subject_id    INTEGER     FK to patients
+  hadm_id       INTEGER     FK to admissions
+  stay_id       INTEGER     FK to icustays
+  charttime     TIMESTAMP   Time of output measurement
+  itemid        INTEGER     FK to d_items (e.g., Urine, Chest Tube)
+  value         DOUBLE      Output volume
+  valueuom      VARCHAR     Unit (mL)
+
+TABLE: procedureevents
+  Column              Type        Description
+  subject_id          INTEGER     FK to patients
+  hadm_id             INTEGER     FK to admissions
+  stay_id             INTEGER     FK to icustays
+  starttime           TIMESTAMP   Procedure start
+  endtime             TIMESTAMP   Procedure end
+  itemid              INTEGER     FK to d_items
+  value               DOUBLE      Value (e.g., duration)
+  valueuom            VARCHAR     Unit
+  location            VARCHAR     Anatomic location
+  ordercategoryname   VARCHAR     Category
+  statusdescription   VARCHAR     Status

@@ -1,0 +1,24 @@
+id: "nhanes"
+name: "NHANES"
+cdm: "nhanes"
+engine: "duckdb"
+online: true
+
+connection:
+  r_code: |
+    library(nhanesA)
+    library(duckdb)
+    con <- dbConnect(duckdb::duckdb(), ":memory:")
+    load_nhanes <- function(tbl) {
+      if (!dbExistsTable(con, tbl)) {
+        df <- nhanes(tbl)
+        dbWriteTable(con, tbl, df)
+        message(sprintf("Loaded %s: %d rows, %d cols", tbl, nrow(df), ncol(df)))
+      }
+      invisible(NULL)
+    }
+
+schema_prefix: ""
+schema_dump: "databases/schemas/nhanes_schema.txt"
+data_profile: "databases/profiles/nhanes_profile.md"
+conventions: "databases/conventions/nhanes_conventions.md"
