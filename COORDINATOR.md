@@ -181,27 +181,37 @@ There are three main phases of work (plus an optional Phase 0). You decide
 when to advance, when to loop, and when to backtrack based on your assessment
 of the deliverables.
 
-### Phase 0: Data Source Onboarding (if database configured)
+### Phase 0: Data Source Onboarding (per-DB)
 
-If a database was configured in your initial prompt:
+Read `{results_dir}/db_triage.json` first. For each entry, act on the
+disposition:
 
-1. **Online mode:**
-   a. Read the DB config YAML to understand the database.
-   b. Check if the schema dump file exists at the path specified in the config.
-      If not, call `dump_schema(db_id=…)` via the R executor to generate it.
-   c. Check if the data profile file exists. If not:
-      - Read the generated schema dump.
-      - Determine appropriate profiling queries based on the CDM type.
-      - Write R profiling code and call `run_profiler(db_id=…, code=…)` to execute it.
-   d. Log onboarding results to `{results_dir}/coordinator_log.md`.
+- **`RUN`** — schema dump and data profile already exist. Nothing to generate;
+  just verify the conventions file path and record the DB in `agent_state.json`.
+- **`RUN_AUTO_ONBOARD`** — the DB is online and a schema dump and/or data
+  profile is missing. Run the per-DB onboarding sub-steps below, using the
+  DB's `id` as the `db_id` argument on every r_executor call.
+- **`SKIP`** — `run.sh` has already excluded this DB from the run. Record it in
+  `agent_state.json` as skipped with its reason; do not invoke any tool for it.
 
-2. **Offline mode:**
-   a. Verify that schema dump and data profile files exist.
-   b. If missing, log a warning and proceed with whatever is available.
+For each `RUN_AUTO_ONBOARD` DB, iterate through these sub-steps:
 
-3. **Both modes:**
-   a. Check that the conventions file exists. Log its path for sub-agents.
-   b. Record the database details in `agent_state.json`.
+1. Read the DB config YAML (`yaml_path` in the triage entry) to understand
+   engine, schema prefix, and connection code.
+2. If `schema_dump` is missing, call `dump_schema(db_id="<id>")` via the R
+   executor to generate it.
+3. If `data_profile` is missing:
+   - Read the (now-existing) schema dump.
+   - Determine appropriate profiling queries based on the CDM type.
+   - Write R profiling code and call `run_profiler(db_id="<id>", code=…)`.
+4. Log onboarding results to `coordinator_log.md` tagged with the `db_id`.
+5. If onboarding fails for one DB, mark it `status: "failed"` in
+   `agent_state.json` and drop it from later phases. Other DBs continue.
+
+After iterating every DB, check that each RUN / RUN_AUTO_ONBOARD DB now has a
+conventions file and log its path for sub-agents.
+
+This phase is skipped entirely for public-datasets-only runs (no `db_triage.json`).
 
 ### Phase 1: Literature Discovery
 - **Goal:** Find causal questions with evidence gaps worth filling
@@ -466,31 +476,54 @@ consider it a credible starting point.
 
 ## State Tracking
 
-Maintain `{results_dir}/agent_state.json` with:
+Maintain `{results_dir}/agent_state.json` with a single schema that fits all
+three run shapes (public-datasets-only, single-DB, multi-DB). The `dbs` object
+is empty for public-datasets-only runs, has one entry for single-DB runs, and
+has multiple entries for multi-DB runs.
 
 ```json
 {
   "therapeutic_area": "...",
-  "database": {"id": "...", "name": "...", "cdm": "...", "engine": "...", "mode": "online|offline"},
   "current_phase": "discovery|feasibility|protocol|execution|reporting|awaiting_results|summary|done",
-  "revision_counts": {"discovery": 0, "feasibility": 0, "protocol": 0},
+  "shared": {
+    "discovery": {"status": "pending|accepted|revising", "revision_count": 0}
+  },
+  "dbs": {
+    "<db_id>": {
+      "mode": "online|offline",
+      "phase": "onboarding|feasibility|protocol|execution|reporting|awaiting_results|done",
+      "status": "pending|running|paused|failed|skipped",
+      "revision_counts": {"feasibility": 0, "protocol": 0},
+      "protocols": 0,
+      "protocols_completed": 0,
+      "reason": "..."
+    }
+  },
   "backtrack_count": 0,
   "total_sub_agents_launched": 0,
   "history": [
-    {"phase": "...", "action": "...", "reason": "...", "timestamp": "..."}
+    {"phase": "...", "db_id": "...", "action": "...", "reason": "...", "timestamp": "..."}
   ]
 }
 ```
 
-Update this after every sub-agent completes.
+Field notes:
 
-In multi-DB runs, `agent_state.json` tracks shared and per-DB phases
-independently:
+- `shared.discovery` tracks the Phase 1 literature work, which runs once
+  regardless of how many DBs are selected.
+- Each `dbs` entry uses the DB id as its key. `status: "skipped"` means `run.sh`
+  excluded it at triage time (e.g., offline with no profile); `reason` explains
+  why. `status: "failed"` means Phase 0 or a later phase exceeded the revision
+  guardrail for this DB.
+- `history` entries include a `db_id` when the event was per-DB, omitted when
+  shared.
+
+Example — multi-DB run mid-flight:
 
 ```json
 {
-  "therapeutic_area": "...",
-  "current_phase": "discovery|feasibility|protocol|execution|reporting|summary|done",
+  "therapeutic_area": "atrial fibrillation",
+  "current_phase": "reporting",
   "shared": {
     "discovery": {"status": "accepted", "revision_count": 1}
   },
@@ -498,14 +531,17 @@ independently:
     "nhanes":   {"mode": "online",  "phase": "reporting", "status": "running",
                  "revision_counts": {"feasibility": 0, "protocol": 1},
                  "protocols": 3, "protocols_completed": 2},
-    "mimic_iv": {"mode": "offline", "phase": "awaiting_results", "status": "paused"},
+    "mimic_iv": {"mode": "offline", "phase": "awaiting_results", "status": "paused",
+                 "protocols": 2, "protocols_completed": 0},
     "foo":      {"status": "skipped", "reason": "offline_no_profile"}
   },
   "backtrack_count": 0,
   "total_sub_agents_launched": 14,
-  "history": [ ... ]
+  "history": []
 }
 ```
+
+Update this file after every sub-agent completes.
 
 ## Handling Previous Runs
 
