@@ -1,0 +1,16 @@
+[
+  {
+    "id": "synthetic_pcornet",
+    "name": "PCORnet Synthetic CDW",
+    "cdm": "pcornet",
+    "engine": "duckdb",
+    "yaml_path": "databases/synthetic_pcornet.yaml",
+    "disposition": "RUN_AUTO_ONBOARD",
+    "effective_mode": "online",
+    "reason": "schema dump and data profile missing (will be auto-generated).",
+    "warnings": [
+      "Conventions file missing; protocols may miss DB-specific rules.",
+      "schema dump and data profile missing; Phase 0 will generate via r_executor."
+    ]
+  }
+]

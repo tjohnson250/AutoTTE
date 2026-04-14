@@ -1,296 +1,322 @@
 # Literature Scan: Atrial Fibrillation
 
-**Therapeutic area:** Atrial fibrillation (AF)
-**Protocol target:** CDW (PCORnet CDM)
-**Date:** 2026-04-06
-**Search strategy:** Three-pass (broad landscape, targeted per-question, citation chaining)
+## Search Strategy
+
+Three-pass literature search conducted 2026-04-13 using PubMed E-utilities API
+with WebSearch cross-referencing for methodology classification.
+
+### Pass 1: Broad Landscape Searches (8 searches)
+
+| # | Theme | Query Summary | Total Found | Reviewed |
+|---|-------|--------------|-------------|----------|
+| 1 | DOAC head-to-head comparisons | AF + (apixaban OR rivaroxaban OR edoxaban OR dabigatran) + comparative study, 2018-2026 | 346 | 40 |
+| 2 | Rate vs rhythm control | AF + (rate control OR rhythm control) + (mortality OR outcomes), 2018-2026 | 690 | 40 |
+| 3 | Catheter ablation vs medical therapy | AF + catheter ablation + (medical therapy OR antiarrhythmic) + (RCT OR observational), 2018-2026 | 187 | 40 |
+| 4 | AF with CKD/HF + anticoagulation | AF + (CKD OR renal insufficiency OR heart failure) + anticoagulants, 2018-2026 | 764 | 40 |
+| 5 | Elderly/frail + anticoagulation | AF + (aged 80+ OR frail elderly OR body weight) + anticoagulants, 2018-2026 | 2,055 | 40 |
+| 6 | LAA closure/stroke prevention | AF + stroke prevention + (LAA OR Watchman), 2018-2026 | 925 | 40 |
+| 7 | Target trial emulation in AF | AF + "target trial emulation", 2015-2026 | 13 | 13 |
+| 8 | AF + cancer + anticoagulants | AF + (neoplasms OR cancer) + anticoagulants, 2018-2026 | 306 | 40 |
 
 ---
 
-## 1. Landmark Randomized Controlled Trials
+## Key Findings by Theme
 
-### 1.1 DOAC vs Warfarin Trials
+### 1. DOAC Head-to-Head Comparisons
 
-| Trial | PMID | Year | Drug | N | Key Finding |
-|-------|------|------|------|---|-------------|
-| RE-LY | 19717844 | 2009 | Dabigatran vs warfarin | 18,113 | Dabigatran 150mg: lower stroke/SE, similar bleeding; 110mg: similar stroke/SE, lower bleeding vs warfarin |
-| ROCKET AF | 21830957 | 2011 | Rivaroxaban vs warfarin | 14,264 | Rivaroxaban noninferior to warfarin for stroke/SE prevention; similar major bleeding |
-| ARISTOTLE | 21870978 | 2011 | Apixaban vs warfarin | 18,201 | Apixaban superior to warfarin: lower stroke/SE, lower bleeding, lower mortality |
-| ENGAGE AF-TIMI 48 | 24251359 | 2013 | Edoxaban vs warfarin | 21,105 | Both edoxaban regimens noninferior; lower bleeding and CV death vs warfarin |
+No RCT directly compares DOACs head-to-head in the general AF population. All pivotal trials compared each DOAC to warfarin individually (RE-LY, ROCKET-AF, ARISTOTLE, ENGAGE AF-TIMI 48). Comparative evidence relies entirely on observational studies and network meta-analyses.
 
-**Key gap:** These trials compared each DOAC to warfarin, NOT to each other. No head-to-head RCTs exist comparing DOACs directly. All excluded severe CKD (eGFR <25-30), advanced liver disease, and had underrepresentation of morbidly obese patients.
+**Key papers:**
 
-### 1.2 Rate vs Rhythm Control Trials
+- **PMID 36315950** — Lau et al., *Ann Intern Med* 2022. Multinational population-based cohort (n > 527,000) comparing all 4 DOACs. Found apixaban associated with lowest risks of stroke/SE and major bleeding. Observational, PS-weighted. No TTE framework explicitly used.
 
-| Trial | PMID | Year | Comparison | N | Key Finding |
-|-------|------|------|------------|---|-------------|
-| AFFIRM | 12466506 | 2002 | Rate vs rhythm control | 4,060 | No survival advantage with rhythm control strategy |
-| EAST-AFNET 4 | 32865375 | 2020 | Early rhythm control vs usual care | 2,789 | Early rhythm control reduced composite CV outcome (HR 0.79); paradigm shift |
+- **PMID 34932078** — Ray et al., *JAMA* 2021. New-user active-comparator design, rivaroxaban vs apixaban in AF (n = 581,451 from Medicare). Rivaroxaban associated with higher risk of major ischemic events (HR 1.18) and hemorrhagic events (HR 1.17). Observational cohort.
 
-**EAST-AFNET 4 subanalyses:**
-- Sinus rhythm at 12 months mediated 81% of treatment benefit (PMID: 36036648)
-- Benefit consistent in symptomatic and asymptomatic patients (PMID: 34447995)
-- Generalizability analysis suggests benefit applies broadly (PMID: 35621202)
-- Subanalysis in diabetes/obesity patients (PMID: 40737012)
+- **PMID 38511316** — Chiv et al., *Stroke* 2024. Edoxaban vs apixaban in elderly AF (≥80 yr, UK). Edoxaban associated with similar stroke/SE but higher major bleeding risk. Real-world cohort.
 
-**Key gap:** EAST-AFNET 4 enrolled patients with AF diagnosed within 12 months. Median age 70 years. Underrepresentation of elderly >80, racial/ethnic minorities, and patients with multiple comorbidities. Real-world generalizability still being established.
+- **PMID 39442621** — Dawwas & Cuker, *JTH* 2025. Rivaroxaban vs other OACs in older adults, responding to Beers Criteria concerns. Population-based cohort finding rivaroxaban associated with higher bleeding than apixaban.
 
-### 1.3 Ablation Trials
+- **PMID 30571400** — Lip et al., *Stroke* 2018 (ARISTOPHANES study). Large pooled analysis from 5 US data sources comparing all DOACs and warfarin.
 
-| Trial | PMID | Year | Comparison | N | Key Finding |
-|-------|------|------|------------|---|-------------|
-| CABANA | 30874766 | 2019 | Ablation vs drugs | 2,204 | ITT: no significant difference in composite of death/stroke/bleeding/arrest; per-protocol: significant benefit |
-| CASTLE-AF | 29385358 | 2018 | Ablation vs drugs in HFrEF | 363 | Ablation reduced death + HF hospitalization by 40% in HFrEF |
-| CASTLE-HTx | 37634135 | 2023 | Ablation in end-stage HF | — | Ablation effective even in end-stage HF eligible for transplant |
+### 2. Rate vs Rhythm Control
 
-**Meta-analyses of ablation vs AAD:**
-- First-line ablation meta-analysis (PMID: 33909022): Ablation reduced arrhythmia recurrence (32.3% vs 53%) and hospitalizations, but no mortality/stroke difference
-- Ablation reduced symptomatic arrhythmia (11.8% vs 26.4%) and hospitalization (5.6% vs 18.7%) (PMID: 34095254)
-- Network meta-analysis in AF+HF: catheter ablation superior for mortality, cardiac function, QoL vs rate/rhythm control drugs (PMID: 41809653)
-- Age and CABANA outcomes (PMID: associated subgroup analysis by age)
+The landscape shifted dramatically with EAST-AFNET 4 (2020), which showed early rhythm control reduces cardiovascular outcomes.
 
-**Key gap:** Ablation evidence in HFpEF is very limited (CASTLE-AF enrolled HFrEF only, LVEF <=35%). Elderly >75 underrepresented in ablation trials. Long-term outcomes (>5 years) sparse.
+- **PMID 32865375** — Kirchhof et al., *NEJM* 2020 (EAST-AFNET 4). Early rhythm control reduced composite of CV death, stroke, HF hospitalization (HR 0.79). Landmark RCT (n = 2,789). Changed clinical guidelines.
 
-### 1.4 Left Atrial Appendage Closure (LAAC) Trials
+- **PMID 34447995** — Willems et al., *Eur Heart J* 2022. EAST-AFNET 4 subanalysis: benefit consistent regardless of symptoms.
 
-| Trial | PMID | Year | Comparison | N | Key Finding |
-|-------|------|------|------------|---|-------------|
-| PROTECT AF | 23325525 | 2013 (2.3yr FU) | WATCHMAN vs warfarin | 707 | LAAC noninferior to warfarin for stroke prevention |
-| PREVAIL | 27343417 | 2016 | WATCHMAN vs warfarin | 407 | LAAC noninferior; 5yr pooled analysis showed lower hemorrhagic stroke, CV death |
-| OPTION | 39555822 | 2024 | LAAC vs OAC post-ablation | 1,600 | LAAC: less bleeding (8.5% vs 18.1%), similar efficacy (5.3% vs 5.8%) at 36 months |
+- **PMID 38727662** — Zafeiropoulos et al., *JACC Clin EP* 2024. Meta-analysis of 12 RCTs: rhythm control reduced all-cause mortality (RR 0.86), driven by ablation-based strategies.
 
-**5-year pooled PROTECT AF + PREVAIL analysis** (PMID: 29103847): LAAC showed improved rates of hemorrhagic stroke, CV/unexplained death, and nonprocedural bleeding vs warfarin.
+- **PMID 30874766** — Packer et al., *JAMA* 2019 (CABANA). Ablation vs drugs in AF: ITT not significant for composite endpoint; per-protocol significant. High crossover rate.
 
-**Key gap:** LAAC trials compared to warfarin, not DOACs. No RCT of LAAC vs DOAC in general AF population. OPTION trial was specific to post-ablation patients.
+- **PMID 40336017** — Weng et al., *J Transl Med* 2025. Rate vs rhythm control in septic AF using MIMIC-IV database.
 
----
+### 3. Catheter Ablation vs Medical Therapy
 
-## 2. Key Observational Studies
+Strong RCT evidence in AF with HFrEF; limited evidence in HFpEF.
 
-### 2.1 Head-to-Head DOAC Comparisons
+- **PMID 29385358** — Marrouche et al., *NEJM* 2018 (CASTLE-AF). Ablation significantly reduced all-cause mortality and HF hospitalization in AF + HFrEF (LVEF ≤35%). Landmark trial.
 
-| Study | PMID | Year | Design | N | Key Finding |
-|-------|------|------|--------|---|-------------|
-| Lip et al. (multinational) | 36315950 | 2022 | Population-based cohort, 6 countries | — | Apixaban: lowest major bleeding; edoxaban similar; rivaroxaban highest bleeding |
-| Lamberts et al. (Danish) | 36817122 | 2023 | Nationwide cohort | — | Long-term DOAC comparison; apixaban favorable safety profile |
-| Ray et al. (JAMA) | 34932078 | 2021 | Claims-based cohort | — | Rivaroxaban vs apixaban: rivaroxaban associated with higher ischemic and hemorrhagic events |
-| Dawwas et al. (VHD) | 36252244 | 2022 | Population-based, AF+VHD | 19,894 matched | Apixaban: lower stroke/SE (HR 0.57) and bleeding (HR 0.51) vs rivaroxaban |
-| Vinogradova et al. (UK) | 36253039 | 2022 | Primary care cohort, UK | — | Apixaban as effective as rivaroxaban for stroke, safer for bleeding |
-| Douros et al. (bleeding risk) | 39154873 | 2024 | Population-based cohort | — | Apixaban: lower major bleeding regardless of bleeding risk level vs rivaroxaban |
-| Noseworthy et al. (IV analysis) | 32283966 | 2020 | Instrumental variable | — | Rivaroxaban vs apixaban: IV analysis confirmed rivaroxaban higher stroke risk |
-| Meta-analysis (DOACs) | 34949473 | 2021 | Meta-analysis | — | Apixaban: lower major bleeding vs rivaroxaban and dabigatran |
+- **PMID 37634135** — Sohns et al., *NEJM* 2023 (CASTLE-HTx). Ablation in end-stage HF + AF: reduced death, LVAD, transplant listing. Single-center.
 
-**Network meta-analyses of DOACs (all 4):**
-- Dose-specific DOAC NMA (PMID: 39817158): Standard-dose apixaban and edoxaban achieved best balance
-- Net clinical benefit NMA of RCTs (PMC: 12090073): Comparative NMA across DOACs from RCT data
-- Valvular AF NMA (PMID: 38707166): Network meta-analysis including both RCT and observational data
-- Falls risk NMA (PMID: 41845167): DOAC comparison in patients with AF and fall risk
+- **PMID 33554614** — Packer et al., *Circulation* 2021. CABANA HF subgroup: ablation reduced AF recurrence and improved quality of life in HF patients but trial not powered for mortality in this subgroup.
 
-### 2.2 DOACs in CKD
+- **PMID 40243977** — Martens et al., *JACC HF* 2025. CABANA HFpEF subanalysis: ablation trends toward benefit but numbers small and confidence intervals wide.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Mavrakanas et al. (review) | 38035566 | 2023 | Review | DOACs preferred over warfarin in moderate CKD; evidence limited in severe CKD/dialysis |
-| CODE-AF Registry | 36579375 | 2022 | Registry, advanced CKD/dialysis | DOACs: lower CRNM bleeding vs warfarin; lower composite adverse events vs no AC |
-| Shin et al. (JAMA review) | 38744617 | 2024 | Systematic review | DOACs in CKD: current evidence questions need for OAC in dialysis patients |
-| Dialysis meta-analysis | PMC:10545858 | 2023 | Meta-analysis | DOACs at least as efficacious and safe as warfarin in dialysis + AF |
-| JACC review | 31648714 | 2019 | Review | Comprehensive review of AC in concomitant CKD and AF |
+- **PMID 33197159** — Andrade et al., *NEJM* 2021 (EARLY-AF). Cryoablation as first-line therapy superior to drugs for AF recurrence.
 
-**Additional studies found in Pass 2/3 (targeted PICO-specific searches):**
+- **PMID 40602939** — Osmancik et al., *JACC* 2025 (PRAGUE-25). Ablation vs lifestyle modification + antiarrhythmics.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Nationwide US cohort (advanced CKD) | 37839687 | 2024 | Claims-based cohort, CKD 4/5 | Rivaroxaban and warfarin: higher major bleeding vs apixaban in advanced CKD |
-| Scoping review (apixaban/rivaroxaban in advanced CKD) | 41733864 | 2026 | Scoping review, 34 studies | Gaps: limited dose-comparison, sparse non-dialysis data |
-| Rivaroxaban vs apixaban in CKD 4-5/dialysis | 33538928 | 2021 | Meta-analysis | DOACs safe/effective as warfarin; no DOAC-vs-DOAC data |
-| Apixaban dose in severe CKD | 37681341 | 2023 | EHR-based cohort | 5mg vs 2.5mg apixaban in CKD 4/5: higher bleeding with 5mg, similar stroke |
-| Apixaban vs warfarin in advanced CKD | 32160801 | 2020 | Observational | Apixaban: lower bleeding vs warfarin in advanced CKD |
-| Apixaban vs warfarin CKD 4-5 systematic review | 36381830 | 2022 | Systematic review | Apixaban 20-30% lower major bleeding vs warfarin in severe CKD |
-| Rivaroxaban vs apixaban in ESRD/dialysis | 31925840 | 2020 | Claims-based cohort | Direct comparison in ESRD; limited sample |
-| Apixaban PK in kidney impairment | PMC:11344734 | 2024 | PK review | Apixaban PK consistent across CKD stages |
-| Apixaban/rivaroxaban vs warfarin in CKD | 38230301 | 2024 | Observational | Both DOACs effective vs warfarin in CKD |
-| Anticoagulation in CKD G5/dialysis scoping review | 40160594 | 2025 | Scoping review | Updated evidence on AC strategies in dialysis |
+### 4. AF with CKD/HF and Anticoagulation
 
-**Updated gap assessment:** Head-to-head apixaban vs rivaroxaban data in CKD IS emerging (PMID: 37839687 is the key study), but evidence remains limited in non-dialysis CKD 3b-4 populations. Most studies compare each DOAC to warfarin rather than to each other. The 2026 scoping review (PMID: 41733864) explicitly identifies this as a gap. Gap score revised to 7/10 (from 8/10).
+Major evidence gap in advanced CKD (eGFR <30 or dialysis). Patients with advanced CKD were excluded from pivotal DOAC trials.
 
-### 2.3 DOACs in Liver Disease
+- **PMID 37839687** — Fu et al., *AJKD* 2024. Nationwide US cohort: warfarin or rivaroxaban vs apixaban in advanced CKD + AF. Apixaban associated with lower bleeding risk vs both comparators. Observational, new-user active-comparator design.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Lee et al. | 32880804 | 2020 | Meta-analysis/systematic review | DOACs safe in CLD without cirrhosis and Child-Pugh A; not recommended in B/C |
-| Qamar et al. | 32626835 | 2020 | Exploratory meta-analysis | DOACs: reduced major bleeding, ICH, GI bleeding vs VKA in advanced liver disease |
+- **PMID 33753537** — De Vriese et al., *JASN* 2021. RCT of VKA vs rivaroxaban in hemodialysis AF patients. Rivaroxaban non-inferior for fatal/non-fatal CV events; lower major bleeding.
 
-### 2.4 DOACs in Obesity
+- **PMID 36335914** — Pokorney et al., *Circulation* 2022 (RENAL-AF). Apixaban vs warfarin in hemodialysis AF. Stopped early for slow enrollment; underpowered. Trend toward less bleeding with apixaban.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Real-world DOACs in morbid obesity | 34825048 | 2021 | Observational | DOACs safe and effective in morbidly obese patients with AF |
-| Post-hoc ARISTOTLE/ENGAGE AF | — | Various | Subgroup analyses | Apixaban and edoxaban as effective as warfarin in BMI >= 40 |
+- **PMID 41085503** — Al-Abcha et al., *JACC Cardiovasc Interv* 2025. LAAO vs apixaban vs warfarin in ESRD + AF. LAAO associated with lower composite endpoint. Observational (PS-matched).
 
-**Additional studies found in Pass 2 (targeted PICO-specific searches):**
+- **PMID 38606775** — Kao et al., *JAHA* 2024. Network meta-analysis of anticoagulation in ESRD + AF.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Apixaban vs rivaroxaban in obese/morbidly obese AF | 37713139 | 2023 | Real-world comparison | No difference in stroke/TIA/MI; small study, baseline differences |
-| Apixaban/rivaroxaban in BMI >= 50 | 34820876 | 2021 | Observational | Both safe in extreme obesity |
-| Apixaban in morbidly obese AF | 35501916 | 2022 | Retrospective cohort | Apixaban safe/effective in morbid obesity |
-| DOACs in obese AF + HF | 36419246 | 2022 | Real-world analysis | All 3 DOACs safe in obese HF+AF |
-| Apixaban vs warfarin in obese AF | 40002903 | 2025 | Propensity-matched | Apixaban effective alternative to warfarin in obese AF |
-| Apixaban PK in obesity review | 35570249 | 2022 | PK review | Modest PK effect of body weight on apixaban |
-| Obesity paradox in ARISTOTLE | 27071819 | 2016 | Post-hoc RCT analysis | Obesity paradox: obese patients had better outcomes |
+### 5. Elderly/Frail + Anticoagulation
 
-**Updated gap assessment:** A direct real-world comparison of apixaban vs rivaroxaban in obese AF patients NOW EXISTS (PMID: 37713139), though it was small and underpowered. PK reviews are reassuring. Gap score revised to 5/10 (from 7/10). This question has lower priority than initially assessed.
+Critical population with high stroke and bleeding risk. Key trials:
 
-### 2.5 DOAC Dosing Practices
+- **PMID 32865374** — Okumura et al., *NEJM* 2020 (ELDERCARE-AF). Low-dose edoxaban 15mg vs placebo in very elderly (≥80, unsuitable for standard OAC). Edoxaban reduced stroke/SE (HR 0.34) with increased GI bleeding.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| HERA-FIB Registry | 39867851 | 2024 | Single-center observational | 20.7% under-dosed; underdosing: HR 1.84 for composite (all-cause mortality + stroke + major bleeding + MI) |
-| ARENA Registry | 39666256 | 2024 | Multi-center registry | 15% inappropriately low-dosed; drug interactions predicted underdosing |
-| Meta-analysis (dose) | PMC:8027572 | 2021 | Meta-analysis, 11 studies | Underdosing: higher stroke/SE (HR 1.29) and death (HR 1.37) |
-| START2-AF Registry | PMC:11012240 | 2024 | Multi-center registry | Inappropriate underdosing patterns characterized |
-| Clinician preferences | PMC:8483523 | 2021 | Survey | 41.2% clinicians would underdose apixaban empirically |
-| Dosing adherence analysis | PMC:10248740 | 2023 | Observational | Dosing non-adherence patterns in NVAF |
+- **PMID 37634130** — Joosten et al., *Circulation* 2024 (FRAIL-AF). Switching from VKA to NOAC in frail elderly: **more bleeding** with switch (HR 1.69). Trial stopped early. Unexpected finding challenging assumption that NOACs are universally safer.
 
-**Additional studies found in Pass 2/3 (targeted PICO-specific searches):**
+- **PMID 39442621** — Dawwas & Cuker, *JTH* 2025. Rivaroxaban associated with higher bleeding than apixaban in older adults.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Long-term underdosed DOAC outcomes | 33444586 | 2021 | Observational | Underdosing: higher stroke, no bleeding benefit |
-| Off-label apixaban in AF+HF+CKD | PMC:12099564 | 2025 | Observational | 53.2% underdosed; worse outcomes |
-| Off-label reduced apixaban in elderly | 37712551 | 2024 | Retrospective cohort | 17% underdosed (201/1172); higher mortality (10.9% vs 1.4%) |
-| Off-label underdosing by individual NOAC | 35643840 | 2022 | Systematic review | Rivaroxaban underdosing: increased stroke/SE |
-| Meta-analysis 148,909 patients | PMC:8012667 | 2021 | Meta-analysis | Underdosing: higher mortality (RR 2.8) |
-| Off-label under/overdosing meta-analysis | 34932377 | 2021 | Meta-analysis | Underdosing: increased ischemic events without bleeding benefit |
-| Prevalence epidemiological meta-analysis | PMC:8188240 | 2021 | Meta-analysis | 20% overall DOAC off-label underdosing prevalence |
-| Comparative effectiveness low-dose OAC | 35095525 | 2022 | Comparative effectiveness | Low-dose OAC effectiveness comparison |
-| Mortality with non-recommended DOAC doses | 32943160 | 2020 | Observational | Underdosing: HR 1.25 for all-cause mortality |
-| Off-label DOAC among inpatients | PMC:10842588 | 2024 | Cross-sectional | >1 in 10 inpatients discharged on off-label dose |
+### 6. LAA Closure
 
-**Key gap (CONFIRMED after Pass 2/3):** All studies are observational associations using conventional epidemiologic methods. NO target trial emulation has been conducted for this question. A sequential TTE framework was used for DOAC *reinitiation after ICH* (PMC: 11934045), but NOT for the underdosing question. The causal effect of inappropriate underdosing vs guideline-concordant dosing remains unestimated with rigorous causal methods.
+Major developments in 2025-2026 with CLOSURE-AF results:
 
-### 2.6 AF and Heart Failure
+- **PMID 41849741** — Landmesser et al., *NEJM* 2026 (CLOSURE-AF). LAA closure vs best medical therapy in high-risk AF. First large RCT in this population. Randomized 1,512 patients.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| AF in HFpEF meta-analysis | 33191141 | 2020 | Meta-analysis, 1.9M patients | AF: 11% increased all-cause mortality in HFpEF |
-| ETNA-AF-Europe Registry | 37713182 | 2023 | Registry | HF patients: higher bleeding/death but similar NOAC effectiveness |
-| AF+HF management NMA | 41809653 | 2025 | Network meta-analysis | Ablation superior to rate/rhythm drugs for mortality and function in AF+HF |
-| 2023 ACC/AHA/ACCP/HRS AF Guideline | 38033089 | 2023 | Clinical guideline | Comprehensive AF management recommendations |
+- **PMID 34748929** — Osmancik et al., *JACC* 2022 (PRAGUE-17 4-year). LAAC noninferior to DOACs at 4 years.
 
-### 2.7 Rate vs Rhythm Control (Post-EAST-AFNET 4 Real-World)
+- **PMID 39945715** — Ngufor et al., *JACC Clin EP* 2025. Causal ML framework for LAAO patient selection. Used causal forest methodology to identify heterogeneous treatment effects.
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Real-world early rhythm control | PMC:10205477 | 2023 | Large real-world cohorts | Early rhythm control beneficial even in high-comorbidity patients |
-| EAST-AFNET 4 generalizability | 35621202 | 2022 | Generalizability analysis | Benefits appear generalizable to broader AF populations |
-| Paradigm shift review | 35255732 | 2022 | Review | From AFFIRM to EAST-AFNET 4: evolving evidence base |
+### 7. Target Trial Emulation in AF (Existing TTE Studies)
 
-**Additional studies found in Pass 2 (targeted PICO-specific searches for elderly):**
+Found 13 PubMed-indexed studies applying TTE to AF questions. Key papers:
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Age and early rhythm control outcomes | 35589174 | 2022 | Nationwide cohort | Early rhythm control benefit ATTENUATES with increasing age |
-| Frailty impact on early rhythm control | 36684588 | 2023 | Nationwide cohort | Benefit maintained but attenuated with increasing frailty in older adults |
-| High comorbidity burden outcomes | 36942567 | 2023 | Large real-world cohorts | Early rhythm control safe and favorable in high-comorbidity patients (CHA2DS2-VASc >= 4) |
-| Systematic review rate vs rhythm in elderly | 31745834 | 2019 | Systematic review, >=65 | Insufficient evidence to recommend rate or rhythm as first-line in older adults |
-| Very elderly AF cohort | 34610350 | 2021 | Observational, 1,497 patients | Rate and rhythm control in elderly and very elderly |
-| Early rhythm control meta-analysis (RCTs) | 38727662 | 2024 | Meta-analysis | Early rhythm control reduces MACCE, stroke, HF hospitalization |
-| Systematic review early rhythm control | 36224587 | 2022 | Systematic review | Early rhythm control improves clinical outcomes |
-| Comparative effectiveness early rhythm | 34889116 | 2021 | Comparative effectiveness | Early rhythm control: lower CV outcomes in real-world populations |
+- **PMID 41121356** — Liu et al., *BMC Med* 2025. TTE: Digoxin vs beta-blocker in AF+HF. Clone-censor-weight approach. Found digoxin associated with higher all-cause mortality.
 
-**Updated gap assessment:** The benefit of early rhythm control ATTENUATES with increasing age (PMID: 35589174), making the elderly >=80 question clinically critical. A 2019 systematic review of patients >=65 (PMID: 31745834) found insufficient evidence to recommend either strategy in older adults. The AFFIRM elderly subgroup analysis actually showed HARM from rhythm control. However, newer drugs and ablation techniques may change this calculus. Gap score confirmed at 7/10.
+- **PMID 41024059** — Prunel et al., *BMC Med* 2025. TTE: Multidisciplinary team for antithrombotic management in older AF.
 
-### 2.8 Stroke Prevention at Low CHA2DS2-VASc
+- **PMID 38504063** — Truong et al., *J Thromb Thrombolysis* 2024. TTE: OAC initiation strategies in AF + cancer (SEER-Medicare).
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| OAC/aspirin/no therapy at CHA2DS2-VASc 0-1 | 25770314 | 2015 | Cohort | Low-risk: no benefit from OAC or aspirin |
-| CHA2DS2-VASc thresholds | 27520653 | 2016 | Observational | Treatment thresholds vary; score 1 may warrant individual assessment |
-| Net clinical benefit analysis | 26223245 | 2015 | NCB analysis | CHA2DS2-VASc 1: positive NCB for warfarin vs no treatment |
-| Beyond CHA2DS2-VASc | PMC:7270900 | 2020 | Review | Atrial substrate (LA size, fibrosis) may improve risk stratification |
+- **PMID 38847907** — Truong et al., *Cardiovasc Drugs Ther* 2025. TTE: DOACs vs warfarin in AF + cancer (SEER-Medicare).
 
-**Additional studies found in Pass 2/3 (targeted PICO-specific and citation chaining):**
+- **PMID 39394165** — Li et al., *BMC Med* 2024. TTE: Suicide risk with different OACs in AF (nationwide, Taiwan).
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Prognosis at CHA2DS2-VASc 0 (community) | 22268375 | 2012 | Community cohort | CHA2DS2-VASc 0: very low stroke risk regardless of treatment |
-| CHA2DS2-VASc identifies no-benefit patients | 23018151 | 2012 | Cohort | CHA2DS2-VASc reclassifies 26% of CHADS2=1 to low risk |
-| Refining risk at CHA2DS2-VASc 0-1 | 22473219 | 2012 | Nationwide cohort | CHA2DS2-VASc 0 = truly low risk; improved stratification |
-| Stroke risk refinement at CHA2DS2-VASc 1 | 25039724 | 2014 | Cohort | Individual risk factors at CHA2DS2-VASc 1 have different stroke rates |
-| Men with CHA2DS2-VASc 0 | 31349811 | 2019 | Editorial/analysis | Even score 0 may not be completely without risk |
-| Young AF patients CHA2DS2-VASc 1 | PMC:5121486 | 2016 | Cohort | Young patients at score 1: OAC benefit uncertain |
-| Hypertension as sole risk factor | PMC:5919811 | 2018 | Registry | Hypertension alone may warrant OAC in AF |
-| Outcomes under 2014 AHA guideline | PMC:5778974 | 2018 | Registry | Newly recommended OAC patients had better outcomes |
-| ARTESiA: Apixaban in subclinical AF | 37952132 | 2024 | RCT | Apixaban reduced stroke vs aspirin in subclinical AF |
-| ARTESiA by CHA2DS2-VASc | 39019530 | 2024 | Subgroup analysis | Greater benefit at higher CHA2DS2-VASc |
-| BRAIN-AF: Rivaroxaban vs placebo in low-risk AF | 41501492 | 2025 | RCT | Rivaroxaban 15mg vs placebo in CHA2DS2-VASc 0-1 (N=1,235); stopped for futility, no benefit on cognitive decline + stroke composite (HR 1.10, P=0.46) |
-| DOACs vs warfarin in low stroke risk | 37573616 | 2023 | Meta-analysis | DOACs favored over warfarin even in low-risk AF |
-| 2024 ESC AF Guidelines | PMC:11865665 | 2024 | Guideline | Updated recommendations on anticoagulation thresholds |
-| hs-cTnT in intermediate CHA2DS2-VASc | PMC:12370022 | 2025 | Cohort | Biomarkers improve risk prediction at intermediate scores |
+- **PMID 39603638** — Anno et al., *Pharmacoepidemiol Drug Saf* 2024. TTE: Early resumption of OAC after subdural hematoma surgery in AF.
 
-**Updated gap assessment (CONFIRMED after Pass 2/3):** This remains the largest evidence gap. Despite 13+ years of study, there is NO RCT and NO target trial emulation addressing whether OAC (especially DOACs) provides net clinical benefit at CHA2DS2-VASc = 1. The ARTESiA trial (PMID: 37952132) addressed subclinical AF (different population). Individual risk factors at score 1 have heterogeneous stroke rates (PMID: 25039724), and biomarkers may refine risk (PMC: 12370022), but the fundamental causal question of DOAC vs. no treatment at the threshold remains unanswered. Gap score confirmed at 9/10.
+- **PMID 36852680** — Walkey et al., *Circ CQO* 2023. TTE: Anticoagulation after sepsis with new-onset AF.
 
-### 2.9 Bleeding Risk Assessment
+### 8. AF + Cancer + Anticoagulants
 
-| Study | PMID | Year | Design | Key Finding |
-|-------|------|------|--------|-------------|
-| Bleeding risk management review | PMC:9569921 | 2022 | Narrative review | DOACs: lower ICH risk vs VKAs; practical bleeding management |
-| Bleeding biomarkers in AF | PMC:12432616 | 2025 | Review | Biomarkers improving bleeding prognostication beyond clinical scores |
-| ABC-AF bleeding score 2.0 | 41644239 | 2025 | Validation study | Updated bleeding score in DOAC/warfarin-treated AF patients |
+Cancer patients systematically excluded from DOAC pivotal trials. Growing literature:
+
+- **PMID 38847907** — Truong et al., *Cardiovasc Drugs Ther* 2025. TTE: DOACs vs warfarin in AF + cancer. DOACs associated with lower stroke/SE and similar bleeding.
+
+- **PMID 38504063** — Truong et al., *J Thromb Thrombolysis* 2024. TTE: OAC initiation strategies in AF + cancer at different CHA2DS2-VASc levels.
+
+- **PMID 39973613** — Grewal et al., *Circulation* 2025. Bleeding after anticoagulation initiation as first sign of malignancy.
+
+- **PMID 33044735** — Mariani et al., *J Thromb Thrombolysis* 2021. Meta-analysis: DOACs vs VKA in AF + cancer; DOACs safer.
 
 ---
 
-## 3. Systematic Reviews and Clinical Guidelines
+## AF with Cirrhosis/Liver Disease
 
-| Source | PMID | Year | Scope |
-|--------|------|------|-------|
-| 2023 ACC/AHA/ACCP/HRS AF Guideline | 38033089 | 2023 | Comprehensive AF management guideline |
-| Anticoagulation in AF/CKD (JACC Review) | 31648714 | 2019 | CKD-specific anticoagulation review |
-| Apixaban safety meta-analysis (3.9M patients) | PMC:9267894 | 2022 | Effectiveness/safety of apixaban in AF |
-| DOAC dose-specific NMA | 39817158 | 2024 | Dose-specific effectiveness and safety across DOACs |
-| Catheter ablation first-line meta-analysis | 33909022 | 2021 | Ablation vs AAD as first-line therapy |
+- **PMID 38976880** — Simon et al., *Ann Intern Med* 2024. Landmark study: Apixaban vs rivaroxaban vs warfarin in cirrhosis + AF. Nationwide cohort. Apixaban associated with lower stroke/SE risk vs warfarin; rivaroxaban associated with higher GI bleeding. Cirrhosis patients excluded from ALL DOAC pivotal trials.
 
 ---
 
-## 4. Summary of Evidence Landscape
+## Summary Statistics
 
-### Well-Established (Low Evidence Gap)
-- DOACs are superior to warfarin for most AF patients (4 landmark RCTs)
-- Early rhythm control benefits patients with recently diagnosed AF (EAST-AFNET 4)
-- Ablation reduces arrhythmia recurrence vs drugs (multiple RCTs + meta-analyses)
-- LAAC is noninferior to warfarin for stroke prevention (PROTECT AF, PREVAIL)
-
-### Emerging but Incomplete (Moderate Evidence Gap)
-- Head-to-head DOAC comparisons favor apixaban (observational only, no RCTs)
-- Ablation in HFrEF is beneficial (CASTLE-AF, single trial)
-- DOACs in moderate CKD preferred over warfarin (subgroup analyses + observational)
-- Early rhythm control in real-world populations (generalizability analyses ongoing)
-
-### Genuine Evidence Gaps (High — TTE Targets)
-1. **Anticoagulation benefit at CHA2DS2-VASc = 1?** (Gap 9/10) — Clinical equipoise, unethical to randomize, no TTE exists
-2. **Causal effect of DOAC underdosing?** (Gap 8/10) — Only observational associations exist, no TTE
-3. **Which DOAC is best in AF + severe CKD?** (Gap 7/10) — Some head-to-head data emerging but limited; non-dialysis CKD 3b-4 gap remains
-4. **Early rhythm control in elderly >=80?** (Gap 7/10) — Benefit attenuates with age; underrepresented in EAST-AFNET 4
-5. **DOAC comparison in morbid obesity (BMI >= 40)?** (Gap 5/10) — One direct comparison exists; PK data reassuring
-6. **Ablation vs drugs in HFpEF?** (Gap 7/10) — CASTLE-AF was HFrEF only
-7. **LAAC vs DOAC (not warfarin)?** (Gap 6/10) — No RCT; low CDW feasibility
+- **Total unique PMIDs cited:** 47
+- **RCTs identified:** 18
+- **Observational comparative effectiveness studies:** 15
+- **Meta-analyses/systematic reviews:** 8
+- **TTE studies in AF:** 7
+- **Reviews used for context:** 6
 
 ---
 
-## 5. Search Strategy Documentation
+## Pass 2: Targeted PICO-Specific Searches
 
-### Pass 1: Broad Landscape Searches (COMPLETE)
-12 thematic searches covering: DOAC comparisons, rate vs rhythm control, ablation trials, LAAC trials, AF+CKD, AF+HF, AF+liver disease/obesity, DOAC dosing, stroke prevention at low CHA2DS2-VASc, bleeding risk, landmark RCTs.
+Completed 2026-04-13. For each of the top 5 candidate questions, 2+ narrow
+PICO-specific PubMed searches were run and abstracts fetched.
 
-### Pass 2: Targeted Per-Question Searches (COMPLETE)
-10 narrow PICO-specific searches for the top 5 questions using exact drug names, conditions, and comparators. Key new papers added to each section above.
+### Q1: Apixaban vs Rivaroxaban in AF + Advanced CKD (eGFR <30)
 
-### Pass 3: Citation Chaining (COMPLETE)
-Forward and backward citation searches for the top 3 questions:
-- Q1 (CHA2DS2-VASc = 1): Chained from PMID 25770314 (Lip 2015) and PMID 26223245 → 8 additional relevant papers found
-- Q2 (DOAC underdosing): Chained from PMID 37712551 (Campbell 2024) and PMC:8012667 → 5 additional papers; confirmed no TTE exists
-- Q3 (Apixaban vs rivaroxaban in CKD): Chained from PMID 37839687 (2024 nationwide US cohort) → 4 additional papers; gap narrowing but still significant
+**Searches:**
+1. `"apixaban" AND "rivaroxaban" AND ("chronic kidney disease" OR "renal insufficiency" OR "CKD") AND "atrial fibrillation"` → 159 results, top 50 reviewed
+2. `"apixaban" AND "rivaroxaban" AND "atrial fibrillation" AND ("kidney" OR "renal" OR "dialysis" OR "eGFR")` sorted by date → 444 results, top 50 reviewed
 
-### Unique PMIDs Cited: >70
-### Study Types: RCTs (12+), observational cohorts (25+), meta-analyses/systematic reviews (15+), guidelines (3), PK reviews (3)
+**New papers not in Pass 1:**
+
+- **PMID 39119973** — Xu et al., *JAHA* 2024. IPW-weighted comparison of warfarin, apixaban, rivaroxaban in AF + severe CKD (eGFR <30, n=6,794). Apixaban vs rivaroxaban: sub-HR 0.53 (0.36–0.78) for major bleeding. **Key new evidence for head-to-head DOAC comparison.**
+
+- **PMID 38230301** — Perreault et al., *World J Nephrol* 2023. Apixaban/rivaroxaban vs warfarin in AF + stage III CKD (Quebec, n=8,899). IPW + Cox models. Apixaban 5mg associated with lower composite risk (HR 0.76) vs warfarin.
+
+- **PMID 38402466** — Binding et al., *Eur Heart J Cardiovasc Pharmacother* 2024. Danish nationwide (n=26,686). Rivaroxaban vs apixaban: HR 1.78 (1.32–2.39) for major bleeding among eGFR 30–49. **Strongest head-to-head signal in moderate CKD.**
+
+- **PMID 41438731** — Liang et al., *Blood Vessels Thromb Hemost* 2026. Systematic review and meta-analysis: DOACs vs warfarin in AF + CKD (110 studies, 310,478 patients). DOACs reduced bleeding (OR 0.66) and strokes (OR 0.60), especially in stage 4–5 CKD.
+
+- **PMID 41292445** — Irlik et al., *Expert Opin Drug Saf* 2026. Review: safety and efficacy of anticoagulation in advanced CKD + AF. Notes observational data suggest DOACs may be superior but large RCTs are urgently needed.
+
+**Methodology check (WebSearch):** Fu et al. 2024 (PMID 37839687) uses propensity score–matched new-user active-comparator design, NOT target trial emulation. No study in this space uses TTE.
+
+### Q2: DOACs vs Warfarin in AF + Liver Cirrhosis
+
+**Searches:**
+1. `"apixaban" AND "rivaroxaban" AND ("cirrhosis" OR "liver disease" OR "hepatic") AND "atrial fibrillation"` → 58 results, all reviewed
+2. `"direct oral anticoagulant" AND ("cirrhosis" OR "liver cirrhosis") AND "atrial fibrillation" AND ("stroke" OR "bleeding")` → 11 results, all reviewed
+
+**New papers not in Pass 1:**
+
+- **PMID 36762560** — Lawal et al., *Circulation* 2023. US nationwide cohort (n=10,209). Apixaban vs warfarin: HR 0.40 (0.19–0.82) for stroke/SE; HR 0.60 (0.46–0.78) for major bleeding. Rivaroxaban vs apixaban: HR 1.59 (1.18–2.14) for major bleeding. **Landmark US study.**
+
+- **PMID 38552497** — Douros et al., *Thromb Res* 2024. Multinational (UK + Quebec, n=11,881). Apixaban vs rivaroxaban: HR 0.80 (0.68–0.95) for major bleeding in liver disease. **But in cirrhosis subgroup: HR 1.01 (0.72–1.43) — safety advantage disappears.**
+
+- **PMID 39583376** — Shaikh et al., *Cureus* 2024. Network meta-analysis (7 studies). Apixaban most favorable: RR 0.51 for stroke/SE, RR 0.54 for bleeding vs VKA.
+
+- **PMID 40727096** — Zhou et al., *Front Pharmacol* 2025. Meta-analysis (14 studies, 44,848 patients). DOACs vs VKA: lower major bleeding (RR 0.64), intracranial bleeding (RR 0.43), all-cause mortality (RR 0.83). Apixaban better than rivaroxaban in liver disease but NOT in cirrhosis.
+
+- **PMID 39027793** — Sinha et al., *Cureus* 2024. Meta-analysis (10 studies). DOACs vs VKA in AF + cirrhosis: lower stroke/SE (RR 0.78) and major bleeding (RR 0.67).
+
+- **PMID 39053441** — Song et al., *JCPT* 2024. Real-world cirrhosis + AF (PS-weighted). Anticoagulation associated with more hospitalizations (OR 1.74) but no mortality difference. DOACs had increased admissions vs warfarin.
+
+- **PMID 38699468** — Ayoub et al., *JGH Open* 2024. DOACs in Child-Pugh C cirrhosis + AF (TriNetX, n=16,029). DOACs vs warfarin: lower ICH (6.6% vs 8.7%) and GI bleed.
+
+**Methodology check (WebSearch):** Simon et al. 2024 (PMID 38976880) uses new-user cohort with PS weighting, NOT TTE. No study in this space uses TTE.
+
+### Q3: Early Rhythm Control vs Rate Control in Newly Diagnosed AF
+
+**Searches:**
+1. `"early rhythm control" AND "atrial fibrillation" AND ("target trial" OR "emulation" OR "observational" OR "causal")` → 21 results, all reviewed
+2. `"rhythm control" AND "rate control" AND "atrial fibrillation" AND ("target trial emulation" OR "emulating" OR "causal inference" OR "observational emulation")` → 1 result
+
+**New papers not in Pass 1:**
+
+- **PMID 38964555** — Gu et al., *Int J Cardiol* 2024. Meta-analysis of 4 real-world studies replicating EAST-AFNET 4 inclusion criteria (n=130,970). ERC associated with lower composite outcome (HR 0.86), CV death (HR 0.87), stroke (HR 0.80). **Most comprehensive real-world validation but NOT TTE framework.**
+
+- **PMID 36942567** — Dickow et al., *Circ Arrhythm Electrophysiol* 2023. OptumLabs (n=109,739) + UK Biobank (n=11,625). ERC more beneficial in high comorbidity (CHA2DS2-VASc ≥4): HR 0.83. PS overlap weighting, NOT TTE.
+
+- **PMID 35322396** — Chao et al., *Thromb Haemost* 2022. Taiwan NHIRD (n=301,064). ERC associated with lower stroke (aHR 0.77), HF (aHR 0.85), mortality (aHR 0.79). Benefit greater with earlier intervention (<3 months). PS matching, NOT TTE.
+
+- **PMID 41317034** — Kang et al., *JAMIA* 2026. Deep learning–based causal inference for rhythm/rate control in ICU AF (MIMIC-III/IV). Rate control only yielded largest mortality reduction in ICU. Novel causal ML approach but ICU-specific, not generalizable.
+
+**Methodology check (WebSearch):** No study applying formal target trial emulation to the EAST-AFNET 4 question was found. All observational validations use PS weighting or matching. This represents a clear methodological gap.
+
+### Q4: Catheter Ablation vs Antiarrhythmic Drugs in AF + HFpEF
+
+**Searches:**
+1. `"catheter ablation" AND "heart failure with preserved ejection fraction" AND "atrial fibrillation"` → 103 results, top 50 reviewed
+2. `"catheter ablation" AND "antiarrhythmic" AND "atrial fibrillation" AND ("HFpEF" OR "preserved ejection") AND ("mortality" OR "hospitalization")` → 20 results, all reviewed
+
+**New papers not in Pass 1:**
+
+- **PMID 39447815** — DeLuca et al., *Heart Rhythm* 2025. TriNetX multicenter (n=3,632 matched). CA vs AAT: mortality HR 0.43 (0.36–0.52), HF hospitalization HR 0.64 (0.55–0.74). **Largest head-to-head observational study.**
+
+- **PMID 38621498** — Bulhões et al., *Heart Rhythm* 2024. Meta-analysis (8 studies, n=20,257). CA vs medical therapy: all-cause death HR 0.68, CV death HR 0.42, HF hospitalization HR 0.43.
+
+- **PMID 41426236** — Wani et al., *J Arrhythmia* 2025. Updated meta-analysis (12 studies, n=43,584). CA reduced composite HR 0.53, mortality HR 0.64, stroke HR 0.66.
+
+- **PMID 41606998** — Deshmukh et al., *JCE* 2026. Drug-refractory AF + HFpEF (Optum EHR, n=2,022 IPTW-balanced). CA vs AAD: 34% lower risk of arrhythmia-related admissions (HR 0.66). No difference in HF admissions overall.
+
+- **PMID 41669949** — Reddy et al., *JAHA* 2026. CABANA substudy: burden of undiagnosed HFpEF in AF. Ablation showed benefit in this subgroup.
+
+- **PMID 39023141** — Parwani et al., *Eur J Heart Fail* 2024. CABA-HFPEF-DZHK27 trial protocol: RCT of early ablation vs usual care in AF + HFpEF/HFmrEF (n≈1,548). **Ongoing — results expected ~2027–2028.**
+
+**Methodology check (WebSearch):** No study in this space uses target trial emulation. All are PS-matched/weighted observational or RCT subanalyses.
+
+### Q5: DOACs (Apixaban vs Rivaroxaban) in AF + Active Cancer
+
+**Searches:**
+1. `("apixaban" OR "rivaroxaban" OR "DOAC") AND "atrial fibrillation" AND ("cancer" OR "malignancy" OR "neoplasm") AND ("stroke" OR "bleeding")` → 143 results, top 50 reviewed
+2. `"atrial fibrillation" AND ("cancer" OR "malignancy") AND ("apixaban" OR "rivaroxaban") AND ("stroke" OR "systemic embolism") AND ("comparative" OR "cohort" OR "effectiveness")` → 21 results, all reviewed
+
+**New papers not in Pass 1:**
+
+- **PMID 34604802** — Deitelzweig et al., *JACC CardioOncol* 2021. ARISTOPHANES subgroup: NVAF + active cancer (n=40,271). Apixaban vs warfarin: HR 0.59 stroke/SE, HR 0.58 major bleeding. Rivaroxaban vs warfarin: similar. PS-matched.
+
+- **PMID 41554390** — Agrawal et al., *Am J Cardiol* 2026. TriNetX (n=41,764 matched pairs). Apixaban vs warfarin in AF + malignancy: lower mortality, lower bleeding, similar stroke. **Largest PS-matched study to date.**
+
+- **PMID 34233467** — Chan et al., *Stroke* 2021. Taiwan NHIRD (n=7,955). NOACs vs warfarin in AF + cancer: lower MACE (HR 0.63), lower bleeding (HR 0.73). Consistent across cancer types. PS stabilized weighting.
+
+- **PMID 36213361** — Potter et al., *JACC CardioOncol* 2022. Cancer hospital (n=1,133 total, 195 matched pairs). DOACs vs warfarin in active cancer + NVAF: similar stroke, ICH, GI bleeding. Small sample.
+
+- **PMID 38088911** — Han et al., *Cancer Epi Bio Prev* 2024. Patterns of anticoagulation and all-cause mortality in cancer + AF.
+
+**Methodology check (WebSearch):** Truong et al. 2024/2025 (PMIDs 38504063, 38847907) CONFIRMED as target trial emulation studies from SEER-Medicare. These are the only AF-cancer TTE studies. Both compare DOACs-as-class vs warfarin — **no head-to-head DOAC comparison** (apixaban vs rivaroxaban) via TTE in cancer.
+
+---
+
+## Pass 3: Citation Chaining (Top 3 Questions)
+
+### Q1: Citation Chain — Fu et al. 2024 (PMID 37839687)
+
+**Backward (co-authors, same design):**
+- Fu EL has published extensively on CKD pharmacoepidemiology. The only other Fu EL publication overlapping AF + CKD is this single paper.
+- Desai RJ (co-author) has published on DOAC comparative effectiveness but no other CKD-specific AF TTE work.
+
+**Forward (citing/concurrent studies):**
+- Xu et al. 2024 (PMID 39119973): Similar design, independent cohort (Optum). Apixaban vs rivaroxaban sub-HR 0.53 for bleeding. Concurrent replication.
+- Binding et al. 2024 (PMID 38402466): Danish data, same question. Rivaroxaban vs apixaban HR 1.78 in eGFR 30–49.
+- Perreault et al. 2023 (PMID 38230301): Quebec, stage III CKD focus.
+- No group has applied TTE framework.
+
+### Q3: Citation Chain — EAST-AFNET 4 Real-World Validations
+
+**Key paper: Dickow et al. 2023 (PMID 36942567)**
+
+**Backward:**
+- Directly extends EAST-AFNET 4 (Kirchhof 2020, PMID 32865375) eligibility criteria to observational data.
+- Uses same composite outcome definition.
+
+**Forward:**
+- Gu et al. 2024 (PMID 38964555) meta-analyzed Dickow + 3 other real-world studies.
+- Lee et al. 2025 (PMID 40052479): ERC + healthy lifestyle in young AF.
+- Han et al. 2025 (PMID 40551338): ERC in cancer survivors.
+- Chao et al. 2022 (PMID 35322396): Taiwan, 301K patients. ERC benefit confirmed.
+- **No group has published a formal TTE emulating EAST-AFNET 4.**
+
+### Q4: Citation Chain — CABANA HFpEF (Martens et al. 2025)
+
+**Key paper: Martens et al. 2025 (PMID 40243977) — CABANA HFpEF subanalysis**
+
+**Backward:**
+- CABANA main trial (Packer 2019, PMID 30874766): ITT non-significant, per-protocol significant.
+- CABANA HF subgroup (Packer 2021, PMID 33554614): AF + HF subanalysis.
+- CASTLE-AF (Marrouche 2018, PMID 29385358): Landmark ablation + HFrEF trial.
+
+**Forward:**
+- Reddy et al. 2026 (PMID 41669949): Undiagnosed HFpEF burden in CABANA.
+- DeLuca et al. 2025 (PMID 39447815): TriNetX observational replication.
+- Deshmukh et al. 2026 (PMID 41606998): Drug-refractory subgroup.
+- Wani et al. 2025 (PMID 41426236): Updated meta-analysis (12 studies).
+- CABA-HFPEF-DZHK27 (PMID 39023141): Ongoing RCT.
+- **No group has applied TTE framework to ablation vs AADs in HFpEF.**
+
+---
+
+## Updated Summary Statistics
+
+- **Total unique PMIDs cited:** 82
+- **RCTs identified:** 18
+- **Observational comparative effectiveness studies:** 32
+- **Meta-analyses/systematic reviews:** 18
+- **TTE studies in AF:** 7 (all from Pass 1; no new TTE studies found)
+- **Reviews used for context:** 7
+- **Pass 2 new papers added:** 28
+- **Pass 3 papers verified:** 18

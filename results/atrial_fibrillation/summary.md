@@ -1,102 +1,206 @@
-# Executive Summary: Atrial Fibrillation Target Trial Emulation Protocols
+# Executive Summary: Atrial Fibrillation Target Trial Emulation Run
 
-## Overview
+**Therapeutic area:** Atrial fibrillation
+**Database:** PCORnet Synthetic CDW (`synthetic_pcornet`) — 500 synthetic patients, PCORnet v6.0, DuckDB
+**Run date:** 2026-04-13
+**Protocols executed:** 1 (methodological demonstration)
+**Primary hypotheses tested:** 1 (no multiple comparison correction required)
 
-This project used a multi-agent autonomous pipeline to design target trial emulation (TTE) protocols for atrial fibrillation (AF) research, targeting an institutional PCORnet Clinical Data Warehouse (CDW) containing ~10 million patients. The pipeline executed four sequential phases -- literature discovery, evidence gap analysis with independent review, CDW feasibility assessment, and protocol generation with independent review -- producing three publication-ready TTE protocols with accompanying Quarto analysis scripts. The protocols address the three highest-priority evidence gaps in AF management where randomized trials are infeasible or have not been conducted, and where CDW data supports robust causal inference.
+> **Synthetic Data Caveat:** This run used a small synthetic database generated
+> for methodological testing. All 500 patient records are artificially
+> generated. Associations between variables do not reflect real biological or
+> clinical relationships. **Effect estimates have no clinical validity.** This
+> summary documents the system's ability to execute the full TTE pipeline
+> end-to-end against a PCORnet-formatted database, not the clinical findings.
 
-The CDW contains 86,308 AF patients, ~20,000 with oral anticoagulant prescriptions, and comprehensive comorbidity, laboratory, vital sign, and mortality data spanning 2016--2025 across two EHR eras (AllScripts and Epic).
+---
 
-## Evidence Landscape
+## 1. Run Overview
 
-The literature scan employed a three-pass search strategy (broad landscape, targeted per-question PICO searches, and citation chaining) identifying **>70 unique PMIDs** across 12+ landmark RCTs, 25+ observational cohorts, 15+ meta-analyses/systematic reviews, and 3 clinical guidelines. An independent reviewer verified 11 PMIDs against PubMed abstracts, finding 9 matches and 2 discrepancies (corrected). The reviewer also identified 2 studies missed by the primary search: the BRAIN-AF trial (PMID: 41501492, the only RCT of anticoagulation vs placebo in low-risk AF) and the ASPIRE study (PMID: 40113236, a prospective cohort complicating the underdosing narrative).
+The Auto-Protocol Designer system was deployed against the atrial fibrillation
+therapeutic area using the PCORnet Synthetic CDW, a 500-patient DuckDB database
+in PCORnet v6.0 format. The system executed all pipeline phases: data source
+onboarding, literature discovery, evidence gap ranking, feasibility assessment,
+protocol generation, R script execution, and per-protocol reporting.
 
-Seven candidate causal questions were identified and ranked by evidence gap size (1--10), clinical importance, TTE suitability, and CDW feasibility. Four questions scored >= 7/10 and advanced to feasibility assessment. Gap scores were revised iteratively as new evidence emerged (Q3: 8 to 7, Q5: 7 to 5, Q7: 6 to 4), demonstrating genuine rather than confirmatory assessment.
+**Key decision point:** All five literature-derived causal questions were
+infeasible against this database. The coordinator pivoted to an alternative
+question identified from available data — metoprolol initiation in AF with
+heart failure — to complete a methodological demonstration of the pipeline.
 
-## Protocols Generated
+---
 
-### Protocol 1: Apixaban vs Rivaroxaban for Stroke Prevention in AF with CKD Stage 3b-5
+## 2. Literature Discovery
 
-- **Question:** Does apixaban cause different rates of stroke/SE or major bleeding compared to rivaroxaban in AF patients with moderate-to-severe CKD (eGFR < 45)?
-- **Design:** Active-comparator, new-user TTE with inverse probability weighting (IPW)
-- **Population:** Adults with NVAF and CKD 3b-5 (dual ascertainment: ICD-10 diagnosis or eGFR < 45), newly initiating apixaban or rivaroxaban
-- **Estimated N:** 2,200--3,700 (apixaban ~1,500--2,500; rivaroxaban ~700--1,200)
-- **Primary Outcome:** Composite of stroke/systemic embolism and major bleeding at 365 days
-- **Key Strength:** Active-comparator design minimizes confounding by indication; dual CKD ascertainment (diagnosis + lab) maximizes capture; pharmacokinetic rationale (apixaban 27% vs rivaroxaban 36% renal clearance) grounds the hypothesis
-- **Key Limitation:** Rivaroxaban arm is smaller (~2:1 ratio); unmeasured confounders include prescriber specialty, frailty, and LVEF
-- **Review Verdict:** ACCEPT
+A three-pass literature search identified **82 unique PMIDs** across 8 broad
+landscape searches and 10 targeted PICO-specific searches, with citation
+chaining for the top 3 questions.
 
-### Protocol 2: Early Rhythm Control vs Rate Control in Elderly AF (Age >= 80)
+**Key findings:**
+- 18 RCTs, 32 observational comparative effectiveness studies, 18 meta-analyses/systematic reviews, and 7 existing TTE studies in AF were identified
+- The existing 7 AF TTE studies cover: digoxin vs. beta-blockers (Liu 2025), DOACs vs. warfarin in cancer (Truong 2024, 2025), antithrombotic management (Prunel 2025), suicide risk with OACs (Li 2024), OAC resumption after subdural hematoma (Anno 2024), and anticoagulation after sepsis-onset AF (Walkey 2023)
+- No existing TTE addresses any of the top 4 ranked evidence gaps
 
-- **Question:** Does initiating early rhythm control (vs rate control) cause different rates of a composite CV outcome in elderly AF patients >= 80 years?
-- **Design:** Landmark TTE with 12-month treatment classification window and IPW
-- **Population:** Adults >= 80 with newly diagnosed AF (first I48.x, no prior AF in 365 days) receiving rhythm or rate control within 12 months
-- **Estimated N:** 9,000--15,000 (rhythm control ~3,000--5,000; rate control ~6,000--10,000)
-- **Primary Outcome:** Composite of CV death, stroke, and HF hospitalization, assessed from the 12-month landmark for up to 3 additional years
-- **Key Strength:** Landmark design correctly eliminates immortal time bias inherent in treatment classification windows; addresses the fastest-growing AF demographic systematically excluded from RCTs; DEATH_CAUSE completeness check with automatic fallback to all-cause mortality
-- **Key Limitation:** Cannot adjust for LVEF or symptom severity (strong drivers of treatment selection); landmark excludes early treatment effects (both beneficial and harmful); treatment crossover dilutes ITT effect
-- **Review Verdict:** ACCEPT
+**Discovery review verdict: ACCEPT.** An independent reviewer verified 15 PMIDs
+(13 accurate, 2 minor description errors not affecting conclusions), confirmed
+all "no TTE exists" claims via independent PubMed and WebSearch searches, and
+validated the self-consistency check.
 
-### Protocol 3: OAC vs No OAC at CHA2DS2-VASc = 1 (Men) / 2 (Women)
+---
 
-- **Question:** What is the causal effect of initiating oral anticoagulation vs no anticoagulation on stroke/SE risk in AF patients at the guideline treatment threshold?
-- **Design:** Treated-vs-untreated, new-user TTE with IPW and net clinical benefit analysis
-- **Population:** Adults with NVAF and CHA2DS2-VASc = 1 (men) or 2 (women), with no prior OAC use
-- **Estimated N:** 12,000--16,000 eligible (~2,000--4,000 treated; ~8,000--12,000 untreated)
-- **Primary Outcome:** Ischemic stroke or systemic embolism at 365 days; net clinical benefit (stroke reduction minus 1.5x ICH excess) as key secondary measure
-- **Key Strength:** Addresses the single most debated clinical decision in AF management; natural comparator group exists (many clinicians defer OAC at this threshold); includes subgroup analysis by driving CHA2DS2-VASc component
-- **Key Limitation:** Treated-vs-untreated design carries stronger confounding by indication than active-comparator designs; cannot capture OTC aspirin use; E-value analysis critical for interpreting results
-- **Review Verdict:** REVISE (time-zero discrepancy between protocol document and SQL; corrected by coordinator)
+## 3. Evidence Gaps
 
-## Feasibility Summary
+Five causal questions were ranked by evidence gap score:
 
-| Rank | Question | Gap Score | CDW Feasibility | Estimated N | Advanced to Protocol? |
-|------|----------|-----------|-----------------|-------------|----------------------|
-| 1 | OAC vs no OAC at CHA2DS2-VASc = 1 | 9/10 | Partially feasible | 12,000--16,000 (2,000--4,000 treated) | Yes (Protocol 3) |
-| 2 | DOAC underdosing vs correct dosing | 8/10 | Partially feasible | 600--1,500 underdosed | **No** -- sample too small |
-| 3 | Apixaban vs rivaroxaban in CKD 3b-5 | 7/10 | Feasible | 2,200--3,700 | Yes (Protocol 1) |
-| 4 | Early rhythm vs rate control in age >= 80 | 7/10 | Feasible | 9,000--15,000 | Yes (Protocol 2) |
-| 5 | Apixaban vs rivaroxaban in obesity (BMI >= 40) | 5/10 | Moderate-high | -- | No -- gap score below threshold |
-| 6 | Apixaban vs rivaroxaban in liver disease | 6/10 | Moderate | -- | No -- smaller population |
-| 7 | LAAC vs DOAC | 4/10 | Low-moderate | -- | No -- TTE already published (2026) |
+| Rank | Question | Gap Score | Existing TTE? |
+|------|----------|-----------|---------------|
+| 1 | Early rhythm control vs. rate control in newly diagnosed AF (EAST-AFNET 4 emulation) | 8/10 | No |
+| 2 | Catheter ablation vs. antiarrhythmic drugs in AF + HFpEF | 8/10 | No |
+| 3 | Apixaban vs. rivaroxaban in AF + advanced CKD (eGFR < 30) | 7/10 | No |
+| 4 | DOACs vs. warfarin in AF + liver cirrhosis | 7/10 | No |
+| 5 | DOACs (apixaban vs. rivaroxaban) in AF + active cancer | 5/10 | Yes (DOACs-as-class vs. warfarin only) |
 
-## Quality Assurance
+**Q1 (Early rhythm vs. rate control)** has the strongest TTE rationale: EAST-AFNET 4 provides a clear target trial protocol, multiple real-world validations exist (Dickow 2023, Chao 2022, Gu 2024 meta-analysis), but no study has applied the formal TTE framework with explicit handling of immortal time bias, per-protocol effects via clone-censor-weight, or US claims/EHR replication of this European RCT.
 
-**Literature review (Phase 1):** An independent reviewer verified 11 PMIDs against PubMed abstracts, identified 2 factual discrepancies (HERA-FIB: HR 1.84 for composite, not HR 1.98 for mortality; Campbell: 17% underdosed, not 15%), and found 2 missed studies (BRAIN-AF, ASPIRE). All corrections were applied to source files before advancing. The reviewer also stress-tested three "no TTE exists" claims with independent searches -- all confirmed.
+**Q2 (Ablation vs. AADs in HFpEF)** addresses a question with no completed RCT (CABA-HFPEF-DZHK27 results expected 2027-2028) and strong observational signals (DeLuca 2025: mortality HR 0.43) that have not been analyzed via TTE.
 
-**Protocol review (Phase 3):** An independent reviewer evaluated all three protocols against a TTE checklist (eligibility, treatment, assignment, time zero, outcome, estimand, causal contrast), verified code quality (CDW table references, legacy encounter filtering, ROW_NUMBER deduplication, T-SQL syntax, dynamic PS formula construction), and assessed immortal time bias. Protocols 1 and 2 were accepted without changes. Protocol 3 had a time-zero discrepancy (document said "first qualifying encounter" but SQL evaluated at "first AF encounter" only); the coordinator resolved this by updating the document to match the SQL and adding a limitations note.
+---
 
-**Cross-protocol quality:** All three protocols share consistent standards -- fully qualified CDW table names, legacy encounter filtering on all joins, RXNORM_CUI for medications, LOINC for labs, ROW_NUMBER deduplication, CONSORT flow diagrams, dynamic propensity score formula construction, E-value sensitivity analyses, and post-Epic era sensitivity analyses.
+## 4. Feasibility Findings
 
-## Deferred Questions
+All five literature-derived questions were **NOT FEASIBLE** against synthetic_pcornet.
 
-| Question | Gap Score | Reason Deferred |
-|----------|-----------|-----------------|
-| DOAC underdosing vs guideline-concordant dosing | 8/10 | Inappropriately underdosed subgroup too small (~600--1,000 for apixaban) for robust causal inference. Recommended for multi-site PCORnet study. |
-| Apixaban vs rivaroxaban in morbid obesity (BMI >= 40) | 5/10 | A direct real-world comparison now exists (PMID: 37713139, 2023); PK data reassuring. Gap has narrowed. |
-| Apixaban vs rivaroxaban in liver disease | 6/10 | Smaller population in CDW; cannot reliably determine Child-Pugh score from EHR data. |
-| LAAC vs DOAC | 4/10 | A TTE of LAAC vs DOAC was published in 2026 using Medicare data. Single-site CDW feasibility too low. |
+**Root cause:** The synthetic database was generated with siloed clinical profiles
+(cardiac, diabetic, respiratory, mental health, multimorbid, healthy). The cardiac
+profile (50 AF patients) includes only common chronic disease medications and
+diagnoses:
 
-## Recommendations for Next Steps
+| Missing Data Category | Impact |
+|-----------------------|--------|
+| **No anticoagulants** (DOACs, warfarin) — 0 prescriptions | Blocks Q1, Q3, Q4, Q5 |
+| **No antiarrhythmic drugs** (amiodarone, flecainide, sotalol) — 0 prescriptions | Blocks Q1, Q2 |
+| **No ablation procedures** (CPT 93653-93657) — 0 procedures | Blocks Q2 |
+| **No comorbidity crossover** — 0 AF patients with CKD, cirrhosis, or cancer | Blocks Q3, Q4, Q5 |
+| **No stroke or bleeding outcomes** — 0 events | Blocks all 5 questions |
 
-1. **Execution priority:** Protocol 1 (Apixaban vs Rivaroxaban in CKD) is the strongest candidate for immediate execution -- active-comparator design, clean time-zero definition, and adequate sample size. Protocol 2 (Rhythm vs Rate Control in Elderly) has the largest population and should follow. Protocol 3 (OAC at Threshold) is the most clinically impactful but carries the strongest confounding threat and should be executed with careful E-value interpretation.
+**Coordinator pivot:** An alternative question was identified from available data:
 
-2. **Data access:** All protocols require read access to CDW tables via ODBC connection (`SQLODBCD17CDM`). Each protocol includes a complete Quarto analysis script (`.qmd`) ready for execution. Verify that eGFR lab data (LOINC 48642-3) and DEATH_CAUSE completeness meet expected thresholds before running Protocols 1 and 2 respectively.
+> **Q-Alt: Effect of metoprolol initiation (vs. no beta-blocker) on HF hospitalization in AF + HF patients**
 
-3. **Methodological considerations:**
-   - All three protocols use IPW with logistic regression propensity scores. Consider augmented IPW (AIPW) or doubly robust estimation as a planned secondary analysis.
-   - Protocol 3's treated-vs-untreated design is most vulnerable to unmeasured confounding. The E-value will be the primary tool for assessing robustness.
-   - LVEF and symptom severity are unmeasured across all protocols. NLP extraction from echocardiography reports could strengthen confounding adjustment if resources permit.
-   - Smoking data is unusable (99.8% unknown) across all protocols -- a known CDW limitation.
+This leveraged the 50 AF+HF patients (29 with metoprolol, 21 without beta-blocker), the only constructable exposure contrast and outcome in the database. It was advanced as a **methodological demonstration only**.
 
-4. **Multi-site extension:** The DOAC underdosing question (Q2, gap score 8/10) has the highest evidence gap among deferred questions and is ideally suited for a multi-site PCORnet analysis where the underdosed subgroup would be large enough for robust inference.
+---
 
-5. **Publication strategy:** Each protocol is designed as a standalone study suitable for submission to clinical journals. Protocol 1 targets nephrology/cardiology journals (e.g., AJKD, JACC); Protocol 2 targets geriatrics/cardiology (e.g., JAMA Internal Medicine); Protocol 3 targets general medicine (e.g., NEJM, BMJ) given its broad clinical impact.
+## 5. Protocol Execution Results
 
-## Appendix: Pipeline Statistics
+### Protocol 01: Metoprolol Initiation in AF+HF → HF Hospitalization
 
-- **Total sub-agents launched:** 7 (3 worker agents, 2 reviewer agents, 1 feasibility agent, 1 summary agent)
-- **Literature PMIDs cited:** >70 unique (across RCTs, cohorts, meta-analyses, guidelines)
-- **Clinical codes validated:** ~160 RxNorm CUIs, ~60 ICD-10 codes, 8 LOINC codes, 4 CPT codes
-- **Revision cycles:** 2 (literature corrections after discovery review; Protocol 3 time-zero fix after protocol review)
-- **Backtracks:** 1 (Q2 DOAC underdosing deferred from protocol generation due to insufficient sample size)
-- **Total output:** 3 protocol documents (~400 lines each), 3 Quarto analysis scripts (~1,900 lines each), 1 literature scan, 1 evidence gaps analysis, 1 feasibility assessment, 2 review reports, 1 coordinator log
+**Design:** Target trial emulation with IPW-weighted logistic regression for binary outcome (HF hospitalization yes/no). Time zero at first AF diagnosis. ATE estimand.
+
+**Cohort:** 43 patients after excluding 7 with non-metoprolol beta-blockers (29 treated, 14 control).
+
+**Propensity score model:** `treatment ~ dm + hld + hdl` (only 3 covariates retained sufficient variability; most planned confounders were near-uniform in this synthetic sample).
+
+**Balance:** Post-weighting maximum SMD improved from 1.113 to 0.219 (below 0.1 threshold not achieved; HDL remained imbalanced).
+
+| Measure | Result |
+|---------|--------|
+| IPW-weighted OR | **0.493** (95% CI: 0.200–1.219) |
+| P-value | 0.126 |
+| Risk — metoprolol | 29.0% (8/29) |
+| Risk — no beta-blocker | 45.2% (6/14) |
+| Risk difference | **-16.3 percentage points** |
+| Crude OR | 0.508 (95% CI: 0.134–1.931) |
+| E-value | CI crosses 1.0; E-value for lower limit = 1.0 |
+
+**Interpretation:** The point estimate suggests a direction toward lower HF hospitalization with metoprolol, but the result is not statistically significant. The wide confidence interval (spanning 80% reduction to 22% increase in odds) reflects severe imprecision from the sample size of 43. The crude and adjusted ORs are nearly identical, suggesting limited measured confounding. **No clinical inference should be drawn.** Critical unmeasured confounders (LVEF) and synthetic data invalidate any clinical interpretation.
+
+**Pipeline outputs produced:**
+- CONSORT flow diagram (PDF)
+- Table 1 — baseline characteristics (HTML)
+- Love plot — covariate balance (PDF)
+- Propensity score distribution plot (PDF)
+- Structured results (JSON)
+- Per-protocol report with STROBE compliance checklist
+
+---
+
+## 6. Methodological Assessment
+
+### What Worked
+
+1. **End-to-end pipeline execution.** The system completed all phases from literature search through R script execution and report generation against a real CDM structure, demonstrating that the automated TTE pipeline is functional on PCORnet v6.0 data.
+
+2. **Literature discovery depth.** The three-pass search (broad, targeted PICO, citation chaining) with 82 PMIDs and independent WebSearch verification of methodology claims produced a thorough, reviewer-validated evidence landscape.
+
+3. **Feasibility honesty.** Rather than forcing an infeasible analysis, the system correctly identified all 5 original questions as infeasible with specific blocking reasons and transparent root cause analysis.
+
+4. **Adaptive decision-making.** The coordinator's pivot to an alternative question preserved pipeline demonstration value while prominently documenting the synthetic data limitation at every stage.
+
+5. **Code validation.** Clinical codes (ICD-10-CM for AF/HF, RxNorm for metoprolol and other beta-blockers) were validated via MCP tools against authoritative code sets before use in the protocol.
+
+### What Didn't Work
+
+1. **Database-question mismatch.** The synthetic database's 27-drug formulary lacks every medication class relevant to AF research (anticoagulants, antiarrhythmics, digoxin). This made the entire literature-derived question set unusable.
+
+2. **Residual covariate imbalance.** Post-weighting SMD of 0.219 exceeded the 0.1 threshold. With only 3 covariates in the PS model (out of 15+ planned), the IPW could not fully adjust for confounding.
+
+3. **E-value computation.** The sensitivity analysis for unmeasured confounding failed due to a subscript-out-of-bounds error in the `EValue` package when the CI crosses 1.0. This is a known edge case that should be handled gracefully.
+
+4. **Near-uniform covariate distributions.** Synthetic data with identical comorbidity profiles (100% HTN, 98% CAD, 88% HLD among AF patients) caused most planned confounders to be dropped from the PS model, undermining the causal inference framework.
+
+### Lessons Learned
+
+- **Database selection is the most critical decision.** A database must contain the treatments, outcomes, and comorbidity overlap relevant to the research question. Feasibility assessment should ideally occur before literature discovery to avoid wasted effort, or the system should support early "data inventory" checks.
+- **Synthetic databases are useful for pipeline testing but fundamentally cannot validate the causal inference methodology** — they lack the real-world correlation structure between treatments, confounders, and outcomes that IPW is designed to address.
+- **Small-sample TTE requires aggressive formula simplification.** The dynamic PS formula construction (dropping zero-variance and single-level factors) was essential and should be standard practice.
+
+---
+
+## 7. Recommendations for Real-World Application
+
+The five literature-derived evidence gaps identified in this run represent genuine, reviewer-verified research opportunities. To execute these protocols with clinically meaningful results, the following database characteristics are needed:
+
+### Recommended Databases by Question
+
+| Question | Required Data | Recommended Database Types |
+|----------|--------------|---------------------------|
+| **Q1: Early rhythm vs. rate control** | AAD prescriptions, ablation CPTs, stroke/CV death outcomes, ≥12 months follow-up from AF diagnosis | Large US claims (Optum, MarketScan, Medicare) or EHR (PCORnet clinical sites, VA CDW) |
+| **Q2: Ablation vs. AADs in AF+HFpEF** | Ablation CPTs, AAD Rx, LVEF/echo data for HFpEF definition, HF hospitalization outcomes | EHR with structured echo data (VA CDW, PCORnet sites with cardiology data, TriNetX) |
+| **Q3: Apixaban vs. rivaroxaban in CKD** | DOAC Rx, eGFR labs, bleeding/stroke outcomes | EHR-linked claims with lab results (PCORnet clinical sites, OneFlorida+, VA CDW) |
+| **Q4: DOACs vs. warfarin in cirrhosis** | OAC Rx, cirrhosis ICD codes + liver function labs (bilirubin, albumin, INR), bleeding/stroke outcomes | EHR with hepatology data (VA CDW, PCORnet sites, TriNetX) |
+| **Q5: Apixaban vs. rivaroxaban in cancer** | DOAC Rx, cancer staging, bleeding outcomes | Cancer registry-linked claims (SEER-Medicare) or EHR (PCORnet oncology sites) |
+
+### Minimum Database Requirements
+
+For any of these questions:
+- **Sample size:** ≥5,000 AF patients with the relevant comorbidity to achieve adequate statistical power
+- **Medication data:** Prescription or dispensing records with RxNorm coding for DOACs/AADs
+- **Outcome data:** ICD-coded stroke (I63.x), bleeding (D62, K25-K28, K92.x, I61.x), and death with cause
+- **Temporal resolution:** Dated diagnoses, prescriptions, and encounters to define time zero and follow-up
+- **Lab data (Q2-Q4):** eGFR, LVEF, liver function tests for population definition and confounder adjustment
+
+---
+
+## Synthetic Data Caveat
+
+This entire run was conducted on the **PCORnet Synthetic CDW**, a 500-patient
+database generated for methodological testing purposes. Key implications:
+
+- **No clinical validity.** All effect estimates, confidence intervals, and
+  p-values are artifacts of synthetic data generation, not reflections of real
+  treatment effects.
+- **No biological plausibility.** The synthetic cohort has a mean age of 22
+  years for AF+HF patients (real-world median > 70 years), 100% comorbidity
+  overlap, and no clinically relevant medications (anticoagulants,
+  antiarrhythmics).
+- **Pipeline validation only.** This run demonstrates that the Auto-Protocol
+  Designer can: (a) conduct systematic literature discovery, (b) identify and
+  rank evidence gaps, (c) assess database feasibility, (d) generate executable
+  TTE protocols with validated clinical codes, (e) run R analysis scripts
+  against PCORnet CDM data, and (f) produce publication-quality outputs
+  (CONSORT diagrams, Table 1, balance diagnostics, effect estimates).
+- **The five evidence gaps identified are real.** The literature discovery and
+  gap ranking are independent of the database and represent genuine TTE
+  opportunities in atrial fibrillation research. These questions should be
+  pursued against appropriately sized real-world databases.
