@@ -57,11 +57,12 @@ in bash, reads their output files, and decides what to do next.
 
 ### Pipeline Phases
 
-**Phase 0 -- Data Source Onboarding** (if a database is configured)
-Auto-generates schema dump and data profile if they are missing. In online
-mode the coordinator uses `dump_schema()` and `run_profiler()` from the R
-executor MCP server. In offline mode the schema dump and profile must
-already exist on disk.
+**Phase 0 -- Data Source Onboarding** (for each selected database)
+Auto-generates schema dump and data profile for any DB marked
+`RUN_AUTO_ONBOARD` in `db_triage.json`. In online mode the coordinator uses
+`dump_schema(db_id=…)` and `run_profiler(db_id=…, code=…)` from the R executor
+MCP server. In offline mode the schema dump and profile must already exist
+on disk; DBs missing them are skipped at startup.
 
 **Phase 1 -- Literature Discovery**
 Worker searches PubMed using a three-pass strategy (broad landscape, targeted
@@ -146,6 +147,9 @@ MIMIC-IV and NHANES. No database connection required.
 
 Results appear in `results/atrial_fibrillation/`.
 
+For targeting specific configured databases, see
+[Multi-Database Runs](#multi-database-runs) below.
+
 ## Quick Start (NHANES)
 
 To run against NHANES (National Health and Nutrition Examination Survey)
@@ -218,6 +222,95 @@ This runs in online mode -- agents query the synthetic DuckDB database,
 validate cohort sizes, and execute analysis scripts end-to-end. Results
 appear in `results/atrial_fibrillation/`.
 
+## Multi-Database Runs
+
+Target any subset of configured databases (or all) in one invocation. Literature
+discovery runs once; feasibility, protocol generation, execution, and
+per-protocol reports branch per DB.
+
+```bash
+# Run against NHANES and MIMIC-IV
+./run.sh "atrial fibrillation" --dbs nhanes,mimic_iv
+
+# Run against every YAML under databases/
+./run.sh "atrial fibrillation" --dbs all
+```
+
+### How selection works
+
+- `--dbs` accepts DB ids (the `id` field inside each `databases/*.yaml`) as a
+  comma-separated list, or the literal keyword `all`.
+- Unknown ids fail fast with the list of valid ids.
+- The legacy `--db-config <path>` is resolved internally to `--dbs <id>` so
+  existing scripts keep working. Mixing `--db-config` and `--dbs` is an error.
+
+### Discovery
+
+```bash
+./run.sh --list-dbs
+# ID                  NAME                    CDM      ENGINE  DEFAULT  SCHEMA  PROFILE  CONVENTIONS
+# mimic_iv            MIMIC-IV v3.1           mimic    duckdb  online   yes     yes      yes
+# nhanes              NHANES                  nhanes   duckdb  online   yes     yes      yes
+# secure_pcornet_cdw  Secure PCORnet CDW      pcornet  mssql   offline  yes     yes      yes
+# synthetic_pcornet   PCORnet Synthetic CDW   pcornet  duckdb  online   no      no       no
+
+./run.sh --show-db nhanes
+# ID:        nhanes
+# Name:      NHANES
+# ...
+# Files:
+#   schema_dump   databases/schemas/nhanes_schema.txt            [present]
+#   data_profile  databases/profiles/nhanes_profile.md           [present]
+#   conventions   databases/conventions/nhanes_conventions.md    [present]
+```
+
+### Startup triage
+
+Before launching the coordinator, `run.sh` triages every selected DB and writes
+`results/{ta}/db_triage.json`. Each entry gets one of three dispositions:
+
+| Disposition | Meaning |
+|---|---|
+| `RUN` | Schema dump and data profile exist; proceed. |
+| `RUN_AUTO_ONBOARD` | Online DB is missing a schema dump or profile; Phase 0 auto-generates them. |
+| `SKIP` | Offline DB with no profile; cannot auto-generate. Warned and excluded from the run. |
+
+If every selected DB is skipped, `run.sh` exits with an error.
+
+### Output layout
+
+DB-backed runs use a nested per-DB layout so multi-DB runs stay organized:
+
+```
+results/{therapeutic_area}/
+├── 01_literature_scan.md        # shared
+├── 02_evidence_gaps.md          # shared
+├── summary.md                   # shared (synthesizes across all DBs)
+├── coordinator_log.md           # shared
+├── agent_state.json             # shared
+├── db_triage.json               # triage output
+├── nhanes/
+│   ├── 03_feasibility.md
+│   └── protocols/
+│       ├── protocol_01.md
+│       ├── protocol_01_analysis.R
+│       ├── protocol_01_results.json
+│       └── protocol_01_report.md
+└── mimic_iv/
+    └── ...
+```
+
+The executive summary explicitly calls out PICO questions that were feasible on
+more than one DB, with a side-by-side comparison of effect estimates -- a natural
+cross-database replication signal.
+
+### Online mode with multiple DBs
+
+When `--dbs` includes online DBs, `run.sh` generates a session MCP config that
+launches a single `r_executor` server with one `--config` flag per online DB.
+The server holds one R session per DB, keyed by `db_id`. Every r_executor tool
+call takes `db_id` as its first argument.
+
 ## Database Mode
 
 To target a specific database, create a YAML config file in `databases/`
@@ -255,6 +348,10 @@ conventions: "databases/conventions/my_pcornet_cdw_conventions.md"
 | `schema_dump` | Path to the schema dump file (auto-generated in online mode) |
 | `data_profile` | Path to the data profile file (auto-generated in online mode) |
 | `conventions` | Path to the database conventions markdown file |
+
+**Tip:** Run `./run.sh --list-dbs` after creating a new YAML to confirm the
+config is discoverable and see which files are present. Run `./run.sh --show-db <id>`
+to inspect the resolved paths.
 
 ### Running with a Database
 
@@ -337,30 +434,58 @@ executive summary.
 
 ```
 ./run.sh <therapeutic_area> [flags] [max_turns]
+./run.sh --list-dbs
+./run.sh --show-db <id>
 
 Arguments:
   therapeutic_area    Required. Clinical topic, e.g., "atrial fibrillation",
                       "type 2 diabetes", "sepsis".
 
 Flags:
-  --db-config PATH    Path to a database YAML config file.
-  --db-mode MODE      Override connectivity mode: "online" or "offline".
+  --dbs CSV|all       Comma-separated list of DB ids, or the literal "all".
+                      The id comes from the YAML's `id` field under databases/.
+  --db-config PATH    (Legacy) Path to a single database YAML config file.
+                      Equivalent to --dbs <id-from-that-yaml>. Cannot be combined
+                      with --dbs.
+  --db-mode MODE      Override connectivity mode uniformly: "online" or "offline".
+                      Applied to every selected DB.
   --resume-reports    Skip Phases 0-3. Generate reports from existing
-                      protocol_NN_results.json files and produce the
-                      executive summary.
+                      protocol_NN_results.json files (per-DB folders are
+                      iterated automatically) and produce the executive summary.
+
+Discovery subcommands (no therapeutic area required):
+  --list-dbs          Print a table of all configured DBs with their
+                      default mode and file-presence flags.
+  --show-db <id>      Print the resolved config and file presence for one DB.
 
 Options:
   max_turns           Integer. Max turns per sub-agent (default 50).
-                      Higher values allow more thorough but longer runs.
 
 Examples:
+  # Public datasets only (flat output layout)
   ./run.sh "atrial fibrillation"
-  ./run.sh "atrial fibrillation" --db-config databases/synthetic_pcornet.yaml
-  ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --db-mode offline
-  ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --resume-reports
-  ./run.sh "type 2 diabetes" --db-config databases/my_db.yaml 75
-  ./run.sh "type 2 diabetes" --db-config databases/nhanes.yaml
+
+  # Single DB via new flag (nested output layout)
+  ./run.sh "atrial fibrillation" --dbs nhanes
+
+  # Multi-DB run
+  ./run.sh "atrial fibrillation" --dbs nhanes,mimic_iv
+
+  # All configured DBs
+  ./run.sh "atrial fibrillation" --dbs all
+
+  # Force every selected DB into offline mode
+  ./run.sh "atrial fibrillation" --dbs all --db-mode offline
+
+  # Legacy --db-config flag (still supported)
   ./run.sh "sepsis" --db-config databases/mimic_iv.yaml
+
+  # Discovery
+  ./run.sh --list-dbs
+  ./run.sh --show-db nhanes
+
+  # Resume reports across every per-DB folder
+  ./run.sh "atrial fibrillation" --dbs all --resume-reports
 ```
 
 ## File Structure
@@ -389,32 +514,41 @@ AutoTTE/
 ├── tools/
 │   ├── pubmed_server.py               # MCP: PubMed search + abstract retrieval
 │   ├── datasource_server.py           # MCP: unified datasource registry
-│   ├── r_executor_server.py           # MCP: persistent R session + DB connection
+│   ├── r_executor_server.py           # MCP: multi-session R executor (keyed by db_id)
 │   ├── rxnorm_server.py               # MCP: RxNorm drug code lookup
 │   ├── clinical_codes_server.py       # MCP: LOINC + HCPCS code lookup
+│   ├── db_triage.py                   # DB discovery + triage + CLI
 │   └── stream_viewer.py               # Streaming output formatter
 ├── tests/
 │   ├── conftest.py                    # MCP module mock for testing
 │   ├── test_datasource_server.py      # Datasource registry tests
-│   └── test_r_executor.py            # R executor tests
+│   ├── test_r_executor.py             # R executor pure-helper tests
+│   ├── test_r_executor_multi_session.py  # Multi-session registry tests
+│   ├── test_db_triage.py              # DB discovery + triage tests
+│   └── test_run_sh_multi_db.sh        # Bash tests for run.sh CLI
 └── results/                           # Agent outputs (per therapeutic area)
     └── <therapeutic_area>/
-        ├── agent_state.json           # Coordinator state
-        ├── coordinator_log.md         # Decision log
-        ├── 01_literature_scan.md      # Phase 1 output
-        ├── 02_evidence_gaps.md        # Phase 1 output (ranked PICO questions)
-        ├── discovery_review.md        # Phase 1 review
-        ├── 03_feasibility.md          # Phase 2 output
-        ├── feasibility_review.md      # Phase 2 review
-        ├── summary.md                 # Executive summary
+        ├── agent_state.json           # Coordinator state (shared)
+        ├── coordinator_log.md         # Decision log (shared)
+        ├── 01_literature_scan.md      # Phase 1 output (shared)
+        ├── 02_evidence_gaps.md        # Phase 1 output (shared)
+        ├── summary.md                 # Executive summary (shared, cross-DB)
+        ├── db_triage.json             # Present for DB-backed runs
         ├── NEXT_STEPS.md              # Offline mode: user instructions
-        └── protocols/
-            ├── protocol_01.md         # Protocol specification
-            ├── protocol_01_analysis.R # R analysis script
-            ├── protocol_01_results.json  # Structured execution results
-            ├── protocol_01_report.md  # Per-protocol analysis report
-            ├── protocol_review.md     # Protocol reviews
-            └── ...
+        │
+        │   # Public-datasets-only runs use a flat layout:
+        ├── 03_feasibility.md
+        ├── protocols/
+        │   └── protocol_01.md ...
+        │
+        │   # DB-backed runs nest protocols per DB:
+        └── <db_id>/                   # e.g. nhanes/, mimic_iv/
+            ├── 03_feasibility.md      # per-DB feasibility
+            └── protocols/
+                ├── protocol_01.md
+                ├── protocol_01_analysis.R
+                ├── protocol_01_results.json
+                └── protocol_01_report.md
 ```
 
 ## Agent Instruction Files
