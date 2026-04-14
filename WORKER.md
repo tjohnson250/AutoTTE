@@ -361,6 +361,24 @@ publication-quality figures to files. Wrap all figure generation in
 When using `evalues.HR()`, specify the `rare` argument (`TRUE` when outcome
 incidence < ~15%). Omitting it causes a runtime error.
 
+**Wrap every E-value call in `tryCatch()`.** The `EValue` package can throw
+`subscript out of bounds` when the confidence interval crosses the null (the
+package's internal indexing assumes one side of the CI is on the null side).
+Skip cleanly rather than letting the error abort the rest of the publication-
+output block. The correct value when the CI crosses the null is 1 by
+definition — record that and move on:
+
+```r
+evalue_result <- tryCatch({
+  EValue::evalues.OR(est = or_point, lo = or_lo, hi = or_hi, rare = FALSE)
+}, error = function(e) {
+  message("E-value calculation skipped: ", conditionMessage(e))
+  NULL
+})
+results$evalue <- if (!is.null(evalue_result)) evalue_result else
+  list(point = 1, ci = 1, note = "CI crosses the null; E-value is 1 by definition.")
+```
+
 ## Publication-Quality Figures and Tables (required)
 
 Every analysis script MUST produce publication-quality figures and tables
@@ -445,9 +463,13 @@ time-to-event outcome (e.g., `protocol_01_km_stroke.pdf`,
 
 **Love plot:**
 - MUST show both pre-weighting AND post-weighting SMDs
-- Call `love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE)`
+- Call `love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE, stars = "std")`
 - The `un = TRUE` parameter is CRITICAL — without it, pre-weighting SMDs
   appear as NA in both the plot and the JSON results
+- The `stars = "std"` argument silences cobalt's "Standardized mean
+  differences and raw mean differences are present in the same plot" warning
+  and labels the x-axis cleanly. Omit only if every covariate in the balance
+  table is guaranteed to be the same type.
 
 **KM curves:**
 - Use `survminer::ggsurvplot()` with `risk.table = TRUE` and `pval = TRUE`
