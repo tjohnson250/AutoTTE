@@ -485,36 +485,67 @@ publication output functions.
 
 ## Self-Contained Analysis Scripts
 
-Every analysis script MUST be runnable standalone with `Rscript protocol_NN_analysis.R`.
-The coordinator provides the database connection code from the DB config — embed it
-directly in the script's setup section.
+Every analysis script MUST be runnable standalone with `Rscript protocol_NN_analysis.R`
+from any working directory, AND via `source()` from an R session regardless of
+`getwd()`.
 
-**Connection preamble pattern:**
+### Fetching the connection code
+
+The database YAML under `databases/` owns the connection code as `connection.r_code`.
+**Use it verbatim.** Do NOT write your own `DBI::dbConnect(...)` call — the YAML may
+wrap connection setup (e.g., `pcornet.synthetic::load_pcornet_database()` sets up
+both CDW and MPI handles; a raw `DBI::dbConnect` would miss the MPI and produce a
+partially-working environment).
+
+To get it, call `get_datasource_details(db_id)` from the datasource MCP server.
+The returned JSON includes the full config including `connection.r_code`. Copy
+that code into the script exactly as written — same function calls, same paths,
+same variable names.
+
+### Required preamble
+
+Every generated analysis script MUST begin with this boilerplate, adapted only
+in the `connection.r_code` slot:
+
 ```r
-# ── Database Connection ──
+# ── Project root resolution (makes relative paths in the YAML connection code
+#    work regardless of the caller's working directory) ──
+.find_project_root <- function(start) {
+  repeat {
+    if (file.exists(file.path(start, ".mcp.json"))) return(start)
+    parent <- dirname(start)
+    if (parent == start) stop("Could not find project root (.mcp.json marker not found).")
+    start <- parent
+  }
+}
+.project_root <- tryCatch({
+  # Works with Rscript
+  script_path <- normalizePath(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1]))
+  .find_project_root(dirname(script_path))
+}, error = function(e) {
+  # Works with source() / interactive R — fall back to cwd
+  .find_project_root(getwd())
+})
+setwd(.project_root)
+
+# ── Database Connection (from databases/<id>.yaml `connection.r_code`, verbatim) ──
 library(DBI)
-# Connection code from database config:
-[paste the exact connection R code from the coordinator's prompt]
+{{PASTE THE EXACT connection.r_code BLOCK HERE — do not modify}}
+on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
 ```
 
-Do NOT leave the connection as a comment like `# con <- dbs$cdw`. The script
-must create a working `con` object when run standalone.
+**Rules:**
 
-For DuckDB databases, this typically looks like:
-```r
-library(DBI)
-library(duckdb)
-con <- DBI::dbConnect(duckdb::duckdb(), "databases/data/pcornet_cdw.duckdb")
-```
-
-For SQL Server databases:
-```r
-library(DBI)
-library(odbc)
-con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
-```
-
-Include `on.exit(DBI::dbDisconnect(con))` after the connection to ensure cleanup.
+1. Paste the `connection.r_code` block exactly — same `library()` calls, same
+   loader functions, same arguments. If the YAML says
+   `con <- dbs$cdw`, copy that line; do not substitute with
+   `con <- DBI::dbConnect(...)`.
+2. Do NOT leave the connection as a comment placeholder.
+3. Relative paths in the YAML (e.g. `"databases/data/pcornet_cdw.duckdb"`) are
+   resolved against the project root — the `setwd(.project_root)` line above
+   guarantees that regardless of how the script is invoked.
+4. Always register the `on.exit` disconnect so the script cleans up when it
+   finishes or errors out.
 
 ## Structured Results Output (JSON)
 

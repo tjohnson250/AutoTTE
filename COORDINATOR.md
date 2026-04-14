@@ -173,7 +173,16 @@ exactly one DB. In the worker prompt, include:
    `list_tables`, `describe_table`, `dump_schema`, `run_profiler`) takes
    a required `db_id` argument that must match the DB the worker was
    told to target.
-4. If this is a revision: the review notes.
+4. For protocol workers specifically: an explicit instruction to call
+   `get_datasource_details(db_id)` and copy the returned
+   `connection.r_code` block **verbatim** into the generated analysis
+   script. Workers must NOT invent their own `DBI::dbConnect(...)` call —
+   some DB YAMLs wrap connection setup (e.g., loading both CDW and MPI
+   handles together) and a generic `dbConnect` will silently miss pieces.
+   The generated script must also start with the project-root shim
+   documented in WORKER.md so relative paths in the YAML resolve
+   regardless of where the script is invoked from.
+5. If this is a revision: the review notes.
 
 ## The Research Phases
 

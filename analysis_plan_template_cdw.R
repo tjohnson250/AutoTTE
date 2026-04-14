@@ -44,25 +44,43 @@ config <- list(
 )
 
 
-# ─── 1. Database Connection ─────────────────────────────────────────────────
-# ── Database Connection ──────────────────────────────────────────────
-# Workers: Replace this with the exact connection code from the
-# coordinator's database configuration. The script must create a
-# working `con` object when run standalone with Rscript.
+# ─── 1. Project root + Database Connection ─────────────────────────────────
+# Workers:
+#   (a) Keep the project-root shim exactly as written. It makes relative
+#       paths in the YAML connection block work regardless of how the
+#       script is invoked (Rscript from any cwd, source() from RStudio,
+#       etc.). The shim walks up from the script / cwd until it finds
+#       .mcp.json as a marker, then sets that as the working directory.
 #
-# Example for DuckDB:
-#   library(duckdb)
-#   con <- DBI::dbConnect(duckdb::duckdb(), "path/to/database.duckdb")
-#
-# Example for SQL Server:
-#   library(odbc)
-#   con <- DBI::dbConnect(odbc::odbc(), "YOUR_DSN")
-#
-# The coordinator will provide the exact connection code.
-connect_cdw <- function() {
-  # PLACEHOLDER — workers must replace with actual connection code
-  stop("Replace connect_cdw() with the database connection code from the coordinator prompt.")
+#   (b) Replace the `# {{PASTE connection.r_code ...}}` marker with the
+#       exact contents of the database YAML's `connection.r_code` field.
+#       Obtain this via get_datasource_details(db_id) from the datasource
+#       MCP server. Copy it verbatim — same library() calls, same loader
+#       functions, same variable names. Do NOT substitute a simpler
+#       `DBI::dbConnect()` call: some YAMLs wrap connection setup in ways
+#       a raw dbConnect cannot reproduce (e.g., loading MPI + CDW
+#       together via pcornet.synthetic::load_pcornet_database()).
+
+.find_project_root <- function(start) {
+  repeat {
+    if (file.exists(file.path(start, ".mcp.json"))) return(start)
+    parent <- dirname(start)
+    if (parent == start) stop("Could not find project root (.mcp.json marker not found).")
+    start <- parent
+  }
 }
+.project_root <- tryCatch({
+  script_path <- normalizePath(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1]))
+  .find_project_root(dirname(script_path))
+}, error = function(e) {
+  .find_project_root(getwd())
+})
+setwd(.project_root)
+
+# {{PASTE connection.r_code FROM THE DB YAML HERE, VERBATIM}}
+# Must produce a `con` DBI connection object.
+
+on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
 
 # ─── 2. Cohort SQL ──────────────────────────────────────────────────────────
@@ -759,9 +777,8 @@ save_consort_figure <- function(consort, protocol_id, output_dir) {
 # ─── 8. Run Pipeline ────────────────────────────────────────────────────────
 
 main <- function() {
-  con    <- connect_cdw()
-  on.exit(dbDisconnect(con))
-
+  # `con` is established at the top of the script by the connection block
+  # pasted from the DB YAML's connection.r_code. Do not re-create it here.
   cohort  <- pull_analytic_cohort(con, config)
   consort <- attr(cohort, "consort")
 
