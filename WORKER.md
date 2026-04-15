@@ -690,6 +690,31 @@ This is much easier to read, debug, and maintain than equivalent
 # Design: <one-line design summary>
 # ============================================================================
 
+# -- Dependency preflight ---------------------------------------------
+# Check every required package BEFORE calling library() on any of them.
+# Some packages (notably gtsummary via cardx/cards, which recent
+# gtsummary versions delegate SMD computation to) will prompt
+# interactively to auto-install mid-run if missing — that hangs
+# non-interactive Rscript sessions AND can re-prompt even after a
+# successful install. Fail loudly up front instead.
+.required_pkgs <- c(
+  "DBI", "odbc", "glue", "dplyr",
+  "WeightIt", "cobalt", "survival", "survminer",
+  "EValue", "gtsummary", "gt", "cardx", "cards",
+  "jsonlite", "ggplot2", "grid", "gridExtra", "smd"
+)
+.missing_pkgs <- .required_pkgs[!vapply(.required_pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(.missing_pkgs)) {
+  stop(
+    sprintf(
+      "Missing R packages: %s\nInstall with:\n  install.packages(c(%s))\nThen restart R and re-run this script.",
+      paste(.missing_pkgs, collapse = ", "),
+      paste0('"', .missing_pkgs, '"', collapse = ", ")
+    ),
+    call. = FALSE
+  )
+}
+
 library(DBI)
 library(odbc)    # pick the driver package from the YAML's engine field
 library(glue)
