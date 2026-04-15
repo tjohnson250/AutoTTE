@@ -573,25 +573,40 @@ Every generated analysis script MUST begin with this boilerplate, adapted only
 in the `connection.r_code` slot:
 
 ```r
-# ── Project root resolution (makes relative paths in the YAML connection code
-#    work regardless of the caller's working directory) ──
-.find_project_root <- function(start) {
+# ── Resolve script directory and (optional) project root ──────
+# out_dir = the folder containing this script. Works from Rscript, from
+# source() in RStudio, and as a fallback from getwd(). The script writes
+# its outputs next to itself regardless of how it's invoked, so results
+# travel with the script across machines (e.g. from the AutoTTE repo to
+# a secure server that has only this script copied over).
+resolve_script_dir <- function() {
+  m <- grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(m) > 0) return(dirname(normalizePath(sub("--file=", "", m[1]))))
+  for (i in seq_along(sys.frames())) {
+    fr <- sys.frames()[[i]]
+    if (!is.null(fr$ofile)) return(dirname(normalizePath(fr$ofile)))
+  }
+  getwd()
+}
+out_dir <- resolve_script_dir()
+
+# Optional: try to find an AutoTTE project root (marked by .mcp.json) so any
+# YAML connection block that uses project-root-relative paths resolves. If
+# the marker is absent — as on secure offline machines that only have this
+# script copied over — leave cwd alone and continue. DSN-based ODBC
+# connections do not need a project root. File-based DuckDB connections
+# with relative paths do.
+find_project_root <- function(start) {
   repeat {
     if (file.exists(file.path(start, ".mcp.json"))) return(start)
     parent <- dirname(start)
-    if (parent == start) stop("Could not find project root (.mcp.json marker not found).")
+    if (parent == start) return(NULL)
     start <- parent
   }
 }
-.project_root <- tryCatch({
-  # Works with Rscript
-  script_path <- normalizePath(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1]))
-  .find_project_root(dirname(script_path))
-}, error = function(e) {
-  # Works with source() / interactive R — fall back to cwd
-  .find_project_root(getwd())
-})
-setwd(.project_root)
+.project_root <- find_project_root(out_dir)
+if (is.null(.project_root)) .project_root <- find_project_root(getwd())
+if (!is.null(.project_root)) setwd(.project_root)
 
 # ── Database Connection (from databases/<id>.yaml `connection.r_code`, verbatim) ──
 library(DBI)
@@ -606,10 +621,16 @@ on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
    `con <- dbs$cdw`, copy that line; do not substitute with
    `con <- DBI::dbConnect(...)`.
 2. Do NOT leave the connection as a comment placeholder.
-3. Relative paths in the YAML (e.g. `"databases/data/pcornet_cdw.duckdb"`) are
-   resolved against the project root — the `setwd(.project_root)` line above
-   guarantees that regardless of how the script is invoked.
-4. Always register the `on.exit` disconnect so the script cleans up when it
+3. Do NOT redefine `out_dir` elsewhere in the script — the shim sets it once,
+   and every downstream save should use `file.path(out_dir, "protocol_NN_…")`.
+   In particular, NEVER write
+   `out_dir <- file.path(.project_root, "results/{ta}/{db_id}/protocols")`
+   — that breaks on any machine where the AutoTTE repo is not present.
+4. For online/local DuckDB runs, the optional `.project_root` discovery sets
+   cwd so YAML-relative paths like `"databases/data/pcornet_cdw.duckdb"`
+   resolve. For offline CDW runs on secure machines, the script just runs
+   where it is; no project root is needed.
+5. Always register the `on.exit` disconnect so the script cleans up when it
    finishes or errors out.
 
 ## Structured Results Output (JSON)

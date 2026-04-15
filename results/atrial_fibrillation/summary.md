@@ -1,206 +1,256 @@
-# Executive Summary: Atrial Fibrillation Target Trial Emulation Run
+# Executive Summary: Atrial Fibrillation Target Trial Emulation
 
-**Therapeutic area:** Atrial fibrillation
-**Database:** PCORnet Synthetic CDW (`synthetic_pcornet`) — 500 synthetic patients, PCORnet v6.0, DuckDB
-**Run date:** 2026-04-13
-**Protocols executed:** 1 (methodological demonstration)
-**Primary hypotheses tested:** 1 (no multiple comparison correction required)
-
-> **Synthetic Data Caveat:** This run used a small synthetic database generated
-> for methodological testing. All 500 patient records are artificially
-> generated. Associations between variables do not reflect real biological or
-> clinical relationships. **Effect estimates have no clinical validity.** This
-> summary documents the system's ability to execute the full TTE pipeline
-> end-to-end against a PCORnet-formatted database, not the clinical findings.
+**Multi-DB Run** | Databases: synthetic_pcornet (PCORnet Synthetic CDW), nhanes (NHANES)
+**Date:** 2026-04-14 | **Coordinator pipeline version:** multi-DB phase-major
 
 ---
 
-## 1. Run Overview
+## Overview
 
-The Auto-Protocol Designer system was deployed against the atrial fibrillation
-therapeutic area using the PCORnet Synthetic CDW, a 500-patient DuckDB database
-in PCORnet v6.0 format. The system executed all pipeline phases: data source
-onboarding, literature discovery, evidence gap ranking, feasibility assessment,
-protocol generation, R script execution, and per-protocol reporting.
+This run applied the target trial emulation (TTE) pipeline to **atrial fibrillation**
+across two databases: the PCORnet Synthetic CDW (a 500-patient test dataset) and
+NHANES (a nationally representative cross-sectional survey). The pipeline completed
+all phases through execution and reporting, producing one protocol with results
+from NHANES.
 
-**Key decision point:** All five literature-derived causal questions were
-infeasible against this database. The coordinator pivoted to an alternative
-question identified from available data — metoprolol initiation in AF with
-heart failure — to complete a methodological demonstration of the pipeline.
-
----
-
-## 2. Literature Discovery
-
-A three-pass literature search identified **82 unique PMIDs** across 8 broad
-landscape searches and 10 targeted PICO-specific searches, with citation
-chaining for the top 3 questions.
-
-**Key findings:**
-- 18 RCTs, 32 observational comparative effectiveness studies, 18 meta-analyses/systematic reviews, and 7 existing TTE studies in AF were identified
-- The existing 7 AF TTE studies cover: digoxin vs. beta-blockers (Liu 2025), DOACs vs. warfarin in cancer (Truong 2024, 2025), antithrombotic management (Prunel 2025), suicide risk with OACs (Li 2024), OAC resumption after subdural hematoma (Anno 2024), and anticoagulation after sepsis-onset AF (Walkey 2023)
-- No existing TTE addresses any of the top 4 ranked evidence gaps
-
-**Discovery review verdict: ACCEPT.** An independent reviewer verified 15 PMIDs
-(13 accurate, 2 minor description errors not affecting conclusions), confirmed
-all "no TTE exists" claims via independent PubMed and WebSearch searches, and
-validated the self-consistency check.
+**Key finding:** Neither database was feasible for the original high-priority TTE
+questions (DOAC comparisons, ablation, anticoagulation in CKD/liver disease). A
+pivot to an alternative prevalent-user design in NHANES yielded a null result
+(HR = 1.07, p = 0.84) for DOAC vs warfarin and all-cause mortality in CKD, which
+is expected given the design's severe limitations. The primary value of this run
+is demonstrating the pipeline's ability to navigate infeasibility and produce
+methodologically honest analyses with appropriate caveats.
 
 ---
 
-## 3. Evidence Gaps
+## Phase 1: Literature Discovery
 
-Five causal questions were ranked by evidence gap score:
+### Search Strategy
+- Three-pass search: 8 broad landscape queries, 5 targeted PICO-specific queries,
+  citation chaining + WebSearch verification
+- **49 unique PMIDs** cited (17 RCTs, 21 observational/cohort, 11 TTE studies,
+  4 meta-analyses, 6 RCT subanalyses)
 
-| Rank | Question | Gap Score | Existing TTE? |
-|------|----------|-----------|---------------|
-| 1 | Early rhythm control vs. rate control in newly diagnosed AF (EAST-AFNET 4 emulation) | 8/10 | No |
-| 2 | Catheter ablation vs. antiarrhythmic drugs in AF + HFpEF | 8/10 | No |
-| 3 | Apixaban vs. rivaroxaban in AF + advanced CKD (eGFR < 30) | 7/10 | No |
-| 4 | DOACs vs. warfarin in AF + liver cirrhosis | 7/10 | No |
-| 5 | DOACs (apixaban vs. rivaroxaban) in AF + active cancer | 5/10 | Yes (DOACs-as-class vs. warfarin only) |
+### Top Candidate Questions (Approved)
 
-**Q1 (Early rhythm vs. rate control)** has the strongest TTE rationale: EAST-AFNET 4 provides a clear target trial protocol, multiple real-world validations exist (Dickow 2023, Chao 2022, Gu 2024 meta-analysis), but no study has applied the formal TTE framework with explicit handling of immortal time bias, per-protocol effects via clone-censor-weight, or US claims/EHR replication of this European RCT.
+| Rank | Question | Gap Score |
+|------|----------|:---------:|
+| 1 | Apixaban vs rivaroxaban in AF + advanced CKD (stages 4-5) | 8 |
+| 2 | Catheter ablation vs AADs in AF + HFpEF | 8 |
+| 3 | DOACs vs warfarin in AF + liver cirrhosis | 8 |
+| 4 | Early rhythm control vs usual care in AF + HF | 7 |
+| 5 | LAAC vs continued anticoag in AF + dialysis | 6 |
+| 6 | Appropriate vs inappropriate DOAC dose reduction in elderly | 6 |
 
-**Q2 (Ablation vs. AADs in HFpEF)** addresses a question with no completed RCT (CABA-HFPEF-DZHK27 results expected 2027-2028) and strong observational signals (DeLuca 2025: mortality HR 0.43) that have not been analyzed via TTE.
-
----
-
-## 4. Feasibility Findings
-
-All five literature-derived questions were **NOT FEASIBLE** against synthetic_pcornet.
-
-**Root cause:** The synthetic database was generated with siloed clinical profiles
-(cardiac, diabetic, respiratory, mental health, multimorbid, healthy). The cardiac
-profile (50 AF patients) includes only common chronic disease medications and
-diagnoses:
-
-| Missing Data Category | Impact |
-|-----------------------|--------|
-| **No anticoagulants** (DOACs, warfarin) — 0 prescriptions | Blocks Q1, Q3, Q4, Q5 |
-| **No antiarrhythmic drugs** (amiodarone, flecainide, sotalol) — 0 prescriptions | Blocks Q1, Q2 |
-| **No ablation procedures** (CPT 93653-93657) — 0 procedures | Blocks Q2 |
-| **No comorbidity crossover** — 0 AF patients with CKD, cirrhosis, or cancer | Blocks Q3, Q4, Q5 |
-| **No stroke or bleeding outcomes** — 0 events | Blocks all 5 questions |
-
-**Coordinator pivot:** An alternative question was identified from available data:
-
-> **Q-Alt: Effect of metoprolol initiation (vs. no beta-blocker) on HF hospitalization in AF + HF patients**
-
-This leveraged the 50 AF+HF patients (29 with metoprolol, 21 without beta-blocker), the only constructable exposure contrast and outcome in the database. It was advanced as a **methodological demonstration only**.
+**Review findings:** Reviewer identified 3 errors (Liu 2025 direction reversed,
+missed TTE PMID 36252244, CLOSURE-AF mischaracterized). All corrected by coordinator.
+Top 3 recommendations unchanged.
 
 ---
 
-## 5. Protocol Execution Results
+## Phase 2: Feasibility
 
-### Protocol 01: Metoprolol Initiation in AF+HF → HF Hospitalization
+### synthetic_pcornet (PCORnet Synthetic CDW) — INFEASIBLE
 
-**Design:** Target trial emulation with IPW-weighted logistic regression for binary outcome (HF hospitalization yes/no). Time zero at first AF diagnosis. ATE estimand.
+| Metric | Value |
+|--------|-------|
+| Total patients | 500 |
+| AF patients | 50 |
+| DOACs/warfarin | 0 |
+| Advanced CKD | 0 |
+| HFpEF/HFrEF | 0 |
+| Cirrhosis | 0 |
+| Stroke/bleeding events | 0 |
 
-**Cohort:** 43 patients after excluding 7 with non-metoprolol beta-blockers (29 treated, 14 control).
+**Verdict:** All 6 questions infeasible. The 500-patient synthetic dataset lacks
+all key exposures, subpopulations, and outcomes. Suitable only for pipeline testing.
+**Dropped from later phases.**
 
-**Propensity score model:** `treatment ~ dm + hld + hdl` (only 3 covariates retained sufficient variability; most planned confounders were near-uniform in this synthetic sample).
+### nhanes (NHANES) — INFEASIBLE for original questions; PIVOT to alternative
 
-**Balance:** Post-weighting maximum SMD improved from 1.113 to 0.219 (below 0.1 threshold not achieved; HDL remained imbalanced).
+| Metric | Value |
+|--------|-------|
+| Adults examined (3 cycles) | 17,192 |
+| Anticoagulant users (total) | 421 |
+| — Warfarin | 258 |
+| — Apixaban | 69 |
+| — Rivaroxaban | 66 |
+| AC users with eGFR < 60 | ~130 |
+| AC users with eGFR < 30 | ~12 |
 
-| Measure | Result |
-|---------|--------|
-| IPW-weighted OR | **0.493** (95% CI: 0.200–1.219) |
-| P-value | 0.126 |
-| Risk — metoprolol | 29.0% (8/29) |
-| Risk — no beta-blocker | 45.2% (6/14) |
-| Risk difference | **-16.3 percentage points** |
-| Crude OR | 0.508 (95% CI: 0.134–1.931) |
-| E-value | CI crosses 1.0; E-value for lower limit = 1.0 |
+**Verdict:** All 6 original TTE questions infeasible (cross-sectional survey, no
+longitudinal follow-up for time-to-event outcomes). NHANES lacks AF diagnosis,
+procedure codes, and medication doses.
 
-**Interpretation:** The point estimate suggests a direction toward lower HF hospitalization with metoprolol, but the result is not statistically significant. The wide confidence interval (spanning 80% reduction to 22% increase in odds) reflects severe imprecision from the sample size of 43. The crude and adjusted ORs are nearly identical, suggesting limited measured confounding. **No clinical inference should be drawn.** Critical unmeasured confounders (LVEF) and synthetic data invalidate any clinical interpretation.
+**Pivot:** Prevalent anticoagulant use (DOAC vs warfarin) → all-cause mortality
+in CKD subgroups using NHANES mortality linkage (NDI, through 12/31/2019). This
+is a Category A TTE with severe prevalent-user caveats.
 
-**Pipeline outputs produced:**
-- CONSORT flow diagram (PDF)
-- Table 1 — baseline characteristics (HTML)
-- Love plot — covariate balance (PDF)
-- Propensity score distribution plot (PDF)
-- Structured results (JSON)
-- Per-protocol report with STROBE compliance checklist
+### Cross-DB Replication
 
----
-
-## 6. Methodological Assessment
-
-### What Worked
-
-1. **End-to-end pipeline execution.** The system completed all phases from literature search through R script execution and report generation against a real CDM structure, demonstrating that the automated TTE pipeline is functional on PCORnet v6.0 data.
-
-2. **Literature discovery depth.** The three-pass search (broad, targeted PICO, citation chaining) with 82 PMIDs and independent WebSearch verification of methodology claims produced a thorough, reviewer-validated evidence landscape.
-
-3. **Feasibility honesty.** Rather than forcing an infeasible analysis, the system correctly identified all 5 original questions as infeasible with specific blocking reasons and transparent root cause analysis.
-
-4. **Adaptive decision-making.** The coordinator's pivot to an alternative question preserved pipeline demonstration value while prominently documenting the synthetic data limitation at every stage.
-
-5. **Code validation.** Clinical codes (ICD-10-CM for AF/HF, RxNorm for metoprolol and other beta-blockers) were validated via MCP tools against authoritative code sets before use in the protocol.
-
-### What Didn't Work
-
-1. **Database-question mismatch.** The synthetic database's 27-drug formulary lacks every medication class relevant to AF research (anticoagulants, antiarrhythmics, digoxin). This made the entire literature-derived question set unusable.
-
-2. **Residual covariate imbalance.** Post-weighting SMD of 0.219 exceeded the 0.1 threshold. With only 3 covariates in the PS model (out of 15+ planned), the IPW could not fully adjust for confounding.
-
-3. **E-value computation.** The sensitivity analysis for unmeasured confounding failed due to a subscript-out-of-bounds error in the `EValue` package when the CI crosses 1.0. This is a known edge case that should be handled gracefully.
-
-4. **Near-uniform covariate distributions.** Synthetic data with identical comorbidity profiles (100% HTN, 98% CAD, 88% HLD among AF patients) caused most planned confounders to be dropped from the PS model, undermining the causal inference framework.
-
-### Lessons Learned
-
-- **Database selection is the most critical decision.** A database must contain the treatments, outcomes, and comorbidity overlap relevant to the research question. Feasibility assessment should ideally occur before literature discovery to avoid wasted effort, or the system should support early "data inventory" checks.
-- **Synthetic databases are useful for pipeline testing but fundamentally cannot validate the causal inference methodology** — they lack the real-world correlation structure between treatments, confounders, and outcomes that IPW is designed to address.
-- **Small-sample TTE requires aggressive formula simplification.** The dynamic PS formula construction (dropping zero-variance and single-level factors) was essential and should be standard practice.
+No questions were feasible on ≥2 databases. No cross-DB replication analysis
+was possible.
 
 ---
 
-## 7. Recommendations for Real-World Application
+## Phase 3: Protocol Generation
 
-The five literature-derived evidence gaps identified in this run represent genuine, reviewer-verified research opportunities. To execute these protocols with clinically meaningful results, the following database characteristics are needed:
+### NHANES Protocol 01: DOAC vs Warfarin → All-Cause Mortality in CKD
 
-### Recommended Databases by Question
+**Design:** Prevalent-user cohort, NHANES 2013-2018 pooled (3 cycles)
 
-| Question | Required Data | Recommended Database Types |
-|----------|--------------|---------------------------|
-| **Q1: Early rhythm vs. rate control** | AAD prescriptions, ablation CPTs, stroke/CV death outcomes, ≥12 months follow-up from AF diagnosis | Large US claims (Optum, MarketScan, Medicare) or EHR (PCORnet clinical sites, VA CDW) |
-| **Q2: Ablation vs. AADs in AF+HFpEF** | Ablation CPTs, AAD Rx, LVEF/echo data for HFpEF definition, HF hospitalization outcomes | EHR with structured echo data (VA CDW, PCORnet sites with cardiology data, TriNetX) |
-| **Q3: Apixaban vs. rivaroxaban in CKD** | DOAC Rx, eGFR labs, bleeding/stroke outcomes | EHR-linked claims with lab results (PCORnet clinical sites, OneFlorida+, VA CDW) |
-| **Q4: DOACs vs. warfarin in cirrhosis** | OAC Rx, cirrhosis ICD codes + liver function labs (bilirubin, albumin, INR), bleeding/stroke outcomes | EHR with hepatology data (VA CDW, PCORnet sites, TriNetX) |
-| **Q5: Apixaban vs. rivaroxaban in cancer** | DOAC Rx, cancer staging, bleeding outcomes | Cancer registry-linked claims (SEER-Medicare) or EHR (PCORnet oncology sites) |
+| Element | Specification |
+|---------|--------------|
+| Population | US adults on OAC with eGFR < 60 (CKD-EPI 2021 race-free) |
+| Exposure | Current DOAC (apixaban/rivaroxaban/dabigatran) vs current warfarin |
+| Outcome | All-cause mortality (NDI linkage through 12/31/2019) |
+| Time zero | NHANES MEC examination date (NOT treatment initiation) |
+| Estimand | ATE via survey-weighted IPW Cox PH |
+| Confounders | Age, sex, race/ethnicity, eGFR, BMI, income, HbA1c, cholesterol, HDL, CHF, CHD, MI, stroke, diabetes, hypertension, smoking |
 
-### Minimum Database Requirements
-
-For any of these questions:
-- **Sample size:** ≥5,000 AF patients with the relevant comorbidity to achieve adequate statistical power
-- **Medication data:** Prescription or dispensing records with RxNorm coding for DOACs/AADs
-- **Outcome data:** ICD-coded stroke (I63.x), bleeding (D62, K25-K28, K92.x, I61.x), and death with cause
-- **Temporal resolution:** Dated diagnoses, prescriptions, and encounters to define time zero and follow-up
-- **Lab data (Q2-Q4):** eGFR, LVEF, liver function tests for population definition and confounder adjustment
+**Review:** 3 MUST FIX corrections applied (eGFR 1.012 female multiplier, income
+in PS model, MI history in confounder table). 2 SHOULD FIX applied (unused survey
+design object removed, E-value rare flag made conditional).
 
 ---
 
-## Synthetic Data Caveat
+## Phase 4: Execution Results
 
-This entire run was conducted on the **PCORnet Synthetic CDW**, a 500-patient
-database generated for methodological testing purposes. Key implications:
+### CONSORT Flow
 
-- **No clinical validity.** All effect estimates, confidence intervals, and
-  p-values are artifacts of synthetic data generation, not reflections of real
-  treatment effects.
-- **No biological plausibility.** The synthetic cohort has a mean age of 22
-  years for AF+HF patients (real-world median > 70 years), 100% comorbidity
-  overlap, and no clinically relevant medications (anticoagulants,
-  antiarrhythmics).
-- **Pipeline validation only.** This run demonstrates that the Auto-Protocol
-  Designer can: (a) conduct systematic literature discovery, (b) identify and
-  rank evidence gaps, (c) assess database feasibility, (d) generate executable
-  TTE protocols with validated clinical codes, (e) run R analysis scripts
-  against PCORnet CDM data, and (f) produce publication-quality outputs
-  (CONSORT diagrams, Table 1, balance diagnostics, effect estimates).
-- **The five evidence gaps identified are real.** The literature discovery and
-  gap ranking are independent of the database and represent genuine TTE
-  opportunities in atrial fibrillation research. These questions should be
-  pursued against appropriately sized real-world databases.
+| Step | Description | N |
+|------|-------------|--:|
+| 1 | US adults examined (MEC), 3 cycles 2013-2018 | 17,192 |
+| 2 | On oral anticoagulant (DOAC or warfarin, excl. dual) | 391 |
+| 3 | Serum creatinine available for eGFR | 361 |
+| 4 | eGFR < 60 mL/min/1.73m² (CKD stage 3-5) | 130 |
+| 5 | Linked mortality follow-up available (ELIGSTAT=1) | 129 |
+| 6 | Complete data for analysis | **125** |
+| | — DOAC arm | 46 |
+| | — Warfarin arm | 79 |
+
+### Primary Analysis
+
+| Metric | Value |
+|--------|-------|
+| Effect measure | Hazard ratio (Cox PH) |
+| HR (DOAC vs warfarin) | **1.07** |
+| 95% CI | 0.57 – 2.02 |
+| p-value | 0.84 |
+| Total deaths | 53 |
+| Deaths (DOAC arm) | 14 |
+| Deaths (warfarin arm) | 39 |
+| Median follow-up | 30 months |
+
+### Balance Diagnostics
+
+| Metric | Value |
+|--------|-------|
+| Max SMD (pre-weighting) | 1.056 |
+| Max SMD (post-weighting) | 0.125 |
+| All covariates < 0.1 | No (1 covariate slightly above) |
+
+### Sensitivity Analyses
+
+| Analysis | HR | 95% CI |
+|----------|:--:|--------|
+| IPW-adjusted (primary) | 1.07 | 0.57 – 2.02 |
+| Unadjusted (survey-only) | 1.19 | 0.60 – 2.37 |
+| E-value (point estimate) | 1.27 | — |
+| E-value (CI bound) | 1.00 | — |
+
+### Multiple Comparison Correction
+
+Only one primary hypothesis was tested in this run. Benjamini-Yekutieli FDR
+correction is not applicable. The single p-value (0.84) is well above any
+reasonable significance threshold.
+
+### Interpretation
+
+The null result (HR ≈ 1.0 with wide confidence intervals spanning 0.57-2.02)
+is **expected and should not be interpreted as evidence of no difference**
+between DOACs and warfarin for mortality in CKD. The study is fundamentally
+limited by:
+
+1. **Prevalent-user bias:** Comparing survivors of each treatment, not new
+   initiators. Early adverse events are invisible.
+2. **No AF ascertainment:** NHANES has no AF diagnosis variable. The cohort
+   includes all anticoagulant users with CKD, regardless of indication.
+3. **Cross-sectional exposure:** Medication captured at a single time point
+   with no duration, switching, or adherence data.
+4. **Small sample size:** 125 patients (46 DOAC, 79 warfarin) is well below
+   the minimum for robust propensity score analyses.
+5. **Low E-value (1.27):** Even modest unmeasured confounding could explain
+   the observed association.
+
+---
+
+## Publication Outputs
+
+### NHANES Protocol 01
+
+| Output | File |
+|--------|------|
+| Protocol | `nhanes/protocols/protocol_01.md` |
+| R analysis script | `nhanes/protocols/protocol_01_analysis.R` |
+| Results JSON | `nhanes/protocols/protocol_01_results.json` |
+| Report | `nhanes/protocols/protocol_01_report.md` |
+| Baseline characteristics | `nhanes/protocols/protocol_01_table1.html` |
+| Covariate balance (love plot) | `nhanes/protocols/protocol_01_loveplot.pdf` |
+| PS distribution | `nhanes/protocols/protocol_01_ps_dist.pdf` |
+| KM survival curves | `nhanes/protocols/protocol_01_km.pdf` |
+| CONSORT diagram | `nhanes/protocols/protocol_01_consort.pdf` |
+
+---
+
+## Database Summary
+
+| Database | Disposition | Status | Protocols | Notes |
+|----------|:----------:|--------|:---------:|-------|
+| synthetic_pcornet | RUN | **Failed (infeasible)** | 0 | 500-patient test dataset |
+| nhanes | RUN | **Completed** | 1 | Prevalent-user alternative; null result |
+
+---
+
+## Pipeline Statistics
+
+| Metric | Value |
+|--------|-------|
+| Total sub-agents launched | 10 |
+| Discovery workers | 2 (1 ran out of turns) |
+| Discovery reviewers | 1 |
+| Feasibility workers | 2 (1 per DB) |
+| Protocol workers | 1 |
+| Protocol reviewers | 1 |
+| Execution workers | 2 (1 failed, 1 succeeded) |
+| Report writers | 1 |
+| Backtracks | 0 |
+| Total revision cycles | 0 |
+
+---
+
+## Recommendations
+
+1. **For the atrial fibrillation TTE questions identified in this run:**
+   The 6 approved questions (especially Q1-Q3) are best addressed using
+   longitudinal claims or EHR databases with:
+   - ≥100,000 AF patients for adequate subgroup sizes
+   - Complete DOAC/warfarin prescribing with fill dates and doses
+   - Procedure codes (ablation, LAAC)
+   - Lab data (eGFR, liver function) for severity staging
+   - Incident outcome events (stroke, bleeding, hospitalization, mortality)
+   
+   Recommended data sources: Medicare claims (CMS), Optum/MarketScan,
+   VA CDW, or a full-scale PCORnet CDW.
+
+2. **For this NHANES analysis:**
+   The prevalent-user result (HR = 1.07) should not be cited as evidence
+   about DOAC vs warfarin effectiveness. It demonstrates that the TTE
+   pipeline can process survey data with honest design caveats. The NHANES
+   cohort characterization (nationally representative anticoagulant use
+   patterns by CKD stage) may complement future claims-based TTE studies
+   as a descriptive reference.
+
+3. **For the synthetic PCORnet CDW:**
+   Continue using this dataset for pipeline testing and R script validation.
+   It is not suitable for any clinical research protocol.

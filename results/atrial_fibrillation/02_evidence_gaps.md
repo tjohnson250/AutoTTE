@@ -1,345 +1,280 @@
 # Evidence Gaps: Atrial Fibrillation
 
-## Ranked Candidate Causal Questions
+## Scoring Methodology
 
-Based on the three-pass literature search (82 papers reviewed, 7 existing AF TTE
-studies identified), the following 5 questions are ranked by evidence gap score.
-Each is framed as a causal contrast suitable for target trial emulation.
+Each candidate question is scored on five dimensions (0–2 each, max 10):
 
----
-
-### Q1: Early Rhythm Control vs Rate Control in Newly Diagnosed AF
-
-**Gap Score: 8/10**
-
-#### PICO Formulation
-
-| Element | Specification |
-|---------|--------------|
-| **Population** | Adults with newly diagnosed AF (≤12 months), ≥1 stroke risk factor (CHA₂DS₂-VASc ≥2), no prior rhythm control |
-| **Intervention** | Early rhythm control (AADs or catheter ablation) initiated within 12 months of diagnosis |
-| **Comparator** | Usual care (rate control + anticoagulation only) |
-| **Outcome** | Composite of CV death, stroke, HF hospitalization, ACS hospitalization (primary); all-cause mortality, stroke (secondary) |
-| **Time zero** | Date of AF diagnosis (or index encounter) |
-| **Follow-up** | 5 years |
-
-#### Causal Contrast
-
-*What is the effect of initiating early rhythm control (AADs or ablation) within 12 months of AF diagnosis, compared to usual care with rate control only, on the composite of CV death, stroke, and HF/ACS hospitalization?*
-
-**Estimand:** ATE (intention to treat the strategy)
-
-#### Evidence Gap Rationale
-
-EAST-AFNET 4 (Kirchhof 2020, PMID 32865375) demonstrated HR 0.79 for the
-composite with early rhythm control. Multiple real-world observational
-validations exist (Dickow 2023, PMID 36942567; Chao 2022, PMID 35322396;
-Gu 2024, PMID 38964555 meta-analysis: HR 0.86). However, **no study has applied
-the formal target trial emulation framework** to this question. All existing
-observational studies use propensity score weighting/matching without explicit
-specification of the target trial protocol elements (eligibility, treatment
-strategies, assignment, time zero, causal contrast).
-
-A TTE would add value by:
-1. Explicitly addressing immortal time bias (which some PS studies may not fully handle)
-2. Enabling per-protocol analyses using clone-censor-weight approach
-3. Exploring subgroups underpowered in EAST-AFNET 4 (e.g., age >80, HFpEF, CKD)
-4. Using US claims/EHR data to replicate a European RCT
-
-#### TTE Suitability: VERY HIGH
-
-- Clear target trial to emulate (EAST-AFNET 4 protocol published)
-- Time zero well-defined (AF diagnosis date)
-- Treatment strategies identifiable in claims (AAD prescriptions, ablation procedures)
-- Outcome definitions map cleanly to ICD/procedure codes
-- Large eligible populations in US claims databases
-
-#### Supporting PMIDs
-
-32865375, 34447995, 38727662, 36942567, 35322396, 38964555, 40052479,
-40551338, 41317034, 30874766
-
-#### Search Completeness Checklist
-
-- [x] At least one narrow PICO-specific search was run
-- [x] Abstracts fetched for all targeted search results
-- [x] Citation chaining done (Dickow → Gu meta-analysis → national cohorts)
-- [x] "No TTE exists" claim stress-tested: searched PubMed for "rhythm control" + "target trial emulation" AND WebSearch; confirmed no TTE
-- [x] Self-consistency check: none of the cited papers use TTE framework
-- [x] Specialty journal coverage: searched electrophysiology and general cardiology literature
+| Dimension | 0 | 1 | 2 |
+|-----------|---|---|---|
+| **Clinical importance** | Low-impact question | Moderate clinical relevance | High-impact, guideline-changing potential |
+| **Evidence gap** | Well-studied by RCTs and observational | Some evidence but key gaps | No RCT; sparse/conflicting observational data |
+| **TTE novelty** | TTE already applied to this exact question | TTE applied to related question | No TTE in this domain |
+| **Data feasibility** | Rare exposures/outcomes; hard to define | Feasible but needs creative design | Common exposures/outcomes; clean operationalization |
+| **Methodological value** | Standard design | Moderate causal inference interest | Addresses key TTE challenge (time zero, positivity) |
 
 ---
 
-### Q2: Catheter Ablation vs Antiarrhythmic Drugs in AF + HFpEF
+## Ranked Candidate Questions
 
-**Gap Score: 8/10**
+### 1. Apixaban vs Rivaroxaban in AF with Advanced CKD (Stages 4–5)
 
-#### PICO Formulation
+**Gap Score: 8/10** (Clinical: 2, Gap: 2, Novelty: 1, Feasibility: 2, Methods: 1)
 
-| Element | Specification |
-|---------|--------------|
-| **Population** | Adults with AF and HFpEF (LVEF ≥50%), on stable HF medications |
-| **Intervention** | Catheter ablation for AF |
-| **Comparator** | Antiarrhythmic drug therapy (rhythm or rate control) |
-| **Outcome** | Composite of all-cause death + HF hospitalization (primary); all-cause mortality, CV death, HF hospitalization, stroke (secondary) |
-| **Time zero** | Date of ablation/AAD initiation |
-| **Follow-up** | 3 years |
+**PICO:**
+- **P:** Adults with non-valvular AF and advanced CKD (eGFR <30 or dialysis)
+- **I:** Apixaban (standard or reduced dose per label)
+- **C:** Rivaroxaban (standard or reduced dose per label)
+- **O:** Composite of stroke/SE and major bleeding; individual components; all-cause mortality
 
-#### Causal Contrast
+**Supporting Evidence:**
+- Fu et al. 2024 (PMID 37839687): US nationwide cohort showing apixaban associated with lower bleeding than rivaroxaban in advanced CKD, using PS matching but not TTE
+- Yao et al. 2020 (PMID 33012172): OAC effectiveness varies by kidney function strata
+- Siontis et al. 2018 (PMID 29954737): Apixaban in ESKD — lower bleeding than warfarin
+- Ray et al. 2021 (PMID 34932078): Apixaban vs rivaroxaban in general AF population (JAMA)
+- Lau et al. 2022 (PMID 36315950): Multinational DOAC comparison
+- Dawwas & Cuker 2025 (PMID 39442621): Rivaroxaban inferior to apixaban in elderly
+- RENAL-AF (PMID 36335914): Only RCT in hemodialysis (apixaban vs warfarin, N=154, underpowered)
+- De Vriese et al. 2021 (PMID 33753537): Only RCT of rivaroxaban in hemodialysis (vs VKA)
 
-*What is the effect of catheter ablation, compared to antiarrhythmic drug therapy, on the composite of all-cause death and heart failure hospitalization in patients with AF and HFpEF?*
+**Why this is a gap:**
+No RCT or TTE study directly compares apixaban to rivaroxaban **in advanced CKD**.
+One TTE (PMID 36252244, Annals of Internal Medicine 2022) compared apixaban vs
+rivaroxaban in AF patients with valvular heart disease (N=19,894; apixaban: lower
+stroke HR 0.57, lower bleeding HR 0.51), and Mei 2021 compared dabigatran vs
+rivaroxaban in a general Medicare population. However, neither addressed the CKD
+population, where altered pharmacokinetics, high bleeding risk, and underpowered
+RCTs (RENAL-AF N=154, De Vriese N=132) leave the clinical question unanswered.
+Fu 2024 is the closest CKD-specific study but used standard PS matching without
+formal TTE framework.
 
-**Estimand:** ATE
+**Stress test of "no TTE in CKD" claim:** Verified via (1) PubMed search for
+"target trial emulation" AND "anticoagulant" AND "atrial fibrillation" — 7 results,
+one comparing apixaban vs rivaroxaban in VHD (PMID 36252244) but none in CKD;
+(2) WebSearch for "target trial emulation atrial fibrillation CKD" — confirmed no
+CKD-specific TTE. Note: TTE novelty scored as 1 (not 2) because PMID 36252244
+applied TTE to the same drug comparison in a different population.
 
-#### Evidence Gap Rationale
-
-No completed RCT addresses this question directly. CASTLE-AF (Marrouche 2018,
-PMID 29385358) proved ablation's benefit in HFrEF; CABANA (Packer 2019) was
-underpowered for HFpEF. The CABANA HFpEF subanalysis (Martens 2025,
-PMID 40243977) showed trends toward benefit but wide CIs. CABA-HFPEF-DZHK27
-(PMID 39023141) is an ongoing RCT but results are not expected until 2027–2028.
-
-Observational studies show strong signals: DeLuca 2025 (PMID 39447815, mortality
-HR 0.43), meta-analyses by Bulhões 2024 (HR 0.62) and Wani 2025 (HR 0.53).
-**None of these use target trial emulation.** All rely on PS matching/weighting.
-
-A TTE is particularly valuable here because:
-1. RCT data won't be available for 2+ years
-2. Observational studies haven't addressed immortal time bias or crossover systematically
-3. The causal question has strong clinical equipoise
-4. A well-designed TTE could help estimate treatment effect magnitude pending RCT
-
-#### TTE Suitability: HIGH (with caveats)
-
-- Time zero defined as ablation/AAD initiation date
-- Treatment strategies identifiable via CPT codes (ablation) and Rx claims (AADs)
-- Challenge: HFpEF diagnosis in claims requires validation (ICD + echo data); risk of misclassification
-- Challenge: High crossover rate expected (patients failing AADs → ablation)
-- Clone-censor-weight approach needed for sustained treatment strategy
-
-#### Supporting PMIDs
-
-29385358, 30874766, 33554614, 40243977, 39447815, 38621498, 41426236,
-41606998, 41669949, 39023141
-
-#### Search Completeness Checklist
-
-- [x] At least one narrow PICO-specific search was run
-- [x] Abstracts fetched for all targeted search results
-- [x] Citation chaining done (CABANA → Martens → DeLuca → meta-analyses)
-- [x] "No TTE exists" claim stress-tested: WebSearch confirmed no TTE for ablation in HFpEF
-- [x] Self-consistency check: none of cited papers use TTE
-- [x] Specialty journal coverage: searched EP journals (Heart Rhythm, JCE, Europace)
+**TTE design opportunity:** Emulate a pragmatic trial of new-user apixaban vs
+rivaroxaban initiators with eGFR <30. Time zero = date of first DOAC fill.
+Active-comparator, new-user design addresses confounding by indication. CKD stage
+captured via lab-based eGFR or ICD codes. PCORnet CDM has PRESCRIBING (RXNORM_CUI)
+and LAB_RESULT_CM (creatinine/eGFR LOINC codes) tables ideal for this design.
 
 ---
 
-### Q3: Apixaban vs Rivaroxaban in AF + Advanced CKD (eGFR <30)
+### 2. Catheter Ablation vs Antiarrhythmic Drugs in AF with HFpEF
 
-**Gap Score: 7/10**
+**Gap Score: 8/10** (Clinical: 2, Gap: 2, Novelty: 2, Feasibility: 1, Methods: 1)
 
-#### PICO Formulation
+**PICO:**
+- **P:** Adults with AF and HFpEF (EF ≥50%)
+- **I:** Catheter ablation (any energy source)
+- **C:** Antiarrhythmic drug therapy
+- **O:** Composite of all-cause death and HF hospitalization; AF recurrence
 
-| Element | Specification |
-|---------|--------------|
-| **Population** | Adults with non-valvular AF and eGFR <30 mL/min/1.73m² (or on dialysis), new OAC users |
-| **Intervention** | Apixaban initiation |
-| **Comparator** | Rivaroxaban initiation |
-| **Outcome** | Major bleeding (primary); stroke/SE, all-cause mortality, GI bleeding, intracranial hemorrhage (secondary) |
-| **Time zero** | Date of first OAC dispensing |
-| **Follow-up** | 2 years |
+**Supporting Evidence:**
+- CASTLE-AF 2018 (PMID 29385358): RCT in HFrEF only (EF ≤35%)
+- CABANA 2019 (PMID 30874766): Mixed population; ITT non-significant
+- Martens et al. 2025 (PMID 40243977): CABANA post-hoc HFpEF subanalysis — ablation beneficial
+- Oraii et al. 2024 (PMID 38656292): Meta-analysis showing ablation benefits in HFrEF > HFpEF
+- DeLuca et al. 2025 (PMID 39447815): Multicenter comparative — ablation superior in HFpEF
+- CABA-HFPEF-DZHK27 (PMID 39023141): Ongoing dedicated RCT (not yet reported)
 
-#### Causal Contrast
+**Why this is a gap:**
+CASTLE-AF excluded HFpEF patients entirely. CABANA was not designed to test HF
+subgroups, and the HFpEF subanalysis was post-hoc and likely underpowered. DeLuca 2025
+is a multicenter observational comparison but did not use TTE. The dedicated CABA-HFPEF
+RCT is ongoing but years from reporting. No TTE study has attempted to emulate
+CASTLE-AF or CABANA in the HFpEF population.
 
-*What is the effect of initiating apixaban, compared to rivaroxaban, on major bleeding risk in patients with AF and advanced CKD (eGFR <30)?*
+**Stress test:** Verified via PubMed search for ablation + HFpEF + AF (68 results):
+multiple meta-analyses and observational studies, zero TTE studies. WebSearch confirmed
+no TTE application to this question.
 
-**Estimand:** ATE (intention-to-treat equivalent for new-user active-comparator)
-
-#### Evidence Gap Rationale
-
-Patients with eGFR <30 were excluded from ALL pivotal DOAC trials (RE-LY,
-ROCKET-AF, ARISTOTLE, ENGAGE AF-TIMI 48). No head-to-head RCT comparing any
-two DOACs exists in any population.
-
-Multiple observational studies provide converging evidence:
-- Fu 2024 (PMID 37839687): Rivaroxaban vs apixaban, bleeding HR 1.69 in advanced CKD
-- Xu 2024 (PMID 39119973): Apixaban vs rivaroxaban, bleeding sub-HR 0.53 in eGFR <30
-- Binding 2024 (PMID 38402466): Rivaroxaban vs apixaban, bleeding HR 1.78 in eGFR 30–49
-
-**None of these use TTE.** All use PS-matched or IPW new-user active-comparator
-designs. While the new-user design is a component of TTE, a formal TTE would:
-1. Explicitly define the target trial being emulated (e.g., a hypothetical head-to-head RCT)
-2. Handle treatment switching/discontinuation with sustained treatment strategies
-3. Use clone-censor-weight or sequential nested trials for per-protocol effects
-4. Provide estimands beyond ITT (e.g., per-protocol effect, effect modification by eGFR strata)
-
-#### TTE Suitability: HIGH
-
-- Time zero and new-user design are standard for this question
-- Active comparator eliminates confounding by indication (both drugs treat the same condition)
-- Outcome definitions are well-validated in claims data (ICD + hospitalization)
-- eGFR available in EHR-linked databases (not always in pure claims)
-- PCORnet CDM databases with lab results would be ideal
-
-#### Supporting PMIDs
-
-37839687, 39119973, 38230301, 38402466, 41438731, 41292445, 33538928,
-36335914, 33753537, 41085503, 38606775
-
-#### Search Completeness Checklist
-
-- [x] At least one narrow PICO-specific search was run (two run)
-- [x] Abstracts fetched for all targeted search results
-- [x] Citation chaining done (Fu → Xu → Binding concurrent studies)
-- [x] "No TTE exists" claim stress-tested: WebSearch confirmed Fu 2024 is PS-matched, not TTE
-- [x] Self-consistency check: none of cited papers use TTE
-- [x] Specialty journal coverage: searched nephrology journals (AJKD, JASN, CJASN)
+**TTE design opportunity:** Emulate CASTLE-AF in HFpEF patients using PCORnet data.
+Identify ablation recipients via procedure codes (CPT 93656) and AAD initiators via
+prescribing data. Key challenge: defining HFpEF reliably (requires EF measurement from
+echocardiography, which may not be in structured CDM fields). Time zero = date of
+ablation or first AAD fill.
 
 ---
 
-### Q4: DOACs vs Warfarin in AF + Liver Cirrhosis
+### 3. DOACs vs Warfarin in AF with Liver Cirrhosis
 
-**Gap Score: 7/10**
+**Gap Score: 8/10** (Clinical: 2, Gap: 2, Novelty: 2, Feasibility: 1, Methods: 1)
 
-#### PICO Formulation
+**PICO:**
+- **P:** Adults with non-valvular AF and liver cirrhosis (any Child-Pugh class)
+- **I:** Any DOAC (apixaban, rivaroxaban, or edoxaban)
+- **C:** Warfarin
+- **O:** Stroke/SE; major bleeding; all-cause mortality
 
-| Element | Specification |
-|---------|--------------|
-| **Population** | Adults with non-valvular AF and compensated or decompensated liver cirrhosis, new OAC users |
-| **Intervention** | DOAC initiation (apixaban or rivaroxaban) |
-| **Comparator** | Warfarin initiation |
-| **Outcome** | Composite of ischemic stroke/SE + major bleeding (primary); individual components, all-cause mortality, GI bleeding, ICH (secondary) |
-| **Time zero** | Date of first OAC dispensing |
-| **Follow-up** | 2 years |
+**Supporting Evidence:**
+- Simon et al. 2024 (PMID 38976880): US nationwide cohort — apixaban lowest bleeding, rivaroxaban comparable to warfarin
+- Lawal et al. 2023 (PMID 36762560): Nationwide cohort — DOACs safer than warfarin in chronic liver disease
+- Song et al. 2024 (PMID 39053441): Real-world outcomes of anticoag in cirrhosis+AF
 
-#### Causal Contrast
+**Why this is a gap:**
+All pivotal DOAC RCTs (RE-LY, ROCKET-AF, ARISTOTLE, ENGAGE) excluded patients with
+significant liver disease (Child-Pugh B or C). The FDA labels carry warnings about
+use in moderate-severe hepatic impairment. Observational evidence (Simon 2024, Lawal
+2023) suggests DOACs are safe, but no study has used formal TTE methodology, and
+Child-Pugh severity strata are poorly characterized in claims data.
 
-*What is the effect of initiating a DOAC (apixaban or rivaroxaban), compared to warfarin, on the composite of ischemic stroke/SE and major bleeding in patients with AF and liver cirrhosis?*
+**Stress test:** PubMed search for DOACs + cirrhosis + AF returned multiple
+observational studies and meta-analyses but zero TTE studies. WebSearch confirmed
+no TTE application.
 
-**Estimand:** ATE
-
-#### Evidence Gap Rationale
-
-Cirrhosis patients were excluded from ALL pivotal DOAC trials. The evidence base
-is growing rapidly:
-- Simon 2024 (PMID 38976880): Apixaban superior on bleeding, similar stroke/SE vs warfarin
-- Lawal 2023 (PMID 36762560): Apixaban HR 0.40 for stroke/SE, HR 0.60 for bleeding
-- Douros 2024 (PMID 38552497): Apixaban safer than rivaroxaban in liver disease but NOT in cirrhosis subgroup (HR 1.01)
-- Zhou 2025 (PMID 40727096): Meta-analysis confirms DOAC safety advantage
-
-**Critical uncertainty:** Apixaban vs rivaroxaban safety advantage observed in
-"liver disease" populations DISAPPEARS in cirrhosis-specific subgroups (Douros
-2024, Zhou 2025). This suggests cirrhosis-specific analyses are essential.
-
-**No TTE has been applied to this question.** All studies use PS-weighted
-observational designs. A TTE could clarify the cirrhosis-specific causal effect
-and address confounding by disease severity (Child-Pugh class).
-
-#### TTE Suitability: HIGH (with caveats)
-
-- Time zero well-defined (OAC initiation)
-- Cirrhosis identification in claims requires ICD + complications codes for staging
-- Challenge: Child-Pugh score not available in claims; would need EHR with lab values
-- Competing risk of liver-related mortality is important
-- PCORnet CDM with lab data could provide bilirubin, albumin, INR for staging
-
-#### Supporting PMIDs
-
-38976880, 36762560, 38552497, 39583376, 40727096, 39027793, 39053441,
-38699468, 35913111
-
-#### Search Completeness Checklist
-
-- [x] At least one narrow PICO-specific search was run (two run)
-- [x] Abstracts fetched for all targeted search results
-- [x] Citation chaining done (Simon → Lawal → Douros; cirrhosis subgroup discordance identified)
-- [x] "No TTE exists" claim stress-tested: WebSearch confirmed Simon 2024 is PS-weighted, not TTE
-- [x] Self-consistency check: none of cited papers use TTE
-- [x] Specialty journal coverage: searched hepatology/GI journals
+**TTE design opportunity:** Emulate ARISTOTLE or ROCKET-AF in cirrhosis patients.
+Active-comparator (DOAC vs warfarin) new-user design. Cirrhosis identified via
+ICD-10 codes (K70.3x, K74.x) + lab markers (FIB-4, MELD). PCORnet's DIAGNOSIS
+and LAB_RESULT_CM tables support this, though Child-Pugh classification requires
+albumin, bilirubin, INR, ascites, and encephalopathy — partially available.
 
 ---
 
-### Q5: DOACs (Apixaban vs Rivaroxaban) in AF + Active Cancer
+### 4. Early Rhythm Control vs Usual Care in AF with Heart Failure
 
-**Gap Score: 5/10**
+**Gap Score: 7/10** (Clinical: 2, Gap: 1, Novelty: 2, Feasibility: 1, Methods: 1)
 
-#### PICO Formulation
+**PICO:**
+- **P:** Adults with newly diagnosed AF (<1 year) and concomitant heart failure (HFrEF or HFpEF)
+- **I:** Early rhythm control (AAD initiation or ablation within 1 year of AF diagnosis)
+- **C:** Rate control only (usual care)
+- **O:** Composite of CV death, stroke, and HF hospitalization
 
-| Element | Specification |
-|---------|--------------|
-| **Population** | Adults with non-valvular AF and active cancer (solid tumor, receiving treatment), new OAC users |
-| **Intervention** | Apixaban initiation |
-| **Comparator** | Rivaroxaban initiation |
-| **Outcome** | Major bleeding (primary); stroke/SE, VTE, all-cause mortality (secondary) |
-| **Time zero** | Date of first OAC dispensing after AF diagnosis |
-| **Follow-up** | 1 year |
+**Supporting Evidence:**
+- EAST-AFNET 4 (PMID 32865375): Early rhythm control beneficial in general AF population
+- Willems et al. 2022 (PMID 34447995): EAST substudy — benefit in symptomatic and asymptomatic patients
+- Kim et al. 2022 (PMID 36063552): Korean nationwide — early rhythm control in low-risk patients
+- Kriz et al. 2025 (PMID 41342526): CYCLE cohort — early rhythm control in acute decompensated HF
+- Rillig et al. 2022 (PMID 35968706): EAST — benefit persists in high comorbidity patients
+- Dickow et al. 2022 (PMID 35621202): EAST generalizability to US population
 
-#### Causal Contrast
+**Why this is a gap:**
+EAST-AFNET 4 included HF patients but was not designed or powered for HF subgroup
+analysis. The HF subgroup has not been separately analyzed. Korean cohort studies
+(Kim 2022) replicated EAST in general populations but did not isolate the HF
+subgroup. No TTE has emulated EAST-AFNET 4 in a HF-specific population. Liu 2025
+(PMID 41121356) used TTE for rate-control drug choice in AF+HF, but not for rhythm
+vs rate control strategy.
 
-*What is the effect of initiating apixaban, compared to rivaroxaban, on major bleeding risk in patients with AF and active cancer?*
+**Stress test:** Confirmed via targeted PubMed search for "early rhythm control" +
+AF + HF + observational: 29 results, including cohort studies but no TTE studies
+specifically in HF subgroups.
 
-**Estimand:** ATE
+**TTE design opportunity:** Emulate EAST-AFNET 4 in HF patients. Identify newly
+diagnosed AF patients with HF (ICD codes + encounters). Classify early rhythm
+control vs rate control based on first treatment received within 1 year. Challenge:
+defining "early" diagnosis requires lookback period; potential for time-zero bias.
 
-#### Evidence Gap Rationale
+---
 
-This space already has TTE studies — but they address a DIFFERENT question.
-Truong et al. published two TTE studies from SEER-Medicare:
-- Truong 2024 (PMID 38504063): TTE of OAC initiation strategies (timing) in AF + cancer
-- Truong 2025 (PMID 38847907): TTE of DOACs-as-class vs warfarin in AF + cancer
+### 5. LAAC vs Continued Anticoagulation in AF with Dialysis
 
-**The remaining gap is head-to-head DOAC comparison (apixaban vs rivaroxaban) in
-cancer.** Non-TTE evidence:
-- Deitelzweig 2021 (PMID 34604802): ARISTOPHANES subgroup (n=40,271), apixaban best
-- Agrawal 2026 (PMID 41554390): TriNetX (n=41,764 pairs), apixaban vs warfarin
-- Chan 2021 (PMID 34233467): Taiwan (n=7,955), NOACs vs warfarin
+**Gap Score: 6/10** (Clinical: 2, Gap: 1, Novelty: 1, Feasibility: 1, Methods: 1)
 
-Gap score is lower (5/10) because:
-1. Two TTE studies already exist in this space
-2. The DOACs-vs-warfarin comparison is largely settled (DOACs favored)
-3. Head-to-head DOAC comparison in cancer is narrower question with less clinical equipoise
-4. Apixaban appears consistently safer — incremental TTE value is lower
+**PICO:**
+- **P:** Adults with AF on chronic hemodialysis
+- **I:** Percutaneous LAAC (Watchman or Amulet device)
+- **C:** Continued oral anticoagulation (DOAC or warfarin)
+- **O:** Stroke/SE; major bleeding; all-cause mortality
 
-#### TTE Suitability: MODERATE
+**Supporting Evidence:**
+- Dhar et al. 2025 (PMID 40924421): LAAC vs anticoagulants in dialysis
+- OPTION trial (PMID 39555822): LAAC after ablation (not dialysis-specific)
+- PRAGUE-17 (PMID 32586585): LAAC vs DOACs in high-risk (not CKD-specific)
+- CLOSURE-AF (PMID 41849741): LAAC vs medical therapy (general population)
+- Lu et al. 2025 (PMID 40231086): TTE of LAAC vs DOACs for dementia risk
+- Multiple meta-analyses of LAAC in CKD (PMIDs 39191612, 38112741, 39029071)
 
-- Active-comparator design feasible
-- Cancer staging and treatment status hard to capture in claims
-- SEER-Medicare is ideal (cancer registry + Medicare claims) but already used by Truong
-- Incremental value over existing observational studies is modest
+**Why gap score is lower:**
+Dhar 2025 directly addresses this population, and the CLOSURE-AF results provide
+new RCT data. However, Dhar 2025 was observational without formal TTE, and no
+study has emulated PROTECT-AF or PREVAIL in dialysis patients. Lu 2025 used TTE
+for LAAC but focused on dementia, not stroke/bleeding in CKD.
 
-#### Supporting PMIDs
+---
 
-38504063, 38847907, 39973613, 33044735, 34604802, 41554390, 34233467,
-36213361, 38088911
+### 6. Appropriate vs Inappropriate DOAC Dose Reduction in Elderly AF
 
-#### Search Completeness Checklist
+**Gap Score: 6/10** (Clinical: 2, Gap: 1, Novelty: 1, Feasibility: 2, Methods: 0)
 
-- [x] At least one narrow PICO-specific search was run (two run)
-- [x] Abstracts fetched for all targeted search results
-- [x] Citation chaining done (Truong 2024 → Truong 2025 → Deitelzweig → Agrawal)
-- [x] "Existing TTE" claim verified: WebSearch confirmed Truong 2024/2025 use TTE
-- [x] Self-consistency check: correctly noted existing TTE studies; gap is in head-to-head DOAC comparison
-- [x] Specialty journal coverage: searched cardio-oncology journals
+**PICO:**
+- **P:** Adults ≥75 with AF prescribed a DOAC
+- **I:** Guideline-concordant DOAC dosing (standard or reduced per label criteria)
+- **C:** Off-label dose reduction (reduced dose without meeting label criteria)
+- **O:** Stroke/SE; major bleeding; all-cause mortality
+
+**Supporting Evidence:**
+- Ciou et al. 2024 (PMID 38266751): Different DOAC regimens in high-bleeding-risk AF
+- Chan et al. 2023 (PMID 37580139): Very low dose vs regular dose NOAC
+- Shurrab et al. 2024 (PMID 38878942): Apixaban vs rivaroxaban in older patients
+
+**Why this is a gap:**
+Inappropriate dose reduction is a known clinical problem (up to 25–30% of DOAC
+prescriptions in elderly), and observational data suggest it increases stroke risk
+without reducing bleeding. However, the question has been studied by multiple cohort
+studies and is not a high-novelty TTE opportunity.
+
+---
+
+### 7. Digoxin vs Beta-Blocker for Rate Control in AF with HF
+
+**Gap Score: 5/10** (Clinical: 1, Gap: 0, Novelty: 0, Feasibility: 2, Methods: 2)
+
+**PICO:**
+- **P:** Adults with AF and heart failure
+- **I:** Digoxin for rate control
+- **C:** Beta-blocker for rate control
+- **O:** All-cause mortality; HF hospitalization
+
+**Supporting Evidence:**
+- RATE-AF (PMID 33351042): RCT, digoxin vs bisoprolol
+- Liu et al. 2025 (PMID 41121356): **TTE already applied** — digoxin vs BB in AF+HF; digoxin associated with **higher** mortality (RR 1.21) and higher HF hospitalization
+
+**Why gap score is lower:**
+Liu 2025 has already applied TTE to this exact question. RATE-AF provides RCT
+evidence. This is not a gap requiring new TTE work.
+
+---
+
+## Search Completeness Checklist
+
+| Check | Q1 (CKD) | Q2 (HFpEF) | Q3 (Cirrhosis) | Q4 (HF) | Q5 (LAAC) |
+|-------|-----------|------------|-----------------|---------|-----------|
+| Narrow PICO search run | Yes | Yes | Yes* | Yes | Yes |
+| Abstracts fetched for targeted results | Yes | Yes | Partial* | Yes | Yes |
+| Citation chaining (top 3) | Yes | Yes | Yes | N/A | N/A |
+| "No studies" claim stress-tested | Yes | Yes | Yes | Yes | Yes |
+| WebSearch verification | Yes | Yes | Yes | Yes | Yes |
+| Self-consistency check | Pass | Pass | Pass | Pass | Pass |
+
+*Cirrhosis search was rate-limited by PubMed API; supplemented by Pass 1 results.
 
 ---
 
 ## Summary Table
 
-| Rank | Question | Gap Score | Existing TTE? | No. Supporting Papers | Key Uncertainty |
-|------|----------|-----------|--------------|----------------------|-----------------|
-| 1 | Early rhythm vs rate control (EAST-AFNET 4 emulation) | 8 | No | 10 | No formal TTE despite multiple RW validations |
-| 2 | Catheter ablation vs AADs in AF + HFpEF | 8 | No | 10 | No RCT; only PS-matched observational data |
-| 3 | Apixaban vs rivaroxaban in AF + advanced CKD | 7 | No | 11 | Converging observational evidence but no TTE or RCT |
-| 4 | DOACs vs warfarin in AF + cirrhosis | 7 | No | 9 | Apixaban advantage disappears in cirrhosis subgroup |
-| 5 | DOACs (apixaban vs rivaroxaban) in AF + cancer | 5 | Yes (DOACs vs warfarin only) | 9 | Head-to-head comparison not yet done via TTE |
+| Rank | Question | Gap Score | Key Missing Evidence | TTE Applied? |
+|------|----------|-----------|---------------------|--------------|
+| 1 | Apixaban vs rivaroxaban in AF + advanced CKD | 8 | No RCT in CKD; TTE exists for VHD (PMID 36252244) but not CKD | No (in CKD) |
+| 2 | Catheter ablation vs AADs in AF + HFpEF | 8 | No completed RCT in HFpEF; no TTE | No |
+| 3 | DOACs vs warfarin in AF + liver cirrhosis | 8 | No RCT (excluded from pivotal trials); no TTE | No |
+| 4 | Early rhythm control vs usual care in AF + HF | 7 | EAST not powered for HF; no TTE in HF subgroup | No |
+| 5 | LAAC vs anticoagulation in AF + dialysis | 6 | One observational study (Dhar 2025); no TTE | No |
+| 6 | Appropriate vs inappropriate DOAC dose reduction | 6 | Multiple cohort studies exist; low novelty for TTE | No |
+| 7 | Digoxin vs BB for rate control in AF + HF | 5 | TTE already applied (Liu 2025) | **Yes** |
 
-## Existing TTE Literature in AF (Self-Consistency Check)
+---
 
-Seven TTE studies were identified in the Pass 1 search (PMID: 41121356,
-41024059, 38504063, 38847907, 39394165, 39603638, 36852680). None of these
-overlap with questions Q1–Q4. The two Truong studies (Q5 space) address
-DOACs-vs-warfarin, not head-to-head DOACs. The remaining TTE studies cover:
-digoxin vs beta-blocker (Liu 2025), multidisciplinary antithrombotic management
-(Prunel 2025), suicide risk with OACs (Li 2024), OAC resumption after SDH (Anno
-2024), and anticoagulation after sepsis-onset AF (Walkey 2023).
+## Recommended Top 3 for Protocol Development
 
-**No existing TTE study addresses any of the top 4 candidate questions.**
-This was verified via PubMed targeted searches AND WebSearch cross-referencing.
+1. **Apixaban vs rivaroxaban in AF + advanced CKD** — Highest clinical impact, clean
+   active-comparator design, ideal for PCORnet CDM (prescribing + labs + outcomes).
+
+2. **Catheter ablation vs AADs in AF + HFpEF** — Addresses the most important gap
+   in AF ablation evidence. Requires procedure codes + echo data.
+
+3. **DOACs vs warfarin in AF + liver cirrhosis** — Addresses population explicitly
+   excluded from all RCTs. Requires diagnosis codes + lab data for severity staging.

@@ -1,0 +1,92 @@
+{
+  "protocol_id": "protocol_01",
+  "protocol_title": "DOAC vs Warfarin and All-Cause Mortality in CKD: NHANES 2013-2018",
+  "database": {
+    "id": "nhanes",
+    "name": "NHANES"
+  },
+  "design_category": "Category A - Prevalent-user TTE",
+  "execution_timestamp": "2026-04-14T17:26:06",
+  "execution_status": "success",
+  "consort": {
+    "steps": [
+      {
+        "step": 1,
+        "description": "US adults examined (MEC), 3 cycles 2013-2018",
+        "n": 17192
+      },
+      {
+        "step": 2,
+        "description": "On oral anticoagulant (DOAC or warfarin, excl. dual)",
+        "n": 391
+      },
+      {
+        "step": 3,
+        "description": "Serum creatinine available for eGFR",
+        "n": 361
+      },
+      {
+        "step": 4,
+        "description": "eGFR < 60 mL/min/1.73m2 (CKD stage 3-5)",
+        "n": 130
+      },
+      {
+        "step": 5,
+        "description": "Linked mortality follow-up available (ELIGSTAT=1)",
+        "n": 129
+      },
+      {
+        "step": 6,
+        "description": "Complete data for analysis (non-missing BMI, wt>0)",
+        "n": 125
+      }
+    ],
+    "n_treated": 46,
+    "n_control": 79
+  },
+  "balance_diagnostics": {
+    "pre_weighting_max_smd": 1.056,
+    "post_weighting_max_smd": 0.125,
+    "all_below_threshold": false,
+    "threshold": 0.1
+  },
+  "notes": [
+    "Initial Cox fit failed with lonely-PSU error; re-ran with survey.lonely.psu='adjust'"
+  ],
+  "figure_paths": {
+    "table1": "protocol_01_table1.html",
+    "love_plot": "protocol_01_loveplot.pdf",
+    "ps_distribution": "protocol_01_ps_dist.pdf",
+    "km_curve": "protocol_01_km.pdf",
+    "consort": "protocol_01_consort.pdf"
+  },
+  "primary_analysis": {
+    "method": "Survey-weighted IPW Cox PH (prevalent-user design)",
+    "estimand": "ATE",
+    "effect_measure": "HR",
+    "point_estimate": 1.069,
+    "ci_lower": 0.565,
+    "ci_upper": 2.022,
+    "p_value": 0.8384,
+    "interpretation": "HR = 1.07 (95% CI: 0.56-2.02); DOAC vs warfarin for all-cause mortality"
+  },
+  "outcome_summary": {
+    "total_events": 53,
+    "events_treated": 14,
+    "events_control": 39,
+    "median_followup_months": 30,
+    "n_treated": 46,
+    "n_control": 79
+  },
+  "sensitivity_analyses": {
+    "e_value": {
+      "point": 1.27,
+      "ci": 1
+    },
+    "unadjusted_cox": {
+      "HR": 1.188,
+      "ci_lower": 0.595,
+      "ci_upper": 2.372
+    }
+  }
+}

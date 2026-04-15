@@ -61,21 +61,29 @@ config <- list(
 #       a raw dbConnect cannot reproduce (e.g., loading MPI + CDW
 #       together via pcornet.synthetic::load_pcornet_database()).
 
-.find_project_root <- function(start) {
+resolve_script_dir <- function() {
+  m <- grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(m) > 0) return(dirname(normalizePath(sub("--file=", "", m[1]))))
+  for (i in seq_along(sys.frames())) {
+    fr <- sys.frames()[[i]]
+    if (!is.null(fr$ofile)) return(dirname(normalizePath(fr$ofile)))
+  }
+  getwd()
+}
+out_dir <- resolve_script_dir()
+
+# Optional project-root discovery (absent on secure machines).
+find_project_root <- function(start) {
   repeat {
     if (file.exists(file.path(start, ".mcp.json"))) return(start)
     parent <- dirname(start)
-    if (parent == start) stop("Could not find project root (.mcp.json marker not found).")
+    if (parent == start) return(NULL)
     start <- parent
   }
 }
-.project_root <- tryCatch({
-  script_path <- normalizePath(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1]))
-  .find_project_root(dirname(script_path))
-}, error = function(e) {
-  .find_project_root(getwd())
-})
-setwd(.project_root)
+.project_root <- find_project_root(out_dir)
+if (is.null(.project_root)) .project_root <- find_project_root(getwd())
+if (!is.null(.project_root)) setwd(.project_root)
 
 # {{PASTE connection.r_code FROM THE DB YAML HERE, VERBATIM}}
 # Must produce a `con` DBI connection object.

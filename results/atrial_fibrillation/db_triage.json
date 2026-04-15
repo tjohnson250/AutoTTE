@@ -5,12 +5,22 @@
     "cdm": "pcornet",
     "engine": "duckdb",
     "yaml_path": "databases/synthetic_pcornet.yaml",
-    "disposition": "RUN_AUTO_ONBOARD",
+    "disposition": "RUN",
     "effective_mode": "online",
-    "reason": "schema dump and data profile missing (will be auto-generated).",
+    "reason": "",
     "warnings": [
-      "Conventions file missing; protocols may miss DB-specific rules.",
-      "schema dump and data profile missing; Phase 0 will generate via r_executor."
+      "Conventions file missing; protocols may miss DB-specific rules."
     ]
+  },
+  {
+    "id": "nhanes",
+    "name": "NHANES",
+    "cdm": "nhanes",
+    "engine": "duckdb",
+    "yaml_path": "databases/nhanes.yaml",
+    "disposition": "RUN",
+    "effective_mode": "online",
+    "reason": "",
+    "warnings": []
   }
 ]
