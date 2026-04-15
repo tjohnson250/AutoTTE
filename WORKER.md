@@ -610,8 +610,19 @@ if (!is.null(.project_root)) setwd(.project_root)
 
 # ── Database Connection (from databases/<id>.yaml `connection.r_code`, verbatim) ──
 library(DBI)
+# Load the engine-specific driver package BEFORE pasting the YAML block.
+# This is critical: on some platforms (especially Windows ODBC on secure
+# servers) the connection's external pointer goes invalid between setup
+# and first query if the driver package isn't on the search path at
+# connection time. Use the engine field from the YAML to pick the right one:
+#   engine: duckdb  → library(duckdb)
+#   engine: mssql   → library(odbc)
+#   engine: postgres→ library(odbc) or library(RPostgres), match the YAML
+{{LOAD THE DRIVER PACKAGE FOR THE DB ENGINE HERE}}
 {{PASTE THE EXACT connection.r_code BLOCK HERE — do not modify}}
-on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+# Engine-agnostic disconnect. Do NOT pass `shutdown = TRUE` unless the
+# engine is duckdb — it's a DuckDB-only argument that breaks other drivers.
+on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
 ```
 
 **Rules:**

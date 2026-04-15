@@ -311,6 +311,23 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
      figure `.pdf`/`.png` pairs and a `protocol_NN_table1.html` sibling.
    - Tell the user to copy the results files back into the same per-DB
      `{db_id}/protocols/` folder before running the resume command.
+
+4. Write a separate `RUN_INSTRUCTIONS.md` inside the per-DB `protocols/`
+   folder. This file travels with the analysis scripts to the secure
+   machine and is the one a human will read when running them. Cover:
+   - The required ODBC DSN / driver (from `connection.r_code`).
+   - The R package install list (DBI, odbc or duckdb, dplyr, WeightIt,
+     cobalt, survival, survminer, EValue, gtsummary, gt, jsonlite,
+     ggplot2, grid, gridExtra, smd).
+   - Two equivalent run modes: `Rscript` from a shell in the folder, or
+     `setwd()` + `source()` from interactive R / RStudio. Tell the user
+     to restart R between protocols so stale `con` / `results` do not
+     leak between scripts.
+   - What files appear next to each script on success.
+   - Where to copy results back in the AutoTTE worktree.
+   - A short troubleshooting section for the common failures:
+     missing DSN, `library(odbc)` not loaded, `smd` missing, stale
+     `shutdown = TRUE` copy.
 2. Set `current_phase` to `"awaiting_results"` in agent_state.json.
 3. Log this in coordinator_log.md and stop the pipeline.
 
