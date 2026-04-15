@@ -136,6 +136,41 @@ OUT=$(./run.sh "topic" --dbs "" 2>&1); RC=$?
   || { echo "  FAIL: should have errored"; FAIL=$((FAIL + 1)); }
 assert_contains "requires a value" "$OUT" "error explains the issue"
 
+echo "Test 15: --resume-protocols + --resume-reports is an error"
+OUT=$(./run.sh "topic" --dbs nhanes --resume-protocols --resume-reports 2>&1); RC=$?
+[[ "$RC" != "0" ]] && { echo "  PASS: mutex enforced"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL: should have errored"; FAIL=$((FAIL + 1)); }
+assert_contains "cannot combine" "$OUT" "error mentions the conflict"
+
+echo "Test 16: --resume-protocols without phase 1 artifacts fails loudly"
+rm -rf "results/no_such_ta_for_test"
+OUT=$(./run.sh "no such ta for test" --dbs nhanes --resume-protocols 2>&1); RC=$?
+[[ "$RC" != "0" ]] && { echo "  PASS: rejected when artifacts missing"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL: should have errored"; FAIL=$((FAIL + 1)); }
+assert_contains "Phase 1" "$OUT" "error mentions missing Phase 1 output"
+rm -rf "results/no_such_ta_for_test"
+
+echo "Test 17: --resume-protocols banner shows and old protocols/ is archived"
+mkdir -p "results/dummy_resume_ta/nhanes/protocols"
+: > "results/dummy_resume_ta/01_literature_scan.md"
+: > "results/dummy_resume_ta/02_evidence_gaps.md"
+: > "results/dummy_resume_ta/01_02_review.md"
+: > "results/dummy_resume_ta/nhanes/03_feasibility.md"
+: > "results/dummy_resume_ta/nhanes/protocols/protocol_old.md"
+OUT=$(AUTOTTE_DRY_RUN=3 ./run.sh "dummy resume ta" --dbs nhanes --resume-protocols 2>&1); RC=$?
+assert_exit_code 0 "$RC" "dry-run exits 0"
+assert_contains "RESUME PROTOCOLS" "$OUT" "banner announces RESUME PROTOCOLS"
+# Old protocols folder should have been archived.
+archived=$(ls -d results/dummy_resume_ta/nhanes/protocols_pre_* 2>/dev/null | wc -l | tr -d ' ')
+[[ "$archived" == "1" ]] && { echo "  PASS: old protocols/ archived"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL: expected one protocols_pre_<ts>/ dir, got $archived"; FAIL=$((FAIL + 1)); }
+# New empty protocols/ should exist.
+[[ -d "results/dummy_resume_ta/nhanes/protocols" ]] \
+  && [[ -z "$(ls -A results/dummy_resume_ta/nhanes/protocols)" ]] \
+  && { echo "  PASS: fresh empty protocols/ ready"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL: fresh empty protocols/ missing"; FAIL=$((FAIL + 1)); }
+rm -rf "results/dummy_resume_ta" .mcp-session.json
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ "$FAIL" == "0" ]] && exit 0 || exit 1

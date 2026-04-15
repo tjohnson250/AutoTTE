@@ -552,34 +552,62 @@ publication output functions.
 
 Every analysis script MUST be runnable standalone with `Rscript protocol_NN_analysis.R`
 from any working directory, AND via `source()` from an R session regardless of
-`getwd()`.
+`getwd()`. The script must be a single `.R` file that can be copied to a secure
+server with no external dependencies beyond R packages.
+
+### Script shape: sectioned, not monolithic
+
+Model the script on the old Quarto `.qmd` templates, translated to a plain
+`.R` file. The sections, in order:
+
+1. Header comment (one block: purpose, DB id, engine, design).
+2. Libraries.
+3. `config` list (dates, codes, thresholds — anything a human might tune).
+4. `connect_db()` — a short function that returns `con`. **Paste the
+   YAML's `connection.r_code` body here verbatim.** Also load the engine
+   driver package in libraries above (`library(odbc)` for mssql,
+   `library(duckdb)` for duckdb, etc.). Do not write your own
+   `DBI::dbConnect(...)` in place of the YAML block; some YAMLs wrap
+   connection setup (e.g. `pcornet.synthetic::load_pcornet_database()`
+   produces both CDW and MPI handles).
+5. `build_cohort(con, config)` — returns the analytic data frame. Use
+   `glue::glue_sql()` for parameterized SQL, NOT `sprintf("...%s...")`.
+   See the SQL section below.
+6. `fit_model(df, config)` — returns a list of fitted objects and
+   estimates.
+7. `save_fig(plot_or_fn, basename, width, height)` — inline helper
+   defined right before `save_outputs()`. ~12 lines, stays in the
+   script so the protocol travels as one file.
+8. `save_outputs(fit, df, out_dir)` — writes the JSON, Table 1, CONSORT,
+   love plot, PS distribution, KM curves, etc. Uses `save_fig()` for
+   every figure.
+9. `main()` — the entrypoint. Creates `out_dir`, opens the connection,
+   calls the pipeline, handles errors, saves outputs. **Register
+   `on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)` here,
+   inside `main()`** — not at the top level. That way `on.exit` fires
+   exactly when `main()` returns or errors, which is what `on.exit` is
+   designed for and avoids the "external pointer is not valid" class of
+   bugs caused by unclear top-level lifetime.
+10. A final line that calls `main()` so `Rscript protocol_NN_analysis.R`
+    does the work.
+
+Do NOT wrap the whole script in a single top-level `tryCatch(...)`. Put
+error handling inside `main()` where it's local and readable.
 
 ### Fetching the connection code
 
-The database YAML under `databases/` owns the connection code as `connection.r_code`.
-**Use it verbatim.** Do NOT write your own `DBI::dbConnect(...)` call — the YAML may
-wrap connection setup (e.g., `pcornet.synthetic::load_pcornet_database()` sets up
-both CDW and MPI handles; a raw `DBI::dbConnect` would miss the MPI and produce a
-partially-working environment).
+Call `get_datasource_details(db_id)` from the datasource MCP server.
+Copy the returned `connection.r_code` into `connect_db()` verbatim —
+same function calls, same arguments, same variable name (always `con`).
 
-To get it, call `get_datasource_details(db_id)` from the datasource MCP server.
-The returned JSON includes the full config including `connection.r_code`. Copy
-that code into the script exactly as written — same function calls, same paths,
-same variable names.
+### Working directory & `out_dir`
 
-### Required preamble
-
-Every generated analysis script MUST begin with this boilerplate, adapted only
-in the `connection.r_code` slot:
+The script runs wherever it is placed. `main()` computes `out_dir` as:
 
 ```r
-# ── Resolve script directory and (optional) project root ──────
-# out_dir = the folder containing this script. Works from Rscript, from
-# source() in RStudio, and as a fallback from getwd(). The script writes
-# its outputs next to itself regardless of how it's invoked, so results
-# travel with the script across machines (e.g. from the AutoTTE repo to
-# a secure server that has only this script copied over).
-resolve_script_dir <- function() {
+# out_dir = the directory containing this script, so outputs land
+# next to the script regardless of the caller's working directory.
+script_dir <- function() {
   m <- grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
   if (length(m) > 0) return(dirname(normalizePath(sub("--file=", "", m[1]))))
   for (i in seq_along(sys.frames())) {
@@ -588,61 +616,163 @@ resolve_script_dir <- function() {
   }
   getwd()
 }
-out_dir <- resolve_script_dir()
-
-# Optional: try to find an AutoTTE project root (marked by .mcp.json) so any
-# YAML connection block that uses project-root-relative paths resolves. If
-# the marker is absent — as on secure offline machines that only have this
-# script copied over — leave cwd alone and continue. DSN-based ODBC
-# connections do not need a project root. File-based DuckDB connections
-# with relative paths do.
-find_project_root <- function(start) {
-  repeat {
-    if (file.exists(file.path(start, ".mcp.json"))) return(start)
-    parent <- dirname(start)
-    if (parent == start) return(NULL)
-    start <- parent
-  }
-}
-.project_root <- find_project_root(out_dir)
-if (is.null(.project_root)) .project_root <- find_project_root(getwd())
-if (!is.null(.project_root)) setwd(.project_root)
-
-# ── Database Connection (from databases/<id>.yaml `connection.r_code`, verbatim) ──
-library(DBI)
-# Load the engine-specific driver package BEFORE pasting the YAML block.
-# This is critical: on some platforms (especially Windows ODBC on secure
-# servers) the connection's external pointer goes invalid between setup
-# and first query if the driver package isn't on the search path at
-# connection time. Use the engine field from the YAML to pick the right one:
-#   engine: duckdb  → library(duckdb)
-#   engine: mssql   → library(odbc)
-#   engine: postgres→ library(odbc) or library(RPostgres), match the YAML
-{{LOAD THE DRIVER PACKAGE FOR THE DB ENGINE HERE}}
-{{PASTE THE EXACT connection.r_code BLOCK HERE — do not modify}}
-# Engine-agnostic disconnect. Do NOT pass `shutdown = TRUE` unless the
-# engine is duckdb — it's a DuckDB-only argument that breaks other drivers.
-on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
 ```
 
-**Rules:**
+No project-root `.mcp.json` hunting, no `setwd()`, no `.project_root`
+variable. If the YAML connection code uses project-root-relative paths
+(e.g. `"databases/data/pcornet_cdw.duckdb"`), the driver handles that
+via its own convention or the user sets `getwd()` appropriately. For
+offline CDW runs (DSN-based), no root is needed.
 
-1. Paste the `connection.r_code` block exactly — same `library()` calls, same
-   loader functions, same arguments. If the YAML says
-   `con <- dbs$cdw`, copy that line; do not substitute with
-   `con <- DBI::dbConnect(...)`.
-2. Do NOT leave the connection as a comment placeholder.
-3. Do NOT redefine `out_dir` elsewhere in the script — the shim sets it once,
-   and every downstream save should use `file.path(out_dir, "protocol_NN_…")`.
-   In particular, NEVER write
-   `out_dir <- file.path(.project_root, "results/{ta}/{db_id}/protocols")`
-   — that breaks on any machine where the AutoTTE repo is not present.
-4. For online/local DuckDB runs, the optional `.project_root` discovery sets
-   cwd so YAML-relative paths like `"databases/data/pcornet_cdw.duckdb"`
-   resolve. For offline CDW runs on secure machines, the script just runs
-   where it is; no project root is needed.
-5. Always register the `on.exit` disconnect so the script cleans up when it
-   finishes or errors out.
+### SQL: use `glue::glue_sql`, not `sprintf`
+
+Use `glue::glue_sql()` (or DBI parameterized queries) for every SQL
+statement. It quotes safely, supports `{`var`}` for identifiers, and is
+readable. Load `library(glue)` in the libraries block.
+
+Example:
+
+```r
+build_cohort <- function(con, config) {
+  flu_codes <- config$flu_cpt_codes
+  t0 <- as.Date(config$study_start)
+  lookback <- t0 - 365
+
+  # Eligible population at time zero.
+  DBI::dbExecute(con, glue::glue_sql("
+    SELECT DISTINCT d.PATID, d.BIRTH_DATE, d.SEX
+    INTO #elig
+    FROM CDW.dbo.DEMOGRAPHIC d
+    WHERE d.BIRTH_DATE <= DATEADD(YEAR, -65, {t0})
+      AND d.SEX IN ('F', 'M')
+      AND EXISTS (
+        SELECT 1 FROM CDW.dbo.ENCOUNTER e
+        WHERE e.PATID = d.PATID
+          AND e.ADMIT_DATE BETWEEN {lookback} AND {t0}
+      )
+  ", .con = con))
+
+  # ... more steps ...
+
+  DBI::dbGetQuery(con, "SELECT * FROM #analytic_cohort")
+}
+```
+
+This is much easier to read, debug, and maintain than equivalent
+`sprintf` with dozens of `%s` placeholders.
+
+### Skeleton example (target shape)
+
+```r
+# ============================================================================
+# Protocol NN: <title>
+# Database: <name> (<db_id>) | Engine: <engine>
+# Design: <one-line design summary>
+# ============================================================================
+
+library(DBI)
+library(odbc)    # pick the driver package from the YAML's engine field
+library(glue)
+library(dplyr)
+library(WeightIt)
+library(cobalt)
+library(survival)
+library(survminer)
+library(EValue)
+library(gtsummary)
+library(gt)
+library(jsonlite)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+
+config <- list(
+  study_start = "2016-09-01",
+  study_end   = "2023-03-31",
+  # ... everything a human would tune ...
+)
+
+connect_db <- function() {
+  # Verbatim from databases/<db_id>.yaml `connection.r_code`.
+  con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+  con
+}
+
+build_cohort <- function(con, config) {
+  # glue::glue_sql DDL/DML here, returns a data.frame.
+}
+
+fit_model <- function(df, config) {
+  # IPW / Cox / logistic / whatever; returns a list.
+}
+
+save_fig <- function(plot_or_fn, basename, width = 8, height = 6, out_dir = ".") {
+  for (ext in c("pdf", "png")) {
+    path <- file.path(out_dir, sprintf("%s.%s", basename, ext))
+    if (ext == "pdf") grDevices::pdf(path, width = width, height = height)
+    else              grDevices::png(path, width = width, height = height, units = "in", res = 300)
+    tryCatch({
+      if (inherits(plot_or_fn, "ggplot")) print(plot_or_fn) else plot_or_fn()
+    }, finally = grDevices::dev.off())
+  }
+}
+
+save_outputs <- function(fit, df, out_dir) {
+  # Write protocol_NN_results.json + table1.html + figures via save_fig().
+}
+
+script_dir <- function() {
+  m <- grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(m) > 0) return(dirname(normalizePath(sub("--file=", "", m[1]))))
+  for (i in seq_along(sys.frames())) {
+    fr <- sys.frames()[[i]]
+    if (!is.null(fr$ofile)) return(dirname(normalizePath(fr$ofile)))
+  }
+  getwd()
+}
+
+main <- function() {
+  out_dir <- script_dir()
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+  con <- connect_db()
+  on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
+
+  results <- list(
+    protocol_id = "protocol_NN",
+    execution_timestamp = format(Sys.time(), "%Y-%m-%dT%H:%M:%S"),
+    execution_status = "pending"
+  )
+
+  tryCatch({
+    df  <- build_cohort(con, config)
+    fit <- fit_model(df, config)
+    save_outputs(fit, df, out_dir)
+    results$execution_status <- "success"
+  }, error = function(e) {
+    results$execution_status <<- "error"
+    results$error_message   <<- conditionMessage(e)
+    message(sprintf("ERROR: %s", conditionMessage(e)))
+  })
+
+  jsonlite::write_json(
+    results, file.path(out_dir, "protocol_NN_results.json"),
+    pretty = TRUE, auto_unbox = TRUE
+  )
+  message(sprintf("Results saved to: %s", file.path(out_dir, "protocol_NN_results.json")))
+}
+
+main()
+```
+
+**Rules, restated briefly:**
+
+1. One file per protocol, self-contained (besides R packages).
+2. Connection lives inside `main()`; `on.exit(try(dbDisconnect))` there.
+3. SQL via `glue::glue_sql()`, not `sprintf`.
+4. `out_dir = script_dir()`. No `.mcp.json` lookup, no setwd().
+5. `save_fig()` is inline (stays in the script).
+6. Error handling inside `main()`. No mega-tryCatch wrapping the whole file.
 
 ## Structured Results Output (JSON)
 

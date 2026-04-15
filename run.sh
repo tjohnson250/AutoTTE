@@ -38,7 +38,7 @@ case "${1:-}" in
     ;;
 esac
 
-THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--dbs <id,id,...>|all] [--db-config <path>] [--db-mode online|offline] [--resume-reports] [max_turns]}"
+THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--dbs <id,id,...>|all] [--db-config <path>] [--db-mode online|offline] [--resume-reports|--resume-protocols] [max_turns]}"
 shift
 
 # Parse optional flags.
@@ -46,6 +46,7 @@ DB_CONFIG=""
 DB_IDS=""
 DB_MODE=""
 RESUME_REPORTS=false
+RESUME_PROTOCOLS=false
 MAX_TURNS="50"
 
 while [[ $# -gt 0 ]]; do
@@ -66,6 +67,9 @@ while [[ $# -gt 0 ]]; do
     --resume-reports)
       RESUME_REPORTS=true; shift
       ;;
+    --resume-protocols)
+      RESUME_PROTOCOLS=true; shift
+      ;;
     [0-9]*)
       MAX_TURNS="$1"; shift
       ;;
@@ -77,6 +81,11 @@ done
 
 if [[ -n "$DB_CONFIG" && -n "$DB_IDS" ]]; then
   echo "Error: cannot combine --db-config and --dbs. Use one or the other." >&2
+  exit 2
+fi
+
+if [[ "$RESUME_REPORTS" == "true" && "$RESUME_PROTOCOLS" == "true" ]]; then
+  echo "Error: cannot combine --resume-reports and --resume-protocols." >&2
   exit 2
 fi
 
@@ -149,6 +158,48 @@ print(sum(1 for r in rows if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')))
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# --resume-protocols: validate phases 1-2 artifacts and archive old protocols.
+# ---------------------------------------------------------------------------
+if [[ "$RESUME_PROTOCOLS" == "true" ]]; then
+  if [[ -z "$TRIAGE_JSON" ]]; then
+    echo "Error: --resume-protocols requires --dbs (no DB selected)." >&2
+    exit 2
+  fi
+
+  # Shared Phase 1 artifacts must exist.
+  for f in "$RESULTS_DIR/01_literature_scan.md" "$RESULTS_DIR/02_evidence_gaps.md"; do
+    if [[ ! -f "$f" ]]; then
+      echo "Error: --resume-protocols requires existing Phase 1 output: $f" >&2
+      exit 1
+    fi
+  done
+
+  # Per-DB Phase 2 artifacts must exist for every live DB.
+  ARCHIVE_TS=$(date +%Y%m%d_%H%M%S)
+  LIVE_IDS=$(python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+print('\n'.join(r['id'] for r in rows if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')))
+")
+  while IFS= read -r db; do
+    [[ -z "$db" ]] && continue
+    feas="$RESULTS_DIR/$db/03_feasibility.md"
+    if [[ ! -f "$feas" ]]; then
+      echo "Error: --resume-protocols requires existing feasibility: $feas" >&2
+      exit 1
+    fi
+    # Archive the existing protocols/ folder so the new Phase 3 run starts clean.
+    proto_dir="$RESULTS_DIR/$db/protocols"
+    if [[ -d "$proto_dir" ]]; then
+      mv "$proto_dir" "${proto_dir}_pre_${ARCHIVE_TS}"
+      echo "Archived $proto_dir → ${proto_dir}_pre_${ARCHIVE_TS}"
+    fi
+    mkdir -p "$proto_dir"
+  done <<< "$LIVE_IDS"
+fi
+
 # Dry-run stage 1: stop after argument parsing.
 if [[ "${AUTOTTE_DRY_RUN:-}" == "1" ]]; then
   echo "AUTOTTE_DRY_RUN — stopping after parse. DB_IDS='$DB_IDS' DB_CONFIG='$DB_CONFIG' MODE='$DB_MODE'"
@@ -175,6 +226,9 @@ echo " Max turns/sub-agent: $MAX_TURNS"
 echo " Results: $RESULTS_DIR/"
 if [[ "$RESUME_REPORTS" == "true" ]]; then
 echo " Mode:             RESUME REPORTS (skipping Phases 0-3)"
+fi
+if [[ "$RESUME_PROTOCOLS" == "true" ]]; then
+echo " Mode:             RESUME PROTOCOLS (skipping Phases 0-2; regenerating Phase 3)"
 fi
 echo "============================================="
 echo ""
@@ -367,5 +421,22 @@ Check for protocol_NN_results.json files in \$RESULTS_DIR/*/protocols/
 For each results file found, launch a report-writing worker (read REPORT_WRITER.md).
 For each protocol WITHOUT a results file, log a warning and skip it.
 Then produce the executive summary.
+")
+$([ "$RESUME_PROTOCOLS" = "true" ] && echo "
+RESUME MODE: PROTOCOLS ONLY
+Skip Phases 0, 1, and 2. Reuse the existing \$RESULTS_DIR/01_literature_scan.md,
+02_evidence_gaps.md, 01_02_review.md, and per-DB \${db_id}/03_feasibility.md +
+03_review.md. run.sh has already archived any existing protocols/ folder to
+protocols_pre_<ts>/ — the target protocols/ is empty and ready.
+
+For each DB listed in db_triage.json with disposition RUN or RUN_AUTO_ONBOARD:
+  1. Launch a Phase 3 protocol-writing worker (read WORKER.md). Point it at
+     the per-DB 03_feasibility.md and tell it to write fresh protocol files
+     into \$RESULTS_DIR/\${db_id}/protocols/.
+  2. Launch a protocol reviewer per DB (read REVIEW.md). Revise as needed
+     under the normal revision guardrails.
+
+Then fall through to Phase 4 as usual: online DBs execute; offline DBs get a
+fresh NEXT_STEPS.md and pause. Finish with the executive summary.
 ")
 PROMPT

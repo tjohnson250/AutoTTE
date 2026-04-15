@@ -341,6 +341,31 @@ When the coordinator prompt says "Resume mode: REPORTS_ONLY":
 5. If some protocols have no results file, log a warning and skip them.
 6. Then proceed to the Executive Summary phase.
 
+**Resume mode (--resume-protocols):**
+When the coordinator prompt says "Resume mode: PROTOCOLS_ONLY":
+1. Skip Phases 0, 1, and 2. `run.sh` has already validated that
+   `01_literature_scan.md`, `02_evidence_gaps.md`, `01_02_review.md`, and
+   per-DB `{db_id}/03_feasibility.md` + `03_review.md` exist, and has
+   archived any previous `{db_id}/protocols/` to `protocols_pre_<ts>/`.
+   The target `protocols/` folder is empty and ready.
+2. For each DB in `db_triage.json` with disposition `RUN` or
+   `RUN_AUTO_ONBOARD`, launch a Phase 3 protocol-writing worker (read
+   `WORKER.md`). Point the worker at:
+   - the per-DB `{db_id}/03_feasibility.md` (input)
+   - the shared `01_literature_scan.md` and `02_evidence_gaps.md` (input)
+   - `{db_id}/protocols/` as the destination (output)
+   Emphasize the WORKER.md script-shape rules (main()-scoped
+   connection, glue::glue_sql, inline save_fig, no project-root shim,
+   no top-level tryCatch).
+3. Launch a protocol reviewer per DB (read `REVIEW.md`). Revise under
+   the normal revision guardrails (max 3 revisions per phase per DB).
+4. Fall through to Phase 4 per the existing flow:
+   - Online DBs: execute protocols via `execute_r(db_id, code)`, then
+     launch report writers and render PDF/DOCX.
+   - Offline DBs: write a fresh `NEXT_STEPS.md` and transition to
+     `awaiting_results`.
+5. Finish with the Executive Summary phase.
+
 ### Final: Executive Summary
 - **Goal:** Synthesize everything into a summary document
 - **Worker reads:** All results files, including per-protocol reports if available
