@@ -332,8 +332,28 @@ template (`analysis_plan_template_cdw.R`) has reference implementations.
 ### Propensity Score Formula
 
 Build the PS formula dynamically by inspecting the data and dropping
-single-level factors and zero-variance columns before fitting. Small or
-specific cohorts often have single-level factors that crash `weightit()`.
+single-level factors, zero-variance columns, and all-NA columns before
+fitting. Small or specific cohorts often have single-level factors that
+crash `weightit()`.
+
+**Always wrap `sd(...)` comparisons in `isTRUE()`** — if a column is all
+NA, `sd(vals, na.rm = TRUE)` returns `NA`, and `if (NA > 0)` throws
+`missing value where TRUE/FALSE needed`. Correct pattern:
+
+```r
+for (v in ps_vars) {
+  if (!v %in% names(df)) next
+  vals <- df[[v]]
+  if (is.factor(vals) || is.character(vals)) {
+    if (length(unique(na.omit(vals))) >= 2) keep_vars <- c(keep_vars, v)
+  } else {
+    if (isTRUE(sd(vals, na.rm = TRUE) > 0)) keep_vars <- c(keep_vars, v)
+  }
+}
+```
+
+`isTRUE` returns `FALSE` for `NA`, so all-NA columns are silently dropped
+rather than crashing the script.
 
 ### Empty Cohort Guard
 
