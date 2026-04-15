@@ -715,6 +715,15 @@ if (length(.missing_pkgs)) {
   )
 }
 
+# Belt-and-suspenders: silence any remaining package-level "would you like
+# to install X?" prompts, so the script cannot hang on a surprise rlang or
+# gtsummary check_installed() call mid-run. The preflight above is the
+# primary defense; these options are a secondary guard.
+options(rlang_interactive = FALSE, menu.graphics = FALSE)
+# Print warnings as they happen instead of buffering to the end, so long
+# SQL runs surface issues in near-real-time.
+options(warn = 1)
+
 library(DBI)
 library(odbc)    # pick the driver package from the YAML's engine field
 library(glue)
@@ -796,6 +805,13 @@ main <- function() {
 
   con <- connect_db()
   on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
+
+  # Connection smoke test — catches DSN / permission / driver issues in
+  # the first second instead of deep inside a SQL build that might take
+  # minutes before the driver emits its real error.
+  stopifnot(DBI::dbIsValid(con))
+  .smoke <- DBI::dbGetQuery(con, "SELECT 1 AS ok")
+  stopifnot(nrow(.smoke) == 1 && .smoke$ok == 1)
 
   results <- list(
     protocol_id = "protocol_NN",
