@@ -780,6 +780,20 @@ main <- function() {
   out_dir <- script_dir()
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
+  # Fast-resume hook: if AUTOTTE_PUBONLY=1 and we have a checkpoint from a
+  # previous run, skip the expensive SQL + fit and just regenerate
+  # publication outputs. Use this to recover from figure/table failures
+  # (e.g. interactive package prompts) without paying the hours-long
+  # cohort-build + model-fit cost again.
+  state_path <- file.path(out_dir, "protocol_NN_state.rds")
+  if (nzchar(Sys.getenv("AUTOTTE_PUBONLY")) && file.exists(state_path)) {
+    message(sprintf("AUTOTTE_PUBONLY=1 — loading state from %s", state_path))
+    state <- readRDS(state_path)
+    save_outputs(state$fit, state$df, out_dir)
+    message(sprintf("=== protocol_NN publication outputs regenerated (%s) ===", Sys.time()))
+    return(invisible())
+  }
+
   con <- connect_db()
   on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
 
@@ -792,6 +806,14 @@ main <- function() {
   tryCatch({
     df  <- build_cohort(con, config)
     fit <- fit_model(df, config)
+
+    # Checkpoint the expensive state RIGHT AFTER fit_model() and BEFORE
+    # save_outputs(). If publication-output generation errors out
+    # (package prompts, missing LaTeX, cobalt edge cases, etc.) the
+    # user can rerun with AUTOTTE_PUBONLY=1 and skip SQL + fit.
+    saveRDS(list(fit = fit, df = df, config = config), state_path)
+    message(sprintf("State checkpointed to: %s", state_path))
+
     save_outputs(fit, df, out_dir)
     results$execution_status <- "success"
   }, error = function(e) {
@@ -816,6 +838,7 @@ main()
 2. Connection lives inside `main()`; `on.exit(try(dbDisconnect))` there.
 3. SQL via `glue::glue_sql()`, not `sprintf`.
 4. `out_dir = script_dir()`. No `.mcp.json` lookup, no setwd().
+5. **Checkpoint after `fit_model()` via `saveRDS(list(fit, df, config), state_path)`**, and honor `AUTOTTE_PUBONLY=1` at the top of `main()` to skip SQL+fit and rerun only `save_outputs()` from the checkpoint. Saves hours when publication output fails.
 5. `save_fig()` is inline (stays in the script).
 6. Error handling inside `main()`. No mega-tryCatch wrapping the whole file.
 
