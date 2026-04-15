@@ -286,11 +286,31 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
    already requires analysis scripts to save every figure as both formats.
 
 **Offline mode:**
-1. Write `{results_dir}/NEXT_STEPS.md` with instructions for the user:
-   - List all protocol analysis scripts that need to be run
-   - Explain that each script saves a `_results.json` file
-   - Tell the user to copy the results files back and re-run with
-     `--resume-reports`
+1. Write `{results_dir}/NEXT_STEPS.md` with instructions for the user.
+   The resume command MUST be the literal `./run.sh` invocation below —
+   do NOT invent alternative flags (no `--therapeutic-area`, no
+   `--results-dir`, no `python3 run.sh …`). Copy this exact template:
+
+   ```bash
+   cd /path/to/AutoTTE
+   ./run.sh "<therapeutic_area>" --dbs <db_id_1>,<db_id_2>,... --resume-reports
+   ```
+
+   Substitute `<therapeutic_area>` with the run's therapeutic area string
+   and `<db_id_...>` with the same comma-separated list the user passed
+   originally. For a single-DB run, the list is just one id. If the
+   original run used `--db-config`, the resume command should still use
+   `--dbs` with the resolved id (the two flags are equivalent after
+   triage).
+
+   The NEXT_STEPS.md body should also:
+   - List all protocol analysis scripts that need to be run, with exact
+     `Rscript results/{ta}/{db_id}/protocols/protocol_NN_analysis.R`
+     commands.
+   - Explain that each script saves `protocol_NN_results.json` plus
+     figure `.pdf`/`.png` pairs and a `protocol_NN_table1.html` sibling.
+   - Tell the user to copy the results files back into the same per-DB
+     `{db_id}/protocols/` folder before running the resume command.
 2. Set `current_phase` to `"awaiting_results"` in agent_state.json.
 3. Log this in coordinator_log.md and stop the pipeline.
 
