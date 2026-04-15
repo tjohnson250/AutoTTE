@@ -644,6 +644,32 @@ variable. If the YAML connection code uses project-root-relative paths
 via its own convention or the user sets `getwd()` appropriately. For
 offline CDW runs (DSN-based), no root is needed.
 
+### ICD-10 code storage: emit both dotted and dotless forms
+
+PCORnet CDM spec says the `DX` column is stored **without periods** (`N1830`,
+`G300`, `S7200`). Some sites keep the periods depending on how the feed was
+loaded (`N18.30`, `G30.0`, `S72.0`). An analysis cannot assume which. If you
+emit only dotted codes, a dotless CDW returns zero matches (silent failure:
+the cohort-build completes, finds zero patients, and the run looks fine
+until you inspect it). If you emit only dotless, a dotted CDW has the same
+problem.
+
+**Always emit both forms.** Two patterns:
+
+```r
+# Pattern A — exact code lists (IN clauses).
+expand_icd_codes <- function(codes) unique(c(codes, gsub("\\.", "", codes)))
+ckd_dx_sql <- sql_quote(expand_icd_codes(config$ckd_dx))
+
+# Pattern B — LIKE-prefix builders that also want to match exact codes.
+# Expand both the prefix list and the exact list to dotted+dotless.
+```
+
+For LIKE patterns with no period in the prefix (e.g. `'G30%'`, `'F01%'`) the
+pattern itself is already dot-agnostic because `%` wildcards anything after,
+so you only need both-forms expansion when a period appears *inside* the
+prefix (`'S72.0%'` needs `'S720%'` too) or for exact-match codes.
+
 ### SQL: use `glue::glue_sql`, not `sprintf`
 
 Use `glue::glue_sql()` (or DBI parameterized queries) for every SQL
