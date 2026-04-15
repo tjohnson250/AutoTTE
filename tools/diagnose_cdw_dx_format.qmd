@@ -1,0 +1,174 @@
+---
+title: "CDW DX code storage format probe"
+subtitle: "Are ICD-10 codes stored dotted, dotless, or mixed?"
+format:
+  html:
+    toc: true
+    code-fold: show
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+## Purpose
+
+Determine how this CDW stores the `DX` column for ICD-10 codes. The PCORnet
+CDM spec says dotless (`N1830`), but implementations vary depending on the
+source feed. Analyses that emit exact-match IN clauses (or LIKE prefixes
+with interior periods) silently match zero rows if they guess the wrong
+format — a cohort of 0 looks like "no data for that question" rather than
+a bug.
+
+This notebook runs five quick probes and prints a verdict.
+
+## Setup
+
+```{r}
+#| label: setup
+library(DBI)
+library(odbc)
+con <- dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+stopifnot(DBI::dbIsValid(con))
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Total ICD-10 row count (denominator)
+
+```{r}
+#| label: row-count
+DBI::dbGetQuery(con, "
+  SELECT COUNT(*) AS icd10_rows
+  FROM CDW.dbo.DIAGNOSIS
+  WHERE DX_TYPE = '10'
+")
+```
+
+## 2. Sample 20 ICD-10 codes (eyeball format)
+
+```{r}
+#| label: sample
+DBI::dbGetQuery(con, "
+  SELECT TOP 20 DX
+  FROM CDW.dbo.DIAGNOSIS
+  WHERE DX_TYPE = '10'
+    AND DX IS NOT NULL
+  ORDER BY NEWID()
+")
+```
+
+## 3. Split by "has-period" across all ICD-10 rows
+
+```{r}
+#| label: period-split
+split_all <- DBI::dbGetQuery(con, "
+  SELECT
+    SUM(CASE WHEN DX LIKE '%.%' THEN 1 ELSE 0 END) AS with_period,
+    SUM(CASE WHEN DX LIKE '%.%' THEN 0 ELSE 1 END) AS without_period,
+    COUNT(*)                                      AS total
+  FROM CDW.dbo.DIAGNOSIS
+  WHERE DX_TYPE = '10'
+    AND DX IS NOT NULL
+")
+split_all
+```
+
+```{r}
+#| label: verdict
+total <- split_all$total
+pct_dotted   <- round(100 * split_all$with_period    / total, 2)
+pct_dotless  <- round(100 * split_all$without_period / total, 2)
+cat(sprintf(
+  "Dotted   (e.g. 'N18.30') : %s rows  (%.2f%%)\n",
+  format(split_all$with_period, big.mark = ","), pct_dotted
+))
+cat(sprintf(
+  "Dotless  (e.g. 'N1830' or 'E11')  : %s rows  (%.2f%%)\n",
+  format(split_all$without_period, big.mark = ","), pct_dotless
+))
+cat("\n")
+if (pct_dotless > 95) {
+  cat("VERDICT: DOTLESS storage. Use IN ('N1830','N1831',...) patterns.\n")
+} else if (pct_dotted > 95) {
+  cat("VERDICT: DOTTED storage. Use IN ('N18.30','N18.31',...) patterns.\n")
+} else {
+  cat("VERDICT: MIXED storage. Emit BOTH dotted and dotless forms in every\n",
+      "         IN list and in any LIKE prefix that contains a period.\n", sep = "")
+}
+```
+
+Note: a three-character root like `E11` (diabetes mellitus) has no period
+even in the "dotted" convention, which is why the verdict uses a 95%
+threshold rather than 0 vs 100 split.
+
+## 4. Split by "has-period" after excluding short (3-char) root codes
+
+Three-character codes like `I10`, `E11`, `J18` never have periods in either
+convention. Excluding them isolates codes that *would* have a period if the
+CDW were dotted.
+
+```{r}
+#| label: period-split-long
+DBI::dbGetQuery(con, "
+  SELECT
+    SUM(CASE WHEN DX LIKE '%.%' THEN 1 ELSE 0 END) AS with_period,
+    SUM(CASE WHEN DX LIKE '%.%' THEN 0 ELSE 1 END) AS without_period,
+    COUNT(*)                                      AS total
+  FROM CDW.dbo.DIAGNOSIS
+  WHERE DX_TYPE = '10'
+    AND DX IS NOT NULL
+    AND LEN(DX) >= 4
+")
+```
+
+If this table shows near-100% `with_period` for rows with length ≥ 4, the
+CDW is dotted. Near-100% `without_period` means dotless.
+
+## 5. Targeted probe — CKD and dementia codes
+
+Spot-check the exact codes Protocol 03 and Protocol 01 care about:
+
+```{r}
+#| label: targeted-probe
+targeted <- DBI::dbGetQuery(con, "
+  SELECT DX, COUNT(*) AS n
+  FROM CDW.dbo.DIAGNOSIS
+  WHERE DX_TYPE = '10'
+    AND (
+      DX LIKE 'N18%'
+      OR DX LIKE 'G30%'
+      OR DX LIKE 'G31%'
+      OR DX LIKE 'Z99%'
+      OR DX LIKE 'S72%'
+    )
+  GROUP BY DX
+  HAVING COUNT(*) > 50
+  ORDER BY n DESC
+")
+targeted
+```
+
+Scan the `DX` column of this table. You'll see exact strings like `N18.30`
+vs `N1830` and can confirm the format at a glance.
+
+## Cleanup
+
+```{r}
+#| label: cleanup
+try(DBI::dbDisconnect(con), silent = TRUE)
+```
+
+## Next steps
+
+- **Dotless only?** Future protocols should emit dotless codes directly.
+  The `expand_icd_codes()` helper in the flu-ADRD protocols already
+  handles this transparently — no action needed.
+- **Dotted only?** Unusual but valid. Update `databases/conventions/secure_pcornet_cdw_conventions.md`
+  to record this so future AutoTTE runs emit dotted codes by default.
+- **Mixed?** Keep the both-forms expansion (current pattern). Document it
+  in the conventions file as a warning.
+
+Add the verdict from section 3 to
+`databases/conventions/secure_pcornet_cdw_conventions.md` under "ICD-9/10
+Transition" so the next protocol worker agent doesn't have to re-derive
+the format.
