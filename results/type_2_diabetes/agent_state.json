@@ -13,7 +13,7 @@
   "current_phase": "done",
   "revision_counts": {"discovery": 0, "feasibility": 0, "protocol": 1},
   "backtrack_count": 0,
-  "total_sub_agents_launched": 6,
+  "total_sub_agents_launched": 7,
   "history": [
     {"phase": "onboarding", "action": "complete", "reason": "All database files verified.", "timestamp": "2026-04-15T00:00:00Z"},
     {"phase": "discovery", "action": "worker_complete", "reason": "32 PMIDs, 7 ranked PICO questions.", "timestamp": "2026-04-15T00:10:00Z"},
@@ -26,6 +26,10 @@
     {"phase": "protocol", "action": "advance", "reason": "Bugs fixed. Advancing to Phase 4.", "timestamp": "2026-04-15T01:11:00Z"},
     {"phase": "awaiting_results", "action": "next_steps_written", "reason": "NEXT_STEPS.md written for offline execution.", "timestamp": "2026-04-15T01:15:00Z"},
     {"phase": "summary", "action": "complete", "reason": "Executive summary written.", "timestamp": "2026-04-15T01:20:00Z"},
-    {"phase": "done", "action": "pipeline_complete", "reason": "All phases complete. Awaiting R script execution.", "timestamp": "2026-04-15T01:21:00Z"}
+    {"phase": "done", "action": "pipeline_complete", "reason": "All phases complete. Awaiting R script execution.", "timestamp": "2026-04-15T01:21:00Z"},
+    {"phase": "reporting", "action": "resume_reports_triggered", "reason": "protocol_01_results.json present; running Phase 4 reporting path.", "timestamp": "2026-04-16T10:25:00Z"},
+    {"phase": "reporting", "action": "worker_complete", "reason": "protocol_01_report.md written (281 lines, 8 sections, STROBE checklist). All numbers match results JSON.", "timestamp": "2026-04-16T10:30:00Z"},
+    {"phase": "summary", "action": "updated", "reason": "Added Section 6A to summary.md with execution results and BY-FDR note (k=1 primary hypothesis; correction is a no-op).", "timestamp": "2026-04-16T10:33:00Z"},
+    {"phase": "done", "action": "resume_reports_complete", "reason": "Per-protocol report and updated executive summary delivered.", "timestamp": "2026-04-16T10:34:00Z"}
   ]
 }

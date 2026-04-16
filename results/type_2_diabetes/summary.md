@@ -3,8 +3,10 @@
 **Therapeutic Area:** Type 2 Diabetes Mellitus
 **Study:** SGLT2 Inhibitors vs DPP-4 Inhibitors for 3-Point MACE
 **Database:** PCORnet CDW v6.1 (institutional Clinical Data Warehouse, MS SQL Server)
-**Date:** 2026-04-15
-**Mode:** OFFLINE — protocol and analysis code generated; no results data available yet
+**Date:** 2026-04-15 (protocol) / 2026-04-16 (execution and reporting)
+**Mode:** OFFLINE protocol design, followed by local R execution and `--resume-reports`
+
+> **Updated 2026-04-16:** Analysis has now been executed against the live CDW. Per-protocol results are reported in Section 6A below, with Benjamini-Yekutieli FDR correction applied across all primary hypotheses tested. The full per-protocol narrative report is in `protocols/protocol_01_report.md`.
 
 ---
 
@@ -315,6 +317,71 @@ The R analysis script (`protocol_01_analysis.R`) is a complete, production-grade
 
 ---
 
+## 6A. Execution Results (2026-04-16)
+
+The analysis script executed successfully against the live PCORnet CDW on 2026-04-16 (`execution_status = "success"`, no warnings). Full numeric results are in `protocols/protocol_01_results.json`; the per-protocol narrative with literature comparison, STROBE checklist, and figure references is in `protocols/protocol_01_report.md`.
+
+### 6A.1 Cohort Assembly
+
+| Step | N |
+|---|---|
+| SGLT2i new users (180-day washout) | 8,372 |
+| DPP-4i new users (180-day washout) | 7,685 |
+| 2nd-gen SU new users (180-day washout) | 18,834 |
+| All initiators across the three classes | 26,931 |
+| Eligible after exclusions and enrollment requirements | 13,745 |
+| Analytic cohort (primary SGLT2i vs DPP-4i pairwise: 6,520) | 13,745 |
+
+### 6A.2 Balance Diagnostics
+
+| Metric | Pre-weighting | Post-weighting |
+|---|---|---|
+| Maximum SMD across covariates | 0.776 | 0.0001 |
+| All below 0.10 threshold | No | Yes |
+
+Overlap weighting produced excellent balance on measured confounders; no PS model re-specification was required.
+
+### 6A.3 Primary and Secondary Hazard Ratios
+
+| Comparison | N treated | N control | Events (T/C) | HR (95% CI) | Uncorrected p | BY-FDR p |
+|---|---|---|---|---|---|---|
+| **SGLT2i vs DPP-4i (primary)** | 3,436 | 3,084 | 47 / 64 | **0.927 (0.615, 1.397)** | 0.718 | 0.718 |
+| SGLT2i vs SU (secondary) | 3,436 | 7,225 | — | 0.701 (0.495, 0.993) | 0.046 | — (not a primary hypothesis) |
+| Canagliflozin vs DPP-4i (descriptive) | 762 | — | — | 1.276 (0.674, 2.418) | — | — (underpowered, descriptive only) |
+
+- **Median follow-up:** 1,353 days. **Total MACE events:** 111.
+- **E-value for primary HR:** 1.370 (point estimate); CI bound not defined because the primary CI crosses the null.
+
+### 6A.4 Multiple Comparison Correction
+
+**Number of primary hypotheses tested across this run: 1** (SGLT2i vs DPP-4i for 3P-MACE).
+
+With a single primary test, Benjamini-Yekutieli FDR correction is a no-op and the corrected p-value equals the uncorrected p-value (0.718). The secondary SU comparison and the canagliflozin descriptive subgroup are within-protocol sensitivity analyses, not separate primary hypotheses, and are therefore not part of the cross-protocol FDR set.
+
+**Conclusion after correction:** No hypothesis in this run survives the pre-specified α = 0.05 threshold after FDR correction. The primary SGLT2i-vs-DPP-4i comparison is non-notable both before and after correction. Future runs that execute multiple protocols in the same therapeutic area should re-apply BY-FDR across the expanded set of primary hypotheses.
+
+### 6A.5 Interpretation in One Paragraph
+
+The primary analysis did not detect a statistically notable difference in MACE hazard between SGLT2i and DPP-4i initiators (HR 0.927, 95% CI 0.615–1.397, p = 0.718). The point estimate is directionally consistent with the class-level RCT and observational literature (CANVAS 0.86, EMPA-REG 0.86, DECLARE 0.93, D'Andrea 2023 0.85, Xie 2023 0.86), but the confidence interval is wide and uninformative about effects in either direction. With 111 MACE events across the pairwise cohort — roughly two orders of magnitude fewer than in VA-wide or Medicare-wide cohorts — this single institutional CDW is underpowered to stabilize MACE-level effect sizes. The secondary SGLT2i-vs-SU comparison is borderline notable before correction (HR 0.701, p = 0.046) but is vulnerable to multiplicity adjustment. The canagliflozin descriptive subgroup (HR 1.276, N = 762) operationally confirmed that agent-specific inference is not feasible in this data source, validating the Alternative D class-level design.
+
+### 6A.6 Published-Literature Concordance
+
+| Source | Comparison | HR (95% CI) | Our HR |
+|---|---|---|---|
+| CANVAS (Neal 2017) | Canagliflozin vs placebo | 0.86 (0.75–0.97) | — |
+| EMPA-REG (Zinman 2015) | Empagliflozin vs placebo | 0.86 (0.74–0.99) | — |
+| DECLARE (Wiviott 2019) | Dapagliflozin vs placebo | 0.93 (0.84–1.03) | — |
+| D'Andrea 2023 | SGLT2i vs DPP-4i (PS-matched) | 0.85 (0.75–0.95) | 0.927 |
+| EMPRISE (Htoo 2024) | Empagliflozin vs DPP-4i | 0.73 (0.62–0.86) | 0.927 |
+| Xie 2023 | SGLT2i vs DPP-4i (TTE) | 0.86 (0.82–0.89) | 0.927 |
+| Kosjerina 2025 | SGLT2i vs DPP-4i (TTE, elderly) | 0.65 (0.63–0.68) | 0.927 |
+| Filion 2020 | Canagliflozin vs DPP-4i | 0.79 (0.66–0.94) | 1.276 (descriptive, underpowered) |
+| Xie 2023 | SGLT2i vs SU (TTE) | 0.77 (0.74–0.80) | 0.701 (secondary) |
+
+The primary point estimate is directionally consistent with published estimates but attenuated (0.927 vs 0.73–0.86), plausibly reflecting channeling-by-indication residual confounding, within-class heterogeneity, or sampling variability in a smaller cohort.
+
+---
+
 ## 6. Next Steps
 
 ### 6.1 Immediate Actions
@@ -330,17 +397,9 @@ The R analysis script (`protocol_01_analysis.R`) is a complete, production-grade
 
 3. **Check results** in `protocols/protocol_01_results.json` and associated publication outputs (Table 1, love plot, PS distribution, KM curves, forest plot, CONSORT diagram).
 
-### 6.2 Report Generation
+### 6.2 Report Generation — Complete
 
-Once results are available, re-run the pipeline with `--resume-reports` to generate the narrative analysis report:
-
-```bash
-./run.sh --therapeutic-area "type 2 diabetes" \
-  --database databases/secure_pcornet_cdw.yaml \
-  --resume-reports
-```
-
-This will launch a report-writing agent that reads the results JSON and produces `protocols/protocol_01_report.md` with full results interpretation, literature comparison, and STROBE compliance checklist.
+Results generation and narrative reporting are complete as of 2026-04-16. The report-writing agent produced `protocols/protocol_01_report.md` (8 sections, STROBE checklist, literature concordance). All numeric values were spot-checked against `protocols/protocol_01_results.json` and match to the decimal places reported. No synthetic-data caveat was applied (institutional PCORnet EHR data is real). See Section 6A above for the cross-protocol summary and multiplicity correction.
 
 ### 6.3 Important Notes for Execution
 
@@ -386,6 +445,15 @@ This will launch a report-writing agent that reads the results JSON and produces
 | `protocols/protocol_01.md` | 404 | Full TTE protocol: target trial spec, variable mapping, statistical plan, limitations |
 | `protocols/protocol_01_analysis.R` | 1,372 | Complete R script: cohort assembly through publication outputs |
 | `protocols/review_protocol_01.md` | 259 | Protocol review: 13/13 CDW conventions verified, 2 SQL bugs found and fixed |
-| `coordinator_log.md` | 118 | Decision log: all coordinator choices with rationale |
-| `NEXT_STEPS.md` | 88 | Execution instructions and prerequisites |
+| `protocols/protocol_01_results.json` | — | Structured execution results (HRs, CIs, CONSORT, balance, E-value, subgroups) |
+| `protocols/protocol_01_report.md` | 281 | Per-protocol narrative report: 8 sections, STROBE checklist, literature concordance |
+| `protocols/protocol_01_table1.html` | — | Publication Table 1 (SGLT2i vs DPP-4i baseline) |
+| `protocols/protocol_01_table1_vs_su.html` | — | Publication Table 1 (SGLT2i vs SU baseline) |
+| `protocols/protocol_01_consort.{png,pdf}` | — | CONSORT flow diagram |
+| `protocols/protocol_01_loveplot{,_vs_su}.{png,pdf}` | — | Love plots (pre/post weighting SMDs) for both comparisons |
+| `protocols/protocol_01_ps_dist.{png,pdf}` | — | Propensity score distributions |
+| `protocols/protocol_01_km{,_vs_su}.{png,pdf}` | — | Kaplan-Meier curves for both comparisons |
+| `protocols/protocol_01_forest.{png,pdf}` | — | Subgroup forest plot (age / sex / ASCVD / CKD) |
+| `coordinator_log.md` | — | Decision log: all coordinator choices with rationale (includes resume-mode entry) |
+| `NEXT_STEPS.md` | 88 | Execution instructions (superseded now that execution is complete) |
 | `summary.md` | — | This document |

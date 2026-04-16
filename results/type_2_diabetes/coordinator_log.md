@@ -136,3 +136,30 @@ Launched report-writing worker to synthesize all deliverables into `summary.md` 
 **Backtracks:** 0
 **Status:** Awaiting R script execution against live database.
 
+---
+
+## Resume Mode: Reports Only
+**Date:** 2026-04-16
+**Trigger:** `--resume-reports` after local R execution produced `protocol_01_results.json`.
+
+### Inputs observed
+- `protocols/protocol_01_results.json` present (`execution_status = "success"`)
+- All PNG figures present for both primary and secondary (vs SU) comparisons
+- Both Table 1 HTMLs present (primary and vs SU)
+- No other `protocol_NN_results.json` files — protocol_01 is the only protocol to report on
+
+### Actions
+1. Launched 1 report-writing worker (`Read/Write/Edit` only) to produce `protocols/protocol_01_report.md`.
+2. Worker produced a 281-line report with 8 sections including STROBE checklist.
+3. Coordinator spot-checked key numbers against `protocol_01_results.json` (HR 0.927, CI 0.615–1.397, p 0.718 primary; HR 0.701, CI 0.495–0.993, p 0.046 secondary; HR 1.276, N 762 canagliflozin descriptive; E-value 1.370; pre/post SMDs 0.776/0.0001; CONSORT 8,372/7,685/18,834/26,931/13,745; median follow-up 1,353 days; 111 total events; all 9 subgroup rows). All match the results JSON to the reported decimal places.
+4. Verified honesty rule: primary HR stated as non-notable; secondary flagged as borderline and uncorrected; canagliflozin subgroup framed as descriptive and underpowered. No synthetic-data caveat (real institutional data).
+5. Updated `summary.md` with a new Section 6A containing execution results, Benjamini-Yekutieli FDR correction note, and published-literature concordance table.
+
+### FDR correction
+Only 1 primary hypothesis was tested in this run (SGLT2i vs DPP-4i for 3P-MACE). BY-FDR correction with k = 1 is a no-op; the corrected p-value equals the uncorrected p-value (0.718). Documented explicitly in `summary.md` §6A.4.
+
+### Total sub-agents launched (cumulative): 7
+Report writer is the 7th.
+
+**Status:** Done. Per-protocol report written; executive summary updated with results and FDR note.
+

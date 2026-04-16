@@ -42,8 +42,8 @@ Key data eras:
 - Year 1900 has ~40K patients — this is a default/unknown date, not real data
 - Pre-2000 data is sparse and unreliable
 - Realistic clinical data begins around **2000** and reaches full volume ~**2005**
-- **AllScripts era:** through ~2019-2020 (all data before Epic go-live)
-- **Epic go-live:** ~2019-2020 (legacy encounter volume drops sharply after 2021)
+- **AllScripts era:** through May 20, 2021 (all data before Epic go-live)
+- **Epic go-live:** May 21, 2021 (legacy encounter volume drops sharply after this date)
 - **Post-ICD-10 only:** 2016+ (ICD-10 transition was Oct 2015, separate from Epic)
 - **Post-Epic + post-ICD-10:** ~2020+
 - Future dates (2027+) include some scheduled appointments but mostly errors
