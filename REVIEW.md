@@ -137,6 +137,14 @@ that all three passes were actually performed:
 - Verify time granularity supports proper time-zero definition
 - Check that only questions approved in the discovery review were used
 
+**Code Validation Spot-Check:**
+- Use `mcp__rxnorm__*` to verify at least the primary exposure drug RxCUIs
+- Use `mcp__clinical_codes__search_icd10` to verify the primary outcome codes
+- These tools are available in ALL modes including offline — if the worker
+  claims they are unavailable, flag as REVISE
+- If the worker deferred ALL code validation, spot-check at least one drug
+  and one diagnosis code list yourself
+
 **Feasibility Assessment:**
 - Are positivity concerns adequately addressed?
 - Were important datasets overlooked? (Check registry with different queries)

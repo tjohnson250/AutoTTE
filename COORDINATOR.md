@@ -125,6 +125,11 @@ At the start of every run that selected any DB, read
   later phases; reflect the skip in `agent_state.json` and note it in the
   executive summary.
 
+When logging triage results, always name the database explicitly and treat
+the disposition as a property — e.g., "DB `secure_pcornet_cdw` has
+disposition RUN (ready to proceed)" — not "the DB is `RUN`", which
+conflates the disposition value with the database identity.
+
 ### Multi-DB phase orchestration (phase-major)
 
 Advance all active DBs through each phase before starting the next. Run
@@ -182,7 +187,12 @@ exactly one DB. In the worker prompt, include:
    The generated script must also start with the project-root shim
    documented in WORKER.md so relative paths in the YAML resolve
    regardless of where the script is invoked from.
-5. If this is a revision: the review notes.
+5. An explicit clarification about tool availability: "Offline mode means no
+   r_executor (execute_r, query_db, list_tables, describe_table). All other
+   MCP tools remain fully available: PubMed, datasource, RxNorm, clinical
+   codes, WebSearch. You MUST use RxNorm and clinical code tools to validate
+   code lists even in offline mode."
+6. If this is a revision: the review notes.
 
 ## The Research Phases
 
@@ -473,6 +483,9 @@ consider it a credible starting point.
       counts from the data profile
 - [ ] At least one feasible question-dataset pair identified
 - [ ] Data gaps documented with what data would be needed
+- [ ] Worker used RxNorm and/or clinical code MCP tools to spot-check at
+      least the primary exposure and outcome code lists (available in all
+      modes including offline)
 
 **Red flags requiring revision:**
 - Dataset claims that are vague ("MIMIC probably has this")
@@ -480,6 +493,8 @@ consider it a credible starting point.
 - Claiming variables exist without checking get_dataset_details or the schema
 - Sample size estimates not backed by actual data profile counts ("we expect
   300-800 per arm" without citing the profile)
+- Worker claims MCP tools (RxNorm, clinical codes) are unavailable in
+  offline mode (they are always available — only r_executor is mode-dependent)
 
 ### Protocol Acceptance Criteria
 - [ ] Target trial specification complete (all 7 elements from WORKER.md)
