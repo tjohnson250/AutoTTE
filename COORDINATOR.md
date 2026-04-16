@@ -85,25 +85,104 @@ often take longer than the timeout allows.
 
 ## Data Sources
 
-Your initial prompt will specify the data source configuration:
+Your initial prompt lists the selected databases in one of three shapes:
 
-- **No database configured:** Protocols target public datasets only.
-  Workers use the datasource MCP tools to find suitable public datasets.
-- **Database configured (offline):** Protocols target the configured database.
-  Workers use `get_schema(id)`, `get_profile(id)`, and `get_conventions(id)`
-  from the datasource MCP server. They cannot query the database directly.
-- **Database configured (online):** Same as offline, plus workers can query
-  the live database via `execute_r()` and `query_db()` to validate feasibility
-  and test generated R code.
+- **Public datasets only:** no `--dbs` / `--db-config` was passed. Workers use
+  `list_datasources` / `get_datasource_details` to target public datasets.
+- **Single-DB run:** one DB id is listed. All feasibility / protocol /
+  execution / report work targets that one DB. Output lives under
+  `results/{ta}/{db_id}/`. Literature discovery remains at `results/{ta}/`.
+- **Multi-DB run:** two or more DB ids are listed in `db_triage.json`.
+  Literature discovery runs ONCE at `results/{ta}/`. Feasibility, protocol
+  generation, execution, and per-protocol reports branch per DB into
+  `results/{ta}/{db_id}/`. The executive summary synthesizes across all DBs.
 
-Public datasets are always available via the datasource registry regardless
-of whether a database is configured.
+### Reading `db_triage.json`
 
-When a database is configured, tell workers:
-1. The database ID, CDM type, engine, and schema prefix (from your initial prompt)
-2. To call `get_schema(id)`, `get_profile(id)`, and `get_conventions(id)`
-3. To read and apply ALL conventions before writing SQL or R code
-4. Whether they have online access (can use `execute_r()` / `query_db()`)
+At the start of every run that selected any DB, read
+`{results_dir}/db_triage.json`. It is a JSON array of entries:
+
+```json
+[
+  {
+    "id": "nhanes",
+    "name": "NHANES",
+    "cdm": "nhanes",
+    "engine": "duckdb",
+    "yaml_path": "databases/nhanes.yaml",
+    "disposition": "RUN" | "RUN_AUTO_ONBOARD" | "SKIP",
+    "effective_mode": "online" | "offline",
+    "reason": "…",
+    "warnings": ["…"]
+  }
+]
+```
+
+- `RUN` — the DB is ready. Proceed through every phase.
+- `RUN_AUTO_ONBOARD` — the DB is missing a schema dump or profile. During
+  Phase 0, generate the missing files via the r_executor.
+- `SKIP` — `run.sh` has already excluded this DB. It will not appear in
+  later phases; reflect the skip in `agent_state.json` and note it in the
+  executive summary.
+
+### Multi-DB phase orchestration (phase-major)
+
+Advance all active DBs through each phase before starting the next. Run
+phases in this order:
+
+1. **Phase 0 (per-DB, parallelizable):** For each `RUN_AUTO_ONBOARD` DB,
+   generate schema dump (if missing) then profile (if missing) via
+   `dump_schema(db_id=…)` and `run_profiler(db_id=…, code=…)`.
+2. **Phase 1 (shared, once):** Launch one discovery worker and one
+   reviewer. Outputs live at `results/{ta}/01_literature_scan.md` and
+   `02_evidence_gaps.md`. No DB awareness needed.
+3. **Phase 2 (per-DB, sequential):** Launch one feasibility worker per
+   active DB. Each worker writes to
+   `results/{ta}/{db_id}/03_feasibility.md`. After all report, read every
+   feasibility file and tag questions feasible on ≥2 DBs for later
+   replication analysis. Launch one reviewer per DB.
+4. **Phase 3 (per-DB, sequential):** Per DB, launch one protocol worker.
+   Protocol numbering restarts at 01 inside each DB's `protocols/` folder.
+   When the same PICO question is feasible on multiple DBs, each DB's
+   worker produces a protocol tailored to its own CDM and conventions
+   (peer protocols, not copies). Launch one reviewer per DB.
+5. **Phase 4 (per-DB, mode-dependent):** For each online DB, launch an
+   execution worker per protocol and then a report writer. For each
+   offline DB, write a per-DB `NEXT_STEPS.md` and transition that DB to
+   `awaiting_results`. Continue other DBs regardless.
+6. **Executive summary (shared):** Read every per-DB feasibility file and
+   every per-protocol report, then write `results/{ta}/summary.md`.
+
+### Failure isolation
+
+Failures are isolated per DB. Max 3 revisions per phase per DB, max 2
+backtracks across the whole run. When a DB fails beyond the revision
+guardrail, mark it `failed` in `agent_state.json` and drop it from later
+phases; other DBs continue unaffected. The summary records what failed.
+
+### Telling workers about their DB
+
+Every feasibility / protocol / execution / report sub-agent targets
+exactly one DB. In the worker prompt, include:
+
+1. The DB id (e.g. `'nhanes'`), name, CDM, engine, and `effective_mode`
+   from `db_triage.json`.
+2. Exact file paths: what to read and what to write, scoped to
+   `results/{ta}/{db_id}/`.
+3. A reminder that every r_executor call (`execute_r`, `query_db`,
+   `list_tables`, `describe_table`, `dump_schema`, `run_profiler`) takes
+   a required `db_id` argument that must match the DB the worker was
+   told to target.
+4. For protocol workers specifically: an explicit instruction to call
+   `get_datasource_details(db_id)` and copy the returned
+   `connection.r_code` block **verbatim** into the generated analysis
+   script. Workers must NOT invent their own `DBI::dbConnect(...)` call —
+   some DB YAMLs wrap connection setup (e.g., loading both CDW and MPI
+   handles together) and a generic `dbConnect` will silently miss pieces.
+   The generated script must also start with the project-root shim
+   documented in WORKER.md so relative paths in the YAML resolve
+   regardless of where the script is invoked from.
+5. If this is a revision: the review notes.
 
 ## The Research Phases
 
@@ -111,27 +190,37 @@ There are three main phases of work (plus an optional Phase 0). You decide
 when to advance, when to loop, and when to backtrack based on your assessment
 of the deliverables.
 
-### Phase 0: Data Source Onboarding (if database configured)
+### Phase 0: Data Source Onboarding (per-DB)
 
-If a database was configured in your initial prompt:
+Read `{results_dir}/db_triage.json` first. For each entry, act on the
+disposition:
 
-1. **Online mode:**
-   a. Read the DB config YAML to understand the database.
-   b. Check if the schema dump file exists at the path specified in the config.
-      If not, call `dump_schema()` via the R executor to generate it.
-   c. Check if the data profile file exists. If not:
-      - Read the generated schema dump.
-      - Determine appropriate profiling queries based on the CDM type.
-      - Write R profiling code and call `run_profiler(code)` to execute it.
-   d. Log onboarding results to `{results_dir}/coordinator_log.md`.
+- **`RUN`** — schema dump and data profile already exist. Nothing to generate;
+  just verify the conventions file path and record the DB in `agent_state.json`.
+- **`RUN_AUTO_ONBOARD`** — the DB is online and a schema dump and/or data
+  profile is missing. Run the per-DB onboarding sub-steps below, using the
+  DB's `id` as the `db_id` argument on every r_executor call.
+- **`SKIP`** — `run.sh` has already excluded this DB from the run. Record it in
+  `agent_state.json` as skipped with its reason; do not invoke any tool for it.
 
-2. **Offline mode:**
-   a. Verify that schema dump and data profile files exist.
-   b. If missing, log a warning and proceed with whatever is available.
+For each `RUN_AUTO_ONBOARD` DB, iterate through these sub-steps:
 
-3. **Both modes:**
-   a. Check that the conventions file exists. Log its path for sub-agents.
-   b. Record the database details in `agent_state.json`.
+1. Read the DB config YAML (`yaml_path` in the triage entry) to understand
+   engine, schema prefix, and connection code.
+2. If `schema_dump` is missing, call `dump_schema(db_id="<id>")` via the R
+   executor to generate it.
+3. If `data_profile` is missing:
+   - Read the (now-existing) schema dump.
+   - Determine appropriate profiling queries based on the CDM type.
+   - Write R profiling code and call `run_profiler(db_id="<id>", code=…)`.
+4. Log onboarding results to `coordinator_log.md` tagged with the `db_id`.
+5. If onboarding fails for one DB, mark it `status: "failed"` in
+   `agent_state.json` and drop it from later phases. Other DBs continue.
+
+After iterating every DB, check that each RUN / RUN_AUTO_ONBOARD DB now has a
+conventions file and log its path for sub-agents.
+
+This phase is skipped entirely for public-datasets-only runs (no `db_triage.json`).
 
 ### Phase 1: Literature Discovery
 - **Goal:** Find causal questions with evidence gaps worth filling
@@ -155,7 +244,7 @@ If a database was configured in your initial prompt:
 
 **Online mode:**
 1. For each approved protocol with a `protocol_NN_analysis.R` file:
-   a. Launch an execution worker that runs the R script via `execute_r()`.
+   a. Launch an execution worker that runs the R script via `execute_r(db_id, code)`.
    b. The worker executes the full script and verifies that
       `protocol_NN_results.json` was created in the protocols/ directory.
    c. The worker checks for publication output files (table1.html,
@@ -175,28 +264,107 @@ If a database was configured in your initial prompt:
       - `02_evidence_gaps.md`
    d. The worker writes `protocols/protocol_NN_report.md`.
    e. Report-writing workers need only `Read,Write,Edit` tools.
+3. **Render each accepted report to PDF and Word.** After the report-writing
+   worker's output is accepted (either first-pass or after revisions), run
+   Quarto from Bash to produce shareable copies alongside the markdown source.
+   The working directory must be the per-DB protocols folder so the PNG
+   references in the report resolve correctly:
+   ```bash
+   cd results/{ta}/{db_id}/protocols && \
+     quarto render protocol_NN_report.md --to pdf --quiet && \
+     quarto render protocol_NN_report.md --to docx --quiet
+   ```
+   Produces `protocol_NN_report.pdf` and `protocol_NN_report.docx` next to
+   the markdown. If `quarto` is not on PATH, log a warning to
+   `coordinator_log.md` and skip — the markdown remains the authoritative
+   source and the user can render manually.
+   **Pre-requisite:** PDF rendering needs TinyTeX or a system LaTeX; DOCX
+   does not. If the PDF step fails but DOCX succeeds, keep the DOCX.
+   **Why PNG embedding matters here:** the report must reference `.png`
+   figures (per REPORT_WRITER.md), not `.pdf`. Quarto can embed PNGs into
+   both PDF and DOCX; it cannot embed PDFs into DOCX cleanly. WORKER.md
+   already requires analysis scripts to save every figure as both formats.
 
 **Offline mode:**
-1. Write `{results_dir}/NEXT_STEPS.md` with instructions for the user:
-   - List all protocol analysis scripts that need to be run
-   - Explain that each script saves a `_results.json` file
-   - Tell the user to re-run with `--resume-reports` using the **exact
-     `run.sh` syntax** (positional therapeutic area, `--db-config`, etc.):
-     ```
-     ./run.sh "{therapeutic_area}" --db-config {db_config_path} --resume-reports
-     ```
-     Do NOT invent flags like `--therapeutic-area` or `--database` — these
-     do not exist. The therapeutic area is always the first positional argument.
+1. Write `{results_dir}/NEXT_STEPS.md` with instructions for the user.
+   The resume command MUST be the literal `./run.sh` invocation below —
+   do NOT invent alternative flags (no `--therapeutic-area`, no
+   `--results-dir`, no `python3 run.sh …`). Copy this exact template:
+
+   ```bash
+   cd /path/to/AutoTTE
+   ./run.sh "<therapeutic_area>" --dbs <db_id_1>,<db_id_2>,... --resume-reports
+   ```
+
+   Substitute `<therapeutic_area>` with the run's therapeutic area string
+   and `<db_id_...>` with the same comma-separated list the user passed
+   originally. For a single-DB run, the list is just one id. If the
+   original run used `--db-config`, the resume command should still use
+   `--dbs` with the resolved id (the two flags are equivalent after
+   triage).
+
+   The NEXT_STEPS.md body should also:
+   - List all protocol analysis scripts that need to be run, with exact
+     `Rscript results/{ta}/{db_id}/protocols/protocol_NN_analysis.R`
+     commands.
+   - Explain that each script saves `protocol_NN_results.json` plus
+     figure `.pdf`/`.png` pairs and a `protocol_NN_table1.html` sibling.
+   - Tell the user to copy the results files back into the same per-DB
+     `{db_id}/protocols/` folder before running the resume command.
+
+4. Write a separate `RUN_INSTRUCTIONS.md` inside the per-DB `protocols/`
+   folder. This file travels with the analysis scripts to the secure
+   machine and is the one a human will read when running them. Cover:
+   - The required ODBC DSN / driver (from `connection.r_code`).
+   - The R package install list (DBI, odbc or duckdb, dplyr, WeightIt,
+     cobalt, survival, survminer, EValue, gtsummary, gt, jsonlite,
+     ggplot2, grid, gridExtra, smd).
+   - Two equivalent run modes: `Rscript` from a shell in the folder, or
+     `setwd()` + `source()` from interactive R / RStudio. Tell the user
+     to restart R between protocols so stale `con` / `results` do not
+     leak between scripts.
+   - What files appear next to each script on success.
+   - Where to copy results back in the AutoTTE worktree.
+   - A short troubleshooting section for the common failures:
+     missing DSN, `library(odbc)` not loaded, `smd` missing, stale
+     `shutdown = TRUE` copy.
 2. Set `current_phase` to `"awaiting_results"` in agent_state.json.
 3. Log this in coordinator_log.md and stop the pipeline.
 
 **Resume mode (--resume-reports):**
 When the coordinator prompt says "Resume mode: REPORTS_ONLY":
 1. Skip Phases 0-3.
-2. Check for `protocol_NN_results.json` files in the protocols/ directory.
+2. Check for `protocol_NN_results.json` files in each per-DB `{db_id}/protocols/` folder (i.e., `$RESULTS_DIR/*/protocols/`).
 3. For each results file found, launch a report-writing worker.
-4. If some protocols have no results file, log a warning and skip them.
-5. Then proceed to the Executive Summary phase.
+4. After each accepted report, render it to PDF and Word (see step 3 of the
+   online mode flow above).
+5. If some protocols have no results file, log a warning and skip them.
+6. Then proceed to the Executive Summary phase.
+
+**Resume mode (--resume-protocols):**
+When the coordinator prompt says "Resume mode: PROTOCOLS_ONLY":
+1. Skip Phases 0, 1, and 2. `run.sh` has already validated that
+   `01_literature_scan.md`, `02_evidence_gaps.md`, `01_02_review.md`, and
+   per-DB `{db_id}/03_feasibility.md` + `03_review.md` exist, and has
+   archived any previous `{db_id}/protocols/` to `protocols_pre_<ts>/`.
+   The target `protocols/` folder is empty and ready.
+2. For each DB in `db_triage.json` with disposition `RUN` or
+   `RUN_AUTO_ONBOARD`, launch a Phase 3 protocol-writing worker (read
+   `WORKER.md`). Point the worker at:
+   - the per-DB `{db_id}/03_feasibility.md` (input)
+   - the shared `01_literature_scan.md` and `02_evidence_gaps.md` (input)
+   - `{db_id}/protocols/` as the destination (output)
+   Emphasize the WORKER.md script-shape rules (main()-scoped
+   connection, glue::glue_sql, inline save_fig, no project-root shim,
+   no top-level tryCatch).
+3. Launch a protocol reviewer per DB (read `REVIEW.md`). Revise under
+   the normal revision guardrails (max 3 revisions per phase per DB).
+4. Fall through to Phase 4 per the existing flow:
+   - Online DBs: execute protocols via `execute_r(db_id, code)`, then
+     launch report writers and render PDF/DOCX.
+   - Offline DBs: write a fresh `NEXT_STEPS.md` and transition to
+     `awaiting_results`.
+5. Finish with the Executive Summary phase.
 
 ### Final: Executive Summary
 - **Goal:** Synthesize everything into a summary document
@@ -401,24 +569,73 @@ consider it a credible starting point.
 
 ## State Tracking
 
-Maintain `{results_dir}/agent_state.json` with:
+Maintain `{results_dir}/agent_state.json` with a single schema that fits all
+three run shapes (public-datasets-only, single-DB, multi-DB). The `dbs` object
+is empty for public-datasets-only runs, has one entry for single-DB runs, and
+has multiple entries for multi-DB runs.
 
 ```json
 {
   "therapeutic_area": "...",
   "study_description": "",
-  "database": {"id": "...", "name": "...", "cdm": "...", "engine": "...", "mode": "online|offline"},
   "current_phase": "discovery|feasibility|protocol|execution|reporting|awaiting_results|summary|done",
-  "revision_counts": {"discovery": 0, "feasibility": 0, "protocol": 0},
+  "shared": {
+    "discovery": {"status": "pending|accepted|revising", "revision_count": 0}
+  },
+  "dbs": {
+    "<db_id>": {
+      "mode": "online|offline",
+      "phase": "onboarding|feasibility|protocol|execution|reporting|awaiting_results|done",
+      "status": "pending|running|paused|failed|skipped",
+      "revision_counts": {"feasibility": 0, "protocol": 0},
+      "protocols": 0,
+      "protocols_completed": 0,
+      "reason": "..."
+    }
+  },
   "backtrack_count": 0,
   "total_sub_agents_launched": 0,
   "history": [
-    {"phase": "...", "action": "...", "reason": "...", "timestamp": "..."}
+    {"phase": "...", "db_id": "...", "action": "...", "reason": "...", "timestamp": "..."}
   ]
 }
 ```
 
-Update this after every sub-agent completes.
+Field notes:
+
+- `shared.discovery` tracks the Phase 1 literature work, which runs once
+  regardless of how many DBs are selected.
+- Each `dbs` entry uses the DB id as its key. `status: "skipped"` means `run.sh`
+  excluded it at triage time (e.g., offline with no profile); `reason` explains
+  why. `status: "failed"` means Phase 0 or a later phase exceeded the revision
+  guardrail for this DB.
+- `history` entries include a `db_id` when the event was per-DB, omitted when
+  shared.
+
+Example — multi-DB run mid-flight:
+
+```json
+{
+  "therapeutic_area": "atrial fibrillation",
+  "current_phase": "reporting",
+  "shared": {
+    "discovery": {"status": "accepted", "revision_count": 1}
+  },
+  "dbs": {
+    "nhanes":   {"mode": "online",  "phase": "reporting", "status": "running",
+                 "revision_counts": {"feasibility": 0, "protocol": 1},
+                 "protocols": 3, "protocols_completed": 2},
+    "mimic_iv": {"mode": "offline", "phase": "awaiting_results", "status": "paused",
+                 "protocols": 2, "protocols_completed": 0},
+    "foo":      {"status": "skipped", "reason": "offline_no_profile"}
+  },
+  "backtrack_count": 0,
+  "total_sub_agents_launched": 14,
+  "history": []
+}
+```
+
+Update this file after every sub-agent completes.
 
 ## Handling Previous Runs
 

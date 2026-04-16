@@ -1,19 +1,40 @@
 {
   "therapeutic_area": "atrial fibrillation",
-  "protocol_target": "cdw",
   "current_phase": "done",
-  "revision_counts": {"discovery": 0, "feasibility": 0, "protocol": 0},
+  "shared": {
+    "discovery": {"status": "accepted", "revision_count": 0}
+  },
+  "dbs": {
+    "synthetic_pcornet": {
+      "mode": "online",
+      "phase": "feasibility",
+      "status": "failed",
+      "revision_counts": {"feasibility": 0, "protocol": 0},
+      "protocols": 0,
+      "protocols_completed": 0,
+      "reason": "All 6 questions infeasible. 500-patient synthetic test dataset."
+    },
+    "nhanes": {
+      "mode": "online",
+      "phase": "done",
+      "status": "running",
+      "revision_counts": {"feasibility": 0, "protocol": 0},
+      "protocols": 1,
+      "protocols_completed": 1,
+      "reason": "Protocol 01 completed. HR=1.07 (0.57-2.02), p=0.84. Prevalent-user design with null result."
+    }
+  },
   "backtrack_count": 0,
-  "total_sub_agents_launched": 8,
+  "total_sub_agents_launched": 10,
   "history": [
-    {"phase": "init", "action": "initialize", "reason": "Starting fresh pipeline for atrial fibrillation targeting CDW", "timestamp": "2026-04-06T00:00:00Z"},
-    {"phase": "discovery", "action": "worker_complete", "reason": "Literature discovery completed. >70 PMIDs, 7 questions, three-pass strategy.", "timestamp": "2026-04-06T00:15:00Z"},
-    {"phase": "discovery", "action": "reviewer_complete", "reason": "Reviewer verified PMIDs, found BRAIN-AF/ASPIRE, confirmed no-TTE claims. Q1-Q4 approved.", "timestamp": "2026-04-06T00:30:00Z"},
-    {"phase": "feasibility", "action": "worker_complete", "reason": "Q3 and Q4 FEASIBLE, Q1 and Q2 PARTIALLY FEASIBLE.", "timestamp": "2026-04-06T00:45:00Z"},
-    {"phase": "protocol", "action": "protocol_01_complete", "reason": "Protocol 1 (Apixaban vs Rivaroxaban in AF+CKD) accepted.", "timestamp": "2026-04-06T01:00:00Z"},
-    {"phase": "protocol", "action": "protocol_02_complete", "reason": "Protocol 2 (Early Rhythm vs Rate Control in elderly >=80) accepted.", "timestamp": "2026-04-07T00:00:00Z"},
-    {"phase": "protocol", "action": "protocol_03_complete", "reason": "Protocol 3 (OAC vs No OAC at CHA2DS2-VASc=1) accepted after revision.", "timestamp": "2026-04-07T00:30:00Z"},
-    {"phase": "protocol", "action": "reviewer_complete", "reason": "P01 ACCEPT, P02 ACCEPT, P03 REVISE (minor). Coordinator applied fix.", "timestamp": "2026-04-07T01:00:00Z"},
-    {"phase": "summary", "action": "summary_complete", "reason": "Executive summary written. Pipeline complete.", "timestamp": "2026-04-07T01:30:00Z"}
+    {"phase": "init", "action": "archived_prior_run", "timestamp": "2026-04-14T16:30:00"},
+    {"phase": "onboarding", "action": "verified", "timestamp": "2026-04-14T16:31:00"},
+    {"phase": "discovery", "action": "accepted", "reason": "49 PMIDs, 7 questions, top 3 at gap score 8", "timestamp": "2026-04-14T16:55:00"},
+    {"phase": "feasibility", "db_id": "synthetic_pcornet", "action": "infeasible", "timestamp": "2026-04-14T17:10:00"},
+    {"phase": "feasibility", "db_id": "nhanes", "action": "pivot", "reason": "Prevalent AC→mortality in CKD", "timestamp": "2026-04-14T17:20:00"},
+    {"phase": "protocol", "db_id": "nhanes", "action": "accepted", "timestamp": "2026-04-14T17:40:00"},
+    {"phase": "execution", "db_id": "nhanes", "action": "completed", "reason": "HR=1.07 (0.57-2.02), p=0.84", "timestamp": "2026-04-14T17:50:00"},
+    {"phase": "reporting", "db_id": "nhanes", "action": "completed", "timestamp": "2026-04-14T18:00:00"},
+    {"phase": "summary", "action": "completed", "reason": "Executive summary written. Pipeline complete.", "timestamp": "2026-04-14T18:10:00"}
   ]
 }

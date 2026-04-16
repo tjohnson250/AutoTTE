@@ -251,48 +251,124 @@ class RSession:
 
 
 # ---------------------------------------------------------------------------
-# Global state
+# SessionRegistry — holds N configs and N lazy-initialized sessions keyed by db_id
 # ---------------------------------------------------------------------------
 
-_config: dict = {}
-_mode_override: str = ""
-_session = RSession()
 
+class SessionRegistry:
+    """Holds YAML configs + R sessions for any number of DBs, keyed by id.
 
-def _ensure_connected() -> dict | None:
-    """Lazily start and connect the R session.
-
-    Returns an error dict if offline or connection fails, otherwise None.
+    Sessions are created lazily on first access via get_session(). Configs
+    are loaded eagerly so unknown ids can be rejected at startup.
     """
-    if not is_online(_config, _mode_override):
-        db_name = _config.get("name", _config.get("id", "unknown"))
+
+    def __init__(self) -> None:
+        self._configs: dict[str, dict] = {}
+        self._sessions: dict[str, RSession] = {}
+        self._mode_overrides: dict[str, str] = {}
+
+    def load_configs(self, config_paths: list[str]) -> None:
+        """Load every config path and register by its id field.
+
+        Atomic on failure: if any config raises (file missing, malformed YAML,
+        missing id, or duplicate id across the batch or against already-loaded
+        entries), no new configs are added to the registry.
+        """
+        new_configs: dict[str, dict] = {}
+        for path in config_paths:
+            cfg = load_config(path)
+            db_id = cfg.get("id")
+            if not db_id:
+                raise ValueError(f"Config {path!r} missing 'id' field.")
+            if db_id in self._configs or db_id in new_configs:
+                raise ValueError(
+                    f"Duplicate DB id {db_id!r} across configs; ids must be unique."
+                )
+            new_configs[db_id] = cfg
+        self._configs.update(new_configs)
+
+    def db_ids(self) -> list[str]:
+        return list(self._configs.keys())
+
+    def get_config(self, db_id: str) -> dict:
+        if db_id not in self._configs:
+            raise KeyError(
+                f"Unknown db_id {db_id!r}. Known: {sorted(self._configs)}"
+            )
+        return self._configs[db_id]
+
+    def has_session(self, db_id: str) -> bool:
+        return db_id in self._sessions
+
+    def get_session(self, db_id: str) -> "RSession":
+        if db_id not in self._configs:
+            raise KeyError(
+                f"Unknown db_id {db_id!r}. Known: {sorted(self._configs)}"
+            )
+        if db_id not in self._sessions:
+            self._sessions[db_id] = RSession()
+        return self._sessions[db_id]
+
+    def drop_session(self, db_id: str) -> None:
+        """Stop and remove a session (used after a crash to force restart)."""
+        sess = self._sessions.pop(db_id, None)
+        if sess is not None:
+            sess.stop()
+
+    def set_mode_override(self, db_id: str, mode: str) -> None:
+        self._mode_overrides[db_id] = mode
+
+    def get_mode_override(self, db_id: str) -> str:
+        return self._mode_overrides.get(db_id, "")
+
+
+# ---------------------------------------------------------------------------
+# Global registry (used by MCP tools)
+# ---------------------------------------------------------------------------
+
+_registry = SessionRegistry()
+
+
+def _ensure_connected(db_id: str) -> dict | None:
+    """Lazily start and connect the R session for *db_id*.
+
+    Returns an error dict if the id is unknown, offline, or the connection
+    fails; otherwise None.
+    """
+    try:
+        config = _registry.get_config(db_id)
+    except KeyError:
+        return {"error": f"Unknown db_id {db_id!r}. Known: {sorted(_registry.db_ids())}"}
+
+    mode_override = _registry.get_mode_override(db_id)
+    if not is_online(config, mode_override):
+        db_name = config.get("name", db_id)
         return {
             "error": (
-                f"Database '{db_name}' is offline. "
-                "Set online: true in config or use --mode online."
+                f"Database '{db_name}' ({db_id}) is offline. "
+                "Set online: true in its YAML or pass --mode online."
             )
         }
 
-    if _session.connected:
-        return None  # Already connected
+    session = _registry.get_session(db_id)
+    if session.connected:
+        return None
 
-    # Start session if not running
-    if _session._proc is None:
+    if session._proc is None:
         try:
-            _session.start()
+            session.start()
         except FileNotFoundError:
             return {"error": "R executable not found. Ensure R is installed and on PATH."}
         except Exception as exc:
-            return {"error": f"Failed to start R session: {exc}"}
+            return {"error": f"Failed to start R session for {db_id}: {exc}"}
 
-    # Establish DB connection
-    r_code = get_connection_code(_config)
+    r_code = get_connection_code(config)
     if not r_code:
-        return {"error": "No connection.r_code configured."}
+        return {"error": f"No connection.r_code configured for {db_id}."}
 
-    result = _session.connect_db(r_code)
+    result = session.connect_db(r_code)
     if not result.get("success", False):
-        return {"error": f"DB connection failed: {result.get('stderr', '')}"}
+        return {"error": f"DB connection failed for {db_id}: {result.get('stderr', '')}"}
 
     return None
 
@@ -303,34 +379,35 @@ def _ensure_connected() -> dict | None:
 
 
 @mcp.tool()
-async def execute_r(code: str) -> str:
-    """Execute arbitrary R code in the persistent R session.
+async def execute_r(db_id: str, code: str) -> str:
+    """Execute arbitrary R code in the persistent R session for *db_id*.
 
     Args:
+        db_id: The database id (e.g. 'nhanes', 'mimic_iv').
         code: R code to execute.
     """
-    err = _ensure_connected()
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
-    result = _session.execute(code)
-    return json.dumps(
-        {
-            "stdout": truncate_output(result["stdout"]),
-            "stderr": truncate_output(result["stderr"]),
-            "success": result["success"],
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(code)
+    return json.dumps({
+        "stdout": truncate_output(result["stdout"]),
+        "stderr": truncate_output(result["stderr"]),
+        "success": result["success"],
+    })
 
 
 @mcp.tool()
-async def query_db(sql: str) -> str:
-    """Run a SQL query via DBI and return results (up to 50 rows).
+async def query_db(db_id: str, sql: str) -> str:
+    """Run a SQL query against *db_id* via DBI and return results (up to 50 rows).
 
     Args:
+        db_id: The database id.
         sql: SQL query string.
     """
-    err = _ensure_connected()
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
@@ -347,23 +424,22 @@ local({{
   cat("DATA_END\\n")
 }})
 """
-    result = _session.execute(r_code)
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
     if not result["success"]:
         return json.dumps({"error": result["stderr"], "stdout": result["stdout"]})
 
-    return json.dumps(
-        {
-            "output": result["stdout"],
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": True,
-        }
-    )
+    return json.dumps({
+        "output": result["stdout"],
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": True,
+    })
 
 
 @mcp.tool()
-async def list_tables() -> str:
-    """List all tables in the connected database with row counts."""
-    err = _ensure_connected()
+async def list_tables(db_id: str) -> str:
+    """List all tables in the connected database for *db_id* with row counts."""
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
@@ -380,24 +456,24 @@ local({
   cat(format(.df, row.names=FALSE), "\n")
 })
 """
-    result = _session.execute(r_code)
-    return json.dumps(
-        {
-            "stdout": truncate_output(result["stdout"]),
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": result["success"],
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
+    return json.dumps({
+        "stdout": truncate_output(result["stdout"]),
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": result["success"],
+    })
 
 
 @mcp.tool()
-async def describe_table(table: str) -> str:
-    """Return column info and sample values for *table* (LIMIT 5).
+async def describe_table(db_id: str, table: str) -> str:
+    """Return column info and sample values for *table* in *db_id* (LIMIT 5).
 
     Args:
+        db_id: The database id.
         table: Table name to describe.
     """
-    err = _ensure_connected()
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
@@ -411,28 +487,28 @@ local({{
   print(.sample)
 }})
 """
-    result = _session.execute(r_code)
-    return json.dumps(
-        {
-            "stdout": truncate_output(result["stdout"]),
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": result["success"],
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
+    return json.dumps({
+        "stdout": truncate_output(result["stdout"]),
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": result["success"],
+    })
 
 
 @mcp.tool()
-async def dump_schema() -> str:
-    """Introspect the full DB schema and write it to the configured schema_dump path."""
-    err = _ensure_connected()
+async def dump_schema(db_id: str) -> str:
+    """Introspect *db_id* schema and write it to its configured schema_dump path."""
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
-    schema_path = _config.get("schema_dump", "")
-    engine = _config.get("engine", "").lower()
+    config = _registry.get_config(db_id)
+    schema_path = config.get("schema_dump", "")
+    engine = config.get("engine", "").lower()
 
     if not schema_path:
-        return json.dumps({"error": "No schema_dump path configured."})
+        return json.dumps({"error": f"No schema_dump path configured for {db_id}."})
 
     if engine == "duckdb":
         r_code = f"""
@@ -477,32 +553,32 @@ local({{
 }})
 """
 
-    result = _session.execute(r_code)
-    return json.dumps(
-        {
-            "stdout": result["stdout"],
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": result["success"],
-            "schema_path": schema_path,
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
+    return json.dumps({
+        "stdout": result["stdout"],
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": result["success"],
+        "schema_path": schema_path,
+    })
 
 
 @mcp.tool()
-async def run_profiler(code: str) -> str:
-    """Run agent-provided profiling R code, capturing output to the data_profile path.
+async def run_profiler(db_id: str, code: str) -> str:
+    """Run agent-provided profiling R code for *db_id*, capturing to its data_profile path.
 
     Args:
-        code: R profiling code to execute.  Output is captured via sink() to
-              the configured data_profile path.
+        db_id: The database id.
+        code: R profiling code to execute.
     """
-    err = _ensure_connected()
+    err = _ensure_connected(db_id)
     if err:
         return json.dumps(err)
 
-    profile_path = _config.get("data_profile", "")
+    config = _registry.get_config(db_id)
+    profile_path = config.get("data_profile", "")
     if not profile_path:
-        return json.dumps({"error": "No data_profile path configured."})
+        return json.dumps({"error": f"No data_profile path configured for {db_id}."})
 
     r_code = f"""
 local({{
@@ -517,15 +593,14 @@ local({{
   cat("Profile written to {profile_path}\\n")
 }})
 """
-    result = _session.execute(r_code)
-    return json.dumps(
-        {
-            "stdout": result["stdout"],
-            "stderr": result["stderr"] if result["stderr"].strip() else None,
-            "success": result["success"],
-            "profile_path": profile_path,
-        }
-    )
+    session = _registry.get_session(db_id)
+    result = session.execute(r_code)
+    return json.dumps({
+        "stdout": result["stdout"],
+        "stderr": result["stderr"] if result["stderr"].strip() else None,
+        "success": result["success"],
+        "profile_path": profile_path,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -533,19 +608,27 @@ local({{
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    global _config, _mode_override
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="R Executor MCP Server")
-    parser.add_argument("--config", required=True, help="Path to database config YAML")
+    parser.add_argument(
+        "--config",
+        required=True,
+        action="append",
+        help="Path to a database config YAML. Repeat to serve multiple DBs.",
+    )
     parser.add_argument(
         "--mode",
         choices=["online", "offline"],
         default="",
-        help="Override online/offline mode from config",
+        help="Override online/offline mode from every config uniformly.",
     )
-    args = parser.parse_args()
-    _config = load_config(args.config)
-    _mode_override = args.mode
+    args = parser.parse_args(argv)
+
+    _registry.load_configs(args.config)
+    if args.mode:
+        for db_id in _registry.db_ids():
+            _registry.set_mode_override(db_id, args.mode)
+
     mcp.run()
 
 

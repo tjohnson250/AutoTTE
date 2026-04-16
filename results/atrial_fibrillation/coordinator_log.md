@@ -1,120 +1,127 @@
-# Coordinator Log — Atrial Fibrillation (CDW Target)
+# Coordinator Log — Atrial Fibrillation (Multi-DB)
 
-## 2026-04-06 — Initialization
+## 2026-04-14 — Run Initialization
 
-- **Therapeutic area:** Atrial fibrillation
-- **Protocol target:** CDW (PCORnet CDM on MS SQL Server)
-- **Results directory:** results/atrial_fibrillation
-- **Prior run:** Archived to `atrial_fibrillation_pre_20260406` earlier. Current directory was empty (just protocols/ subdir). Starting fresh.
-- **Action:** Initializing state files and launching Phase 1 (literature discovery).
+**Action:** Archived prior run to `atrial_fibrillation_pre_20260414`.
 
-## 2026-04-06 — Phase 1: Literature Discovery Worker Complete
+The prior run was a single-DB run targeting only `synthetic_pcornet`. This new
+run targets both `synthetic_pcornet` and `nhanes` per `db_triage.json`.
 
-- **Sub-agent:** Worker #1 (literature discovery)
-- **Output files:** `01_literature_scan.md`, `02_evidence_gaps.md`
-- **Assessment:** All acceptance criteria met:
-  - >70 unique PMIDs cited across 12+ broad searches
-  - 7 candidate PICO questions, all framed as causal contrasts
-  - 4 questions with gap scores >= 7 (top: OAC at CHA2DS2-VASc=1, score 9/10)
-  - Three-pass search strategy fully executed with documented revisions
-  - Gap scores revised iteratively (Q3: 8→7, Q5: 7→5) showing genuine refinement
-  - All "no studies" claims stress-tested with 2+ search strategies
-  - Diverse journal coverage (nephrology, geriatrics, pharmacy, general medicine)
-- **Red flags:** None detected
-- **Decision:** ADVANCE to discovery review
-- **Next:** Launch reviewer to verify PMIDs, check for missed studies, and produce approved questions list
+**DB Triage Summary:**
+- `synthetic_pcornet` (PCORnet Synthetic CDW): disposition=RUN, mode=online, engine=duckdb
+  - Warning: Conventions file missing; protocols may miss DB-specific rules.
+- `nhanes` (NHANES): disposition=RUN, mode=online, engine=duckdb
 
-## 2026-04-06 — Phase 1: Discovery Review Complete
+Both DBs have disposition=RUN (not RUN_AUTO_ONBOARD), so Phase 0 onboarding
+generation is not needed — just verification.
 
-- **Sub-agent:** Reviewer #2 (discovery review)
-- **Output file:** `01_02_review.md`
-- **Assessment:** Reviewer performed genuine verification (not rubber-stamp):
-  - Verified 11 PMIDs: 9 match, 2 discrepancies found (HERA-FIB HR, Campbell prevalence)
-  - Found BRAIN-AF trial (PMID: 41501492) — RCT of rivaroxaban vs placebo in CHA2DS2-VASc 0-1, stopped for futility. Worker missed this.
-  - Found ASPIRE study (PMID: 40113236) — prospective cohort showing null results for underdosing in single-criterion patients. Worker missed this.
-  - Found 2026 LAAC vs DOAC TTE — Q7 gap reduced to 4/10
-  - Stress-tested all "no TTE" claims: all confirmed
-  - Approved Q1-Q4 for feasibility
-- **Corrections applied by coordinator:**
-  1. Fixed HERA-FIB HR (1.84 composite, not 1.98 mortality) in both files
-  2. Fixed Campbell prevalence (17%, not 15%)
-  3. Added BRAIN-AF to literature scan and Q1 justification
-  4. Added ASPIRE study to Q2 with nuance about heterogeneity
-  5. Updated Q7 gap score to 4/10
-- **Decision:** ADVANCE to Phase 2 (feasibility)
-- **Approved questions for feasibility:** Q1 (gap 9), Q2 (gap 8), Q3 (gap 7), Q4 (gap 7)
+---
 
-## 2026-04-06 — Phase 2: Feasibility Assessment Complete
+## Phase 1: Literature Discovery — ACCEPTED
 
-- **Sub-agent:** Worker #3 (feasibility assessment)
-- **Output file:** `03_feasibility.md`
-- **Assessment:** All acceptance criteria met:
-  - All 4 questions assessed with detailed variable mapping to PCORnet CDM tables
-  - Sample size estimates grounded in actual data profile counts (86K AF, 6.6K apixaban, etc.)
-  - ICD-9/10 coverage correctly handled (study period 2016+)
-  - Positivity discussed per question with medication counts
-  - Complete clinical code appendix: RxNorm (SCD+SBD), ICD-10, LOINC, CPT
-  - Key finding: INR LOINC code error caught (30313-1 is arterial hemoglobin, not INR)
-  - Smoking data unusable (99.8% unknown) — documented for all questions
-  - Legacy encounter filtering documented
-- **Feasibility rankings:**
-  1. Q3 (Apixaban vs Rivaroxaban in CKD 3b-5): FEASIBLE — N~2,200-3,700, active comparator
-  2. Q4 (Early Rhythm vs Rate Control ≥80): FEASIBLE — N~9,000-15,000, both arms well-populated
-  3. Q1 (OAC vs No OAC at CHA₂DS₂-VASc=1): PARTIALLY FEASIBLE — treated arm ~2,000-4,000
-  4. Q2 (DOAC Underdosing): PARTIALLY FEASIBLE — underdosed group only ~600-1,000
-- **Decision:** ADVANCE to Phase 3 (protocol generation) for Q3, Q4, Q1
-- **Q2 deferred:** Small underdosed group makes robust causal inference difficult
+**Discovery worker (attempt 1):** Ran out of 15 turns before writing deliverables.
+**Discovery worker (attempt 2):** Completed successfully with 49 PMIDs, 7 ranked
+questions (scores 5-9), three-pass search strategy.
 
-## 2026-04-06/07 — Phase 3: Protocol Generation Complete
+**Reviewer findings:** 3 issues identified —
+1. Liu 2025 (PMID 41121356) direction of effect reversed (worker: "lower mortality",
+   actual: higher mortality RR 1.21). Corrected in Sections 2 and 7.
+2. Missed TTE study PMID 36252244 (apixaban vs rivaroxaban in AF+VHD). Added to
+   Sections 1 and 8. Q1 TTE novelty reduced from 2→1, gap score 9→8.
+3. CLOSURE-AF (PMID 41849741) mischaracterized as "pending" — actually showed LAAC
+   NOT noninferior. Corrected in Section 6.
 
-### Protocol 1: Apixaban vs Rivaroxaban in AF with CKD 3b-5
-- **Sub-agent:** Worker #4
-- **Files:** `protocols/protocol_01.md` (421 lines), `protocols/protocol_01_analysis.qmd` (1852 lines)
-- **Assessment:** All acceptance criteria met. Active-comparator new-user design, dual CKD ascertainment (Dx + eGFR lab), 35 CDW.dbo. refs, ROW_NUMBER (12), legacy filter (4), CONSORT (70), dynamic PS formula, E-value with rare=TRUE, two-part Quarto layout, comprehensive limitations section.
-- **Decision:** ACCEPT
+**Decision:** ACCEPT with corrections applied. Top 3 questions unchanged:
+1. Apixaban vs rivaroxaban in AF + advanced CKD (gap score 8)
+2. Catheter ablation vs AADs in AF + HFpEF (gap score 8)
+3. DOACs vs warfarin in AF + liver cirrhosis (gap score 8)
 
-### Protocol 2: Early Rhythm vs Rate Control in AF Patients Age >= 80
-- **Sub-agent:** Worker #5
-- **Files:** `protocols/protocol_02.md` (288 lines), `protocols/protocol_02_analysis.qmd` (1881 lines)
-- **Assessment:** All acceptance criteria met. Landmark design with 12-month classification window to avoid immortal time bias. 31 CDW.dbo. refs, ROW_NUMBER (9), legacy filter (6), CONSORT (74), comprehensive AAD + rate control RXCUI lists.
-- **Decision:** ACCEPT
+All 7 questions approved for feasibility (Q7 excluded — TTE already exists).
 
-### Protocol 3: OAC vs No OAC at CHA2DS2-VASc = 1/2
-- **Sub-agent:** Worker #6
-- **Files:** `protocols/protocol_03.md` (313 lines), `protocols/protocol_03_analysis.qmd` (1941 lines)
-- **Assessment:** All acceptance criteria met. CHA2DS2-VASc score computed in SQL (27 refs), treated vs untreated design with aggressive IPW adjustment, net clinical benefit analysis (7 refs), grace period ±7 days. 32 CDW.dbo. refs, ROW_NUMBER (10), legacy filter (6).
-- **Decision:** ACCEPT
+---
 
-### Next: Launch protocol reviewer, then executive summary
+## Phase 2: Feasibility — ACCEPTED (with pivot)
 
-## 2026-04-07 — Phase 3: Protocol Review Complete
+### synthetic_pcornet: INFEASIBLE (all 6 questions)
+500-patient synthetic test dataset. Key findings from database queries:
+- 50 AF patients (I48.91 only), 0 DOACs, 0 warfarin, 0 AADs
+- 0 catheter ablations, 0 LAAC procedures
+- 0 advanced CKD (stages 4-5), 0 HFpEF, 0 cirrhosis, 0 dialysis
+- 0 stroke/SE events, 0 major bleeding events
+- Only 27 medications (statins, aspirin, metoprolol, metformin, etc.)
+**Decision:** Mark synthetic_pcornet as failed/infeasible. Drop from later phases.
 
-- **Sub-agent:** Reviewer #7 (protocol review)
-- **Output file:** `protocols/protocol_review.md`
-- **Results:**
-  - **Protocol 1:** ACCEPT — Sound active-comparator new-user design, no immortal time bias
-  - **Protocol 2:** ACCEPT — 12-month landmark design correctly handles immortal time bias
-  - **Protocol 3:** REVISE — Time-zero definition discrepancy (doc said "first qualifying encounter" but SQL evaluates at first AF encounter only)
-- **Coordinator action on P03:** Applied Option A — updated protocol_03.md Section 2.5 to match SQL behavior, added Section 6.7 documenting the limitation
-- **Cross-protocol observations:** All share consistent CDW coding standards, CONSORT diagrams, dynamic PS formulas, E-value analysis, post-Epic sensitivity analyses
-- **Minor shared issue:** ICD-9 codes not included for comorbidity lookback (minimal impact since study starts 2016)
-- **Decision:** All 3 protocols now accepted. ADVANCE to executive summary.
+### nhanes: INFEASIBLE for all 6 original TTE questions
+Cross-sectional survey with no longitudinal follow-up, no procedure codes, no
+medication doses, no new-user designs possible. Key counts (3-cycle pooled):
+- 17,192 adults examined, 421 anticoagulant users (258 warfarin, 69 apixaban, 66 rivaroxaban)
+- 12 anticoagulant users with eGFR < 30 (too small for CKD-specific TTE)
+- ~130 AC users with eGFR < 60
+- Mortality linkage available (up to 6 years, through 12/31/2019)
 
-## 2026-04-07 — Final: Executive Summary Complete
+**Pivot:** NHANES feasibility worker recommended alternative analysis:
+"Prevalent anticoagulant use (DOAC vs warfarin) → all-cause mortality in CKD subgroups"
+using NHANES mortality linkage. This is a prevalent-user design with acknowledged
+limitations, but it's the best this data supports and is clinically relevant to Q1.
 
-- **Sub-agent:** Worker #8 (executive summary)
-- **Output file:** `summary.md`
-- **Pipeline status:** COMPLETE
-- **Total sub-agents launched:** 8 (3 workers, 2 reviewers, 3 protocol workers)
-- **Revision cycles:** 0 (all phases accepted on first pass, with minor coordinator corrections)
-- **Backtracks:** 0
-- **All deliverables produced:**
-  - 01_literature_scan.md — Literature scan (>70 PMIDs)
-  - 02_evidence_gaps.md — 7 ranked causal questions
-  - 01_02_review.md — Discovery review
-  - 03_feasibility.md — CDW feasibility for 4 questions
-  - protocols/protocol_01.md + .qmd — Apixaban vs Rivaroxaban in AF+CKD
-  - protocols/protocol_02.md + .qmd — Rhythm vs Rate Control in elderly >=80
-  - protocols/protocol_03.md + .qmd — OAC at low CHA2DS2-VASc
-  - protocols/protocol_review.md — Protocol review
-  - summary.md — Executive summary
+**Decision:** Proceed to protocol generation for NHANES with the alternative question.
+No questions feasible on ≥2 DBs for replication analysis.
+
+---
+
+## Phase 3: Protocol Generation — ACCEPTED (with corrections)
+
+### nhanes Protocol 01: DOAC vs Warfarin → All-Cause Mortality in CKD (Prevalent-User)
+- Design: Prevalent-user cohort, NHANES 2013-2018 pooled, mortality linkage
+- Population: AC users with eGFR < 60 (~130 participants)
+- Exposure: Current DOAC vs current warfarin
+- Outcome: All-cause mortality (NDI linkage through 12/31/2019)
+- Methods: Survey-weighted IPW Cox PH, WeightIt, cobalt, E-value
+
+**Reviewer verdict: REVISE (3 MUST FIX, 2 SHOULD FIX)**
+1. eGFR missing 1.012 female multiplier → FIXED in code and protocol
+2. Income (INDFMPIR) omitted from PS model → ADDED to ps_candidates
+3. MI history missing from protocol confounder table → ADDED
+4. Unused tbl1_svy survey object → REMOVED
+5. E-value rare flag unconditional → MADE conditional on event rate
+
+All 5 corrections applied by coordinator. Protocol ACCEPTED.
+
+---
+
+## Phase 4: Execution & Reporting — COMPLETE
+
+### Execution
+- **Attempt 1:** Failed — nhanesA factor encoding (RIDSTATR = factor not numeric),
+  MCQ230D type conflict across cycles. Worker found issues but ran out of turns.
+- **Coordinator fixes:** Updated script with `translate=FALSE`, explicit `as.numeric()`,
+  MCQ column selection. Script saved.
+- **Attempt 2:** Succeeded after one in-flight fix (lonely PSU: `survey.lonely.psu="adjust"`).
+  
+**Results:**
+- CONSORT: 17,192 → 391 → 361 → 130 → 129 → **125** final (46 DOAC, 79 warfarin)
+- **HR = 1.07 (95% CI: 0.57-2.02), p = 0.84** — no significant difference
+- 53 deaths (14 DOAC, 39 warfarin), median follow-up 30 months
+- Balance: max SMD 1.056 → 0.125 post-IPW
+- Sensitivity: unadjusted HR = 1.19 (0.60-2.37); E-value = 1.27
+- All publication outputs generated (Table 1, love plot, PS dist, KM, CONSORT)
+
+### Report
+- Written by report worker, all numbers verified against results JSON
+- 5 literature citations with PMIDs
+- Prominent prevalent-user and design limitation caveats
+
+---
+
+## Executive Summary — WRITTEN
+
+Cross-DB synthesis written to `summary.md`. Key conclusions:
+- Neither DB was feasible for the 6 original TTE questions
+- NHANES pivot yielded null result (HR 1.07, p=0.84) — expected given prevalent-user design
+- Synthetic PCORnet dropped (infeasible)
+- Single hypothesis tested — no FDR correction needed
+- Recommendations: use longitudinal claims/EHR databases for these AF questions
+
+**Pipeline complete.** 10 sub-agents launched, 0 backtracks, 0 revision cycles.
+
+---

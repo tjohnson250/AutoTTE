@@ -15,8 +15,12 @@ perform. Focus on that task and do it well.
 - **get_schema** — Get the database schema dump for a configured data source.
 - **get_profile** — Get the data profile for a configured data source.
 - **get_conventions** — Get database-specific conventions (required filters, SQL patterns, etc.).
-- **execute_r** — (Online mode only) Execute R code in a persistent session with DB connection.
-- **query_db** — (Online mode only) Run SQL queries against the connected database.
+- **execute_r(db_id, code)** — (Online mode only) Execute R code in the persistent R session for *db_id*.
+- **query_db(db_id, sql)** — (Online mode only) Run SQL against *db_id*.
+- **list_tables(db_id)** — (Online mode only) List tables in *db_id*.
+- **describe_table(db_id, table)** — (Online mode only) Describe a table in *db_id*.
+- **dump_schema(db_id)** — (Phase 0 only) Write *db_id*'s schema to its configured path.
+- **run_profiler(db_id, code)** — (Phase 0 only) Run profiling code and write *db_id*'s profile.
 - **WebSearch / WebFetch** — For non-PubMed searches (dataset docs, guidelines, etc.)
 - **Bash, Read, Write, Edit** — File I/O and shell access (e.g., running R scripts).
 
@@ -62,6 +66,16 @@ When a study description is present:
 
 When no study description is present, use the therapeutic area alone to guide
 your work (this is the default behavior).
+
+## Single-DB Scope
+
+Feasibility, protocol, execution, and report workers are always scoped to
+exactly ONE database, identified by `db_id` in the coordinator's prompt to
+you. Every r_executor call you make must pass that `db_id` — never omit it,
+never substitute another DB's id, never guess.
+
+If the coordinator did not give you a `db_id`, you are a literature worker
+and r_executor is not available to you.
 
 ## Literature Search Protocol (Three-Pass Strategy)
 
@@ -281,7 +295,7 @@ Always use the `schema_prefix` from the database config to qualify table names.
 ## Online Mode Validation
 
 If the coordinator tells you that you have online database access, you can
-use `execute_r()` and `query_db()` to validate your work:
+use `execute_r(db_id, ...)` and `query_db(db_id, ...)` to validate your work:
 
 1. After writing cohort-building SQL, execute key sections and verify temp
    tables have rows.
@@ -348,8 +362,28 @@ template (`analysis_plan_template_cdw.R`) has reference implementations.
 ### Propensity Score Formula
 
 Build the PS formula dynamically by inspecting the data and dropping
-single-level factors and zero-variance columns before fitting. Small or
-specific cohorts often have single-level factors that crash `weightit()`.
+single-level factors, zero-variance columns, and all-NA columns before
+fitting. Small or specific cohorts often have single-level factors that
+crash `weightit()`.
+
+**Always wrap `sd(...)` comparisons in `isTRUE()`** — if a column is all
+NA, `sd(vals, na.rm = TRUE)` returns `NA`, and `if (NA > 0)` throws
+`missing value where TRUE/FALSE needed`. Correct pattern:
+
+```r
+for (v in ps_vars) {
+  if (!v %in% names(df)) next
+  vals <- df[[v]]
+  if (is.factor(vals) || is.character(vals)) {
+    if (length(unique(na.omit(vals))) >= 2) keep_vars <- c(keep_vars, v)
+  } else {
+    if (isTRUE(sd(vals, na.rm = TRUE) > 0)) keep_vars <- c(keep_vars, v)
+  }
+}
+```
+
+`isTRUE` returns `FALSE` for `NA`, so all-NA columns are silently dropped
+rather than crashing the script.
 
 ### Empty Cohort Guard
 
@@ -376,6 +410,24 @@ publication-quality figures to files. Wrap all figure generation in
 
 When using `evalues.HR()`, specify the `rare` argument (`TRUE` when outcome
 incidence < ~15%). Omitting it causes a runtime error.
+
+**Wrap every E-value call in `tryCatch()`.** The `EValue` package can throw
+`subscript out of bounds` when the confidence interval crosses the null (the
+package's internal indexing assumes one side of the CI is on the null side).
+Skip cleanly rather than letting the error abort the rest of the publication-
+output block. The correct value when the CI crosses the null is 1 by
+definition — record that and move on:
+
+```r
+evalue_result <- tryCatch({
+  EValue::evalues.OR(est = or_point, lo = or_lo, hi = or_hi, rare = FALSE)
+}, error = function(e) {
+  message("E-value calculation skipped: ", conditionMessage(e))
+  NULL
+})
+results$evalue <- if (!is.null(evalue_result)) evalue_result else
+  list(point = 1, ci = 1, note = "CI crosses the null; E-value is 1 by definition.")
+```
 
 ## Publication-Quality Figures and Tables (required)
 
@@ -443,11 +495,48 @@ time-to-event outcome (e.g., `protocol_01_km_stroke.pdf`,
 
 ### Figure specifications
 
-- PDF for vector graphics (main manuscript), PNG at 300 DPI (markdown embedding)
+- **Every figure MUST be saved twice — once as PDF and once as PNG.** The PDF
+  is for manuscript embedding / LaTeX-rendered PDFs; the PNG (300 DPI) is for
+  markdown embedding, HTML, and Word rendering. The coordinator renders
+  `protocol_NN_report.md` to both PDF and DOCX after the report is accepted,
+  and the PNG is the format that survives every rendering path.
+  **Exception:** `.html` tables (`protocol_NN_table1.html`, `_table2.html`)
+  are the only non-dual output — they're reference-linked, not embedded.
 - Standard dimensions: 8x6 inches for most plots, 8x7 for KM with risk
-  tables, 10x12 for CONSORT
+  tables, 10x12 for CONSORT.
 - Use `ggsave()` for ggplot objects; `pdf()`/`png()` + `dev.off()` for
-  grid graphics
+  grid graphics.
+
+**Dual-save helper.** Define this once near the top of the analysis script
+and call it for every figure:
+
+```r
+save_fig <- function(plot_or_fn, basename, width = 8, height = 6) {
+  # plot_or_fn: either a ggplot object OR a zero-arg function that draws
+  #             grid graphics (e.g., CONSORT, love.plot base output).
+  for (ext in c("pdf", "png")) {
+    path <- file.path(out_dir, sprintf("%s.%s", basename, ext))
+    if (ext == "pdf") { grDevices::pdf(path, width = width, height = height) }
+    else              { grDevices::png(path, width = width, height = height, units = "in", res = 300) }
+    tryCatch({
+      if (inherits(plot_or_fn, "ggplot")) print(plot_or_fn) else plot_or_fn()
+    }, finally = grDevices::dev.off())
+  }
+}
+```
+
+Usage:
+
+```r
+save_fig(love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE, stars = "std"),
+         "protocol_01_loveplot")
+
+save_fig(function() grid.newpage() ; render_consort_diagram(consort),
+         "protocol_01_consort", width = 10, height = 12)
+```
+
+CONSORT is the figure that is most often saved as PDF only — use `save_fig`
+for it too. The report embedding expects `protocol_NN_consort.png` to exist.
 
 ### Implementation details
 
@@ -461,9 +550,13 @@ time-to-event outcome (e.g., `protocol_01_km_stroke.pdf`,
 
 **Love plot:**
 - MUST show both pre-weighting AND post-weighting SMDs
-- Call `love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE)`
+- Call `love.plot(weights, threshold = 0.1, abs = TRUE, un = TRUE, stars = "std")`
 - The `un = TRUE` parameter is CRITICAL — without it, pre-weighting SMDs
   appear as NA in both the plot and the JSON results
+- The `stars = "std"` argument silences cobalt's "Standardized mean
+  differences and raw mean differences are present in the same plot" warning
+  and labels the x-axis cleanly. Omit only if every covariate in the balance
+  table is guaranteed to be the same type.
 
 **KM curves:**
 - Use `survminer::ggsurvplot()` with `risk.table = TRUE` and `pval = TRUE`
@@ -482,15 +575,21 @@ in a single `tryCatch()` block after `save_results()`. If any figure
 fails, the JSON results (already saved) are not affected.
 
 After generating figures, add a `figure_paths` key to the results JSON
-listing only the files that were actually generated, then re-save:
+listing only the files that were actually generated. Record BOTH the `.pdf`
+and `.png` paths for every figure so downstream rendering paths (PDF via
+LaTeX, HTML/DOCX via pandoc) each have the format they can embed:
 
 ```r
 results$figure_paths <- list(
-  consort         = "protocol_01_consort.pdf",
-  table1          = "protocol_01_table1.html",
-  love_plot       = "protocol_01_loveplot.pdf",
-  ps_distribution = "protocol_01_ps_dist.pdf",
-  km_curve        = "protocol_01_km.pdf"          # only if time-to-event
+  consort         = list(pdf = "protocol_01_consort.pdf",
+                         png = "protocol_01_consort.png"),
+  table1          = "protocol_01_table1.html",    # single-file: HTML only
+  love_plot       = list(pdf = "protocol_01_loveplot.pdf",
+                         png = "protocol_01_loveplot.png"),
+  ps_distribution = list(pdf = "protocol_01_ps_dist.pdf",
+                         png = "protocol_01_ps_dist.png"),
+  km_curve        = list(pdf = "protocol_01_km.pdf",
+                         png = "protocol_01_km.png")     # only if time-to-event
   # table2, forest_plot, etc. — include only if generated
 )
 ```
@@ -501,20 +600,91 @@ publication output functions.
 
 ## Self-Contained Analysis Scripts
 
-Every analysis script MUST be runnable standalone with `Rscript protocol_NN_analysis.R`.
-The coordinator provides the database connection code from the DB config — embed it
-directly in the script's setup section.
+Every analysis script MUST be runnable standalone with `Rscript protocol_NN_analysis.R`
+from any working directory, AND via `source()` from an R session regardless of
+`getwd()`. The script must be a single `.R` file that can be copied to a secure
+server with no external dependencies beyond R packages.
 
-**Connection preamble pattern:**
+### Script shape: sectioned, not monolithic
+
+Model the script on the old Quarto `.qmd` templates, translated to a plain
+`.R` file. The sections, in order:
+
+1. Header comment (one block: purpose, DB id, engine, design).
+2. Libraries.
+3. `config` list (dates, codes, thresholds — anything a human might tune).
+4. `connect_db()` — a short function that returns `con`. **Paste the
+   YAML's `connection.r_code` body here verbatim.** Also load the engine
+   driver package in libraries above (`library(odbc)` for mssql,
+   `library(duckdb)` for duckdb, etc.). Do not write your own
+   `DBI::dbConnect(...)` in place of the YAML block; some YAMLs wrap
+   connection setup (e.g. `pcornet.synthetic::load_pcornet_database()`
+   produces both CDW and MPI handles).
+5. `build_cohort(con, config)` — returns the analytic data frame. Use
+   `glue::glue_sql()` for parameterized SQL, NOT `sprintf("...%s...")`.
+   See the SQL section below.
+6. `fit_model(df, config)` — returns a list of fitted objects and
+   estimates.
+7. `save_fig(plot_or_fn, basename, width, height)` — inline helper
+   defined right before `save_outputs()`. ~12 lines, stays in the
+   script so the protocol travels as one file.
+8. `save_outputs(fit, df, out_dir)` — writes the JSON, Table 1, CONSORT,
+   love plot, PS distribution, KM curves, etc. Uses `save_fig()` for
+   every figure.
+9. `main()` — the entrypoint. Creates `out_dir`, opens the connection,
+   calls the pipeline, handles errors, saves outputs. **Register
+   `on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)` here,
+   inside `main()`** — not at the top level. That way `on.exit` fires
+   exactly when `main()` returns or errors, which is what `on.exit` is
+   designed for and avoids the "external pointer is not valid" class of
+   bugs caused by unclear top-level lifetime.
+10. A final line that calls `main()` so `Rscript protocol_NN_analysis.R`
+    does the work.
+
+Do NOT wrap the whole script in a single top-level `tryCatch(...)`. Put
+error handling inside `main()` where it's local and readable.
+
+### Fetching the connection code
+
+Call `get_datasource_details(db_id)` from the datasource MCP server.
+Copy the returned `connection.r_code` into `connect_db()` verbatim —
+same function calls, same arguments, same variable name (always `con`).
+
+### Working directory & `out_dir`
+
+The script runs wherever it is placed. `main()` computes `out_dir` as:
+
 ```r
-# ── Database Connection ──
-library(DBI)
-# Connection code from database config:
-[paste the exact connection R code from the coordinator's prompt]
+# out_dir = the directory containing this script, so outputs land
+# next to the script regardless of the caller's working directory.
+script_dir <- function() {
+  m <- grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(m) > 0) return(dirname(normalizePath(sub("--file=", "", m[1]))))
+  for (i in seq_along(sys.frames())) {
+    fr <- sys.frames()[[i]]
+    if (!is.null(fr$ofile)) return(dirname(normalizePath(fr$ofile)))
+  }
+  getwd()
+}
 ```
 
-Do NOT leave the connection as a comment like `# con <- dbs$cdw`. The script
-must create a working `con` object when run standalone.
+No project-root `.mcp.json` hunting, no `setwd()`, no `.project_root`
+variable. If the YAML connection code uses project-root-relative paths
+(e.g. `"databases/data/pcornet_cdw.duckdb"`), the driver handles that
+via its own convention or the user sets `getwd()` appropriately. For
+offline CDW runs (DSN-based), no root is needed.
+
+### ICD-10 code storage: emit both dotted and dotless forms
+
+PCORnet CDM spec says the `DX` column is stored **without periods** (`N1830`,
+`G300`, `S7200`). Some sites keep the periods depending on how the feed was
+loaded (`N18.30`, `G30.0`, `S72.0`). An analysis cannot assume which. If you
+emit only dotted codes, a dotless CDW returns zero matches (silent failure:
+the cohort-build completes, finds zero patients, and the run looks fine
+until you inspect it). If you emit only dotless, a dotted CDW has the same
+problem.
+
+**Always emit both forms.** Two patterns:
 
 **CRITICAL — Table 1 `pivot_longer()` type consistency:** When building
 Table 1 with `pivot_longer()`, every column in the `summarise()` must be the
@@ -522,21 +692,233 @@ same type (character). `N = n()` returns an integer, but `sprintf()` columns
 return character — this type mismatch causes `pivot_longer()` to error. Use
 `N = as.character(n())` so all columns are character before pivoting.
 
-For DuckDB databases, this typically looks like:
 ```r
-library(DBI)
-library(duckdb)
-con <- DBI::dbConnect(duckdb::duckdb(), "databases/data/pcornet_cdw.duckdb")
+# Pattern A — exact code lists (IN clauses).
+expand_icd_codes <- function(codes) unique(c(codes, gsub("\\.", "", codes)))
+ckd_dx_sql <- sql_quote(expand_icd_codes(config$ckd_dx))
+
+# Pattern B — LIKE-prefix builders that also want to match exact codes.
+# Expand both the prefix list and the exact list to dotted+dotless.
 ```
 
-For SQL Server databases:
+For LIKE patterns with no period in the prefix (e.g. `'G30%'`, `'F01%'`) the
+pattern itself is already dot-agnostic because `%` wildcards anything after,
+so you only need both-forms expansion when a period appears *inside* the
+prefix (`'S72.0%'` needs `'S720%'` too) or for exact-match codes.
+
+### SQL: use `glue::glue_sql`, not `sprintf`
+
+Use `glue::glue_sql()` (or DBI parameterized queries) for every SQL
+statement. It quotes safely, supports `{`var`}` for identifiers, and is
+readable. Load `library(glue)` in the libraries block.
+
+Example:
+
 ```r
-library(DBI)
-library(odbc)
-con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+build_cohort <- function(con, config) {
+  flu_codes <- config$flu_cpt_codes
+  t0 <- as.Date(config$study_start)
+  lookback <- t0 - 365
+
+  # Eligible population at time zero.
+  DBI::dbExecute(con, glue::glue_sql("
+    SELECT DISTINCT d.PATID, d.BIRTH_DATE, d.SEX
+    INTO #elig
+    FROM CDW.dbo.DEMOGRAPHIC d
+    WHERE d.BIRTH_DATE <= DATEADD(YEAR, -65, {t0})
+      AND d.SEX IN ('F', 'M')
+      AND EXISTS (
+        SELECT 1 FROM CDW.dbo.ENCOUNTER e
+        WHERE e.PATID = d.PATID
+          AND e.ADMIT_DATE BETWEEN {lookback} AND {t0}
+      )
+  ", .con = con))
+
+  # ... more steps ...
+
+  DBI::dbGetQuery(con, "SELECT * FROM #analytic_cohort")
+}
 ```
 
-Include `on.exit(DBI::dbDisconnect(con))` after the connection to ensure cleanup.
+This is much easier to read, debug, and maintain than equivalent
+`sprintf` with dozens of `%s` placeholders.
+
+### Skeleton example (target shape)
+
+```r
+# ============================================================================
+# Protocol NN: <title>
+# Database: <name> (<db_id>) | Engine: <engine>
+# Design: <one-line design summary>
+# ============================================================================
+
+# -- Dependency preflight ---------------------------------------------
+# Check every required package BEFORE calling library() on any of them.
+# Some packages (notably gtsummary via cardx/cards, which recent
+# gtsummary versions delegate SMD computation to) will prompt
+# interactively to auto-install mid-run if missing — that hangs
+# non-interactive Rscript sessions AND can re-prompt even after a
+# successful install. Fail loudly up front instead.
+.required_pkgs <- c(
+  "DBI", "odbc", "glue", "dplyr",
+  "WeightIt", "cobalt", "survival", "survminer",
+  "EValue", "gtsummary", "gt", "cardx", "cards",
+  "jsonlite", "ggplot2", "grid", "gridExtra", "smd"
+)
+.missing_pkgs <- .required_pkgs[!vapply(.required_pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(.missing_pkgs)) {
+  stop(
+    sprintf(
+      "Missing R packages: %s\nInstall with:\n  install.packages(c(%s))\nThen restart R and re-run this script.",
+      paste(.missing_pkgs, collapse = ", "),
+      paste0('"', .missing_pkgs, '"', collapse = ", ")
+    ),
+    call. = FALSE
+  )
+}
+
+# Belt-and-suspenders: silence any remaining package-level "would you like
+# to install X?" prompts, so the script cannot hang on a surprise rlang or
+# gtsummary check_installed() call mid-run. The preflight above is the
+# primary defense; these options are a secondary guard.
+options(rlang_interactive = FALSE, menu.graphics = FALSE)
+# Print warnings as they happen instead of buffering to the end, so long
+# SQL runs surface issues in near-real-time.
+options(warn = 1)
+
+library(DBI)
+library(odbc)    # pick the driver package from the YAML's engine field
+library(glue)
+library(dplyr)
+library(WeightIt)
+library(cobalt)
+library(survival)
+library(survminer)
+library(EValue)
+library(gtsummary)
+library(gt)
+library(jsonlite)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+
+config <- list(
+  study_start = "2016-09-01",
+  study_end   = "2023-03-31",
+  # ... everything a human would tune ...
+)
+
+connect_db <- function() {
+  # Verbatim from databases/<db_id>.yaml `connection.r_code`.
+  con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
+  con
+}
+
+build_cohort <- function(con, config) {
+  # glue::glue_sql DDL/DML here, returns a data.frame.
+}
+
+fit_model <- function(df, config) {
+  # IPW / Cox / logistic / whatever; returns a list.
+}
+
+save_fig <- function(plot_or_fn, basename, width = 8, height = 6, out_dir = ".") {
+  for (ext in c("pdf", "png")) {
+    path <- file.path(out_dir, sprintf("%s.%s", basename, ext))
+    if (ext == "pdf") grDevices::pdf(path, width = width, height = height)
+    else              grDevices::png(path, width = width, height = height, units = "in", res = 300)
+    tryCatch({
+      if (inherits(plot_or_fn, "ggplot")) print(plot_or_fn) else plot_or_fn()
+    }, finally = grDevices::dev.off())
+  }
+}
+
+save_outputs <- function(fit, df, out_dir) {
+  # Write protocol_NN_results.json + table1.html + figures via save_fig().
+}
+
+script_dir <- function() {
+  m <- grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(m) > 0) return(dirname(normalizePath(sub("--file=", "", m[1]))))
+  for (i in seq_along(sys.frames())) {
+    fr <- sys.frames()[[i]]
+    if (!is.null(fr$ofile)) return(dirname(normalizePath(fr$ofile)))
+  }
+  getwd()
+}
+
+main <- function() {
+  out_dir <- script_dir()
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+  # Fast-resume hook: if AUTOTTE_PUBONLY=1 and we have a checkpoint from a
+  # previous run, skip the expensive SQL + fit and just regenerate
+  # publication outputs. Use this to recover from figure/table failures
+  # (e.g. interactive package prompts) without paying the hours-long
+  # cohort-build + model-fit cost again.
+  state_path <- file.path(out_dir, "protocol_NN_state.rds")
+  if (nzchar(Sys.getenv("AUTOTTE_PUBONLY")) && file.exists(state_path)) {
+    message(sprintf("AUTOTTE_PUBONLY=1 — loading state from %s", state_path))
+    state <- readRDS(state_path)
+    save_outputs(state$fit, state$df, out_dir)
+    message(sprintf("=== protocol_NN publication outputs regenerated (%s) ===", Sys.time()))
+    return(invisible())
+  }
+
+  con <- connect_db()
+  on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
+
+  # Connection smoke test — catches DSN / permission / driver issues in
+  # the first second instead of deep inside a SQL build that might take
+  # minutes before the driver emits its real error.
+  stopifnot(DBI::dbIsValid(con))
+  .smoke <- DBI::dbGetQuery(con, "SELECT 1 AS ok")
+  stopifnot(nrow(.smoke) == 1 && .smoke$ok == 1)
+
+  results <- list(
+    protocol_id = "protocol_NN",
+    execution_timestamp = format(Sys.time(), "%Y-%m-%dT%H:%M:%S"),
+    execution_status = "pending"
+  )
+
+  tryCatch({
+    df  <- build_cohort(con, config)
+    fit <- fit_model(df, config)
+
+    # Checkpoint the expensive state RIGHT AFTER fit_model() and BEFORE
+    # save_outputs(). If publication-output generation errors out
+    # (package prompts, missing LaTeX, cobalt edge cases, etc.) the
+    # user can rerun with AUTOTTE_PUBONLY=1 and skip SQL + fit.
+    saveRDS(list(fit = fit, df = df, config = config), state_path)
+    message(sprintf("State checkpointed to: %s", state_path))
+
+    save_outputs(fit, df, out_dir)
+    results$execution_status <- "success"
+  }, error = function(e) {
+    results$execution_status <<- "error"
+    results$error_message   <<- conditionMessage(e)
+    message(sprintf("ERROR: %s", conditionMessage(e)))
+  })
+
+  jsonlite::write_json(
+    results, file.path(out_dir, "protocol_NN_results.json"),
+    pretty = TRUE, auto_unbox = TRUE
+  )
+  message(sprintf("Results saved to: %s", file.path(out_dir, "protocol_NN_results.json")))
+}
+
+main()
+```
+
+**Rules, restated briefly:**
+
+1. One file per protocol, self-contained (besides R packages).
+2. Connection lives inside `main()`; `on.exit(try(dbDisconnect))` there.
+3. SQL via `glue::glue_sql()`, not `sprintf`.
+4. `out_dir = script_dir()`. No `.mcp.json` lookup, no setwd().
+5. **Checkpoint after `fit_model()` via `saveRDS(list(fit, df, config), state_path)`**, and honor `AUTOTTE_PUBONLY=1` at the top of `main()` to skip SQL+fit and rerun only `save_outputs()` from the checkpoint. Saves hours when publication output fails.
+5. `save_fig()` is inline (stays in the script).
+6. Error handling inside `main()`. No mega-tryCatch wrapping the whole file.
 
 ## Structured Results Output (JSON)
 

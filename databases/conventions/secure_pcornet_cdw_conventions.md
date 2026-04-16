@@ -61,6 +61,41 @@ Oct 2015, `DX_TYPE = '10'` alone is sufficient.
 
 Check the data profile Section 4 to see which years have ICD-9 vs ICD-10 data.
 
+### DX code storage format — DOTTED
+
+This CDW stores the `DX` column **with periods** (`'N18.30'`, `'G30.0'`,
+`'S72.0'`). Verified 2026-04-15: 99.76% of ICD-10 rows contain a period
+(106,245,470 dotted vs 257,510 dotless; the 0.24% dotless are three-
+character roots like `E11` that never carry a period in either convention).
+
+**Rule:** When writing `IN (...)` lists or exact-match comparisons against
+`DX`, always emit dotted codes (e.g. `IN ('N18.30', 'N18.31', ...)`). When
+writing `LIKE` prefixes, include the period where it naturally appears
+(e.g. `LIKE 'S72.0%'` for hip fracture). Do not strip periods.
+
+The `expand_icd_codes()` helper some protocols use to emit both dotted
+and dotless forms is a harmless no-op here but can be dropped in
+site-specific protocols for readability.
+
+### ICD-10-CM code-set updates (CKD example)
+
+ICD-10-CM updates annually. Notable: in the October 2022 release, CKD
+stage 3 was split from the single code `N18.3` into three codes: `N18.30`
+(stage 3 unspecified), `N18.31` (stage 3a), and `N18.32` (stage 3b). This
+CDW accumulates data across the update, so patients coded before Oct 2022
+carry `N18.3` and patients coded after carry `N18.30`/`.31`/`.32`.
+
+**Rule:** When defining a stage-3-to-5 CKD population, the IN list MUST
+include BOTH the legacy and the new codes:
+```sql
+DX IN ('N18.3', 'N18.30', 'N18.31', 'N18.32', 'N18.4', 'N18.5')
+```
+
+The same principle applies to any other condition whose ICD-10-CM coding
+changed during the study period. Before locking in an exact-code IN list,
+check the [ICD-10-CM change logs](https://www.cdc.gov/nchs/icd/icd-10-cm.htm)
+for the code family.
+
 ### Clinical Code Validation (MANDATORY)
 
 Every medication, diagnosis, lab, and procedure code list MUST be validated

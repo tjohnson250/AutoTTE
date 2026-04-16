@@ -7,12 +7,14 @@
 #
 # Usage:
 #   ./run.sh "atrial fibrillation"
-#   ./run.sh "atrial fibrillation" --db-config databases/synthetic_pcornet.yaml
-#   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --db-mode offline
-#   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --resume-reports
-#   ./run.sh "type 2 diabetes" --db-config databases/my_cdw.yaml 75
+#   ./run.sh "atrial fibrillation" --dbs nhanes,mimic_iv
+#   ./run.sh "atrial fibrillation" --dbs all --db-mode offline
+#   ./run.sh "atrial fibrillation" --db-config databases/my_cdw.yaml
+#   ./run.sh "atrial fibrillation" --dbs all --resume-reports
 #   ./run.sh "type 2 diabetes" --study-desc "Parallel group cohort comparing canagliflozin to DPP-4 inhibitors for 3P-MACE"
 #   ./run.sh "type 2 diabetes" --study-desc-file studies/canagliflozin_vs_dpp4i.txt --db-config databases/my_cdw.yaml
+#   ./run.sh --list-dbs
+#   ./run.sh --show-db nhanes
 #
 # Prerequisites:
 #   - Claude Code CLI installed (npm install -g @anthropic-ai/claude-code)
@@ -23,50 +25,66 @@
 
 set -euo pipefail
 
-THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--study-desc \"...\"] [--study-desc-file path] [--db-config <path>] [--db-mode online|offline] [max_turns]}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Parse optional flags
+# Handle discovery subcommands first (do not require a therapeutic area).
+case "${1:-}" in
+  --list-dbs)
+    exec python3 -m tools.db_triage list --project-root "$(pwd)"
+    ;;
+  --show-db)
+    shift
+    [[ -n "${1:-}" ]] || { echo "Usage: --show-db <id>" >&2; exit 2; }
+    exec python3 -m tools.db_triage show "$1" --project-root "$(pwd)"
+    ;;
+esac
+
+THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--dbs <id,id,...>|all] [--db-config <path>] [--db-mode online|offline] [--resume-reports|--resume-protocols] [max_turns]}"
+shift
+
+# Parse optional flags.
 DB_CONFIG=""
+DB_IDS=""
 DB_MODE=""
 STUDY_DESC=""
 STUDY_DESC_FILE=""
 RESUME_REPORTS=false
+RESUME_PROTOCOLS=false
 MAX_TURNS="50"
-SKIP_NEXT=false
-for i in $(seq 2 $#); do
-  if $SKIP_NEXT; then
-    SKIP_NEXT=false
-    continue
-  fi
-  arg="${!i}"
-  case "$arg" in
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --db-config)
-      next_i=$((i + 1))
-      DB_CONFIG="${!next_i}"
-      SKIP_NEXT=true
+      DB_CONFIG="$2"; shift 2
+      ;;
+    --dbs)
+      DB_IDS="$2"; shift 2
+      if [[ -z "$DB_IDS" ]]; then
+        echo "Error: --dbs requires a value (a DB id, CSV list, or 'all')." >&2
+        exit 2
+      fi
       ;;
     --db-mode)
-      next_i=$((i + 1))
-      DB_MODE="${!next_i}"
-      SKIP_NEXT=true
+      DB_MODE="$2"; shift 2
       ;;
     --study-desc)
-      next_i=$((i + 1))
-      STUDY_DESC="${!next_i}"
-      SKIP_NEXT=true
+      STUDY_DESC="$2"; shift 2
       ;;
     --study-desc-file)
-      next_i=$((i + 1))
-      STUDY_DESC_FILE="${!next_i}"
-      SKIP_NEXT=true
+      STUDY_DESC_FILE="$2"; shift 2
       ;;
     --resume-reports)
-      RESUME_REPORTS=true
+      RESUME_REPORTS=true; shift
+      ;;
+    --resume-protocols)
+      RESUME_PROTOCOLS=true; shift
+      ;;
+    [0-9]*)
+      MAX_TURNS="$1"; shift
       ;;
     *)
-      if [[ "$arg" =~ ^[0-9]+$ ]]; then
-        MAX_TURNS="$arg"
-      fi
+      echo "Unknown argument: $1" >&2; exit 2
       ;;
   esac
 done
@@ -86,49 +104,136 @@ if [[ -n "$STUDY_DESC_FILE" ]]; then
   STUDY_DESC="$(cat "$STUDY_DESC_FILE")"
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+if [[ -n "$DB_CONFIG" && -n "$DB_IDS" ]]; then
+  echo "Error: cannot combine --db-config and --dbs. Use one or the other." >&2
+  exit 2
+fi
 
-RESULTS_DIR="results/$(echo "$THERAPEUTIC_AREA" | tr ' ' '_' | tr '[:upper:]' '[:lower:]')"
-mkdir -p "$RESULTS_DIR/protocols"
+if [[ "$RESUME_REPORTS" == "true" && "$RESUME_PROTOCOLS" == "true" ]]; then
+  echo "Error: cannot combine --resume-reports and --resume-protocols." >&2
+  exit 2
+fi
 
-# ---------------------------------------------------------------------------
-# Parse DB config if provided
-# ---------------------------------------------------------------------------
-DB_ID=""
-DB_NAME=""
-DB_CDM=""
-DB_ENGINE=""
-DB_SCHEMA_PREFIX=""
-DB_ONLINE="false"
-
+# Legacy --db-config path: resolve to a single DB id via python.
 if [[ -n "$DB_CONFIG" ]]; then
   if [[ ! -f "$DB_CONFIG" ]]; then
     echo "ERROR: DB config file not found: $DB_CONFIG" >&2
     exit 1
   fi
-
-  # Parse YAML using Python (pyyaml is a dependency)
-  eval "$(python3 -c "
-import yaml, sys
+  DB_IDS=$(python3 -c "
+import sys, yaml
 with open('$DB_CONFIG') as f:
     c = yaml.safe_load(f)
-print(f'DB_ID={c.get(\"id\", \"\")}')
-print(f'DB_NAME=\"{c.get(\"name\", \"\")}\"')
-print(f'DB_CDM={c.get(\"cdm\", \"\")}')
-print(f'DB_ENGINE={c.get(\"engine\", \"\")}')
-print(f'DB_SCHEMA_PREFIX=\"{c.get(\"schema_prefix\", \"\")}\"')
-print(f'DB_ONLINE={str(c.get(\"online\", False)).lower()}')
-")"
+id = c.get('id')
+if not id:
+    sys.stderr.write('Config missing id field\n'); sys.exit(1)
+print(id)
+") || exit 1
+fi
 
-  # Apply mode override
-  if [[ -n "$DB_MODE" ]]; then
-    if [[ "$DB_MODE" == "offline" ]]; then
-      DB_ONLINE="false"
-    elif [[ "$DB_MODE" == "online" ]]; then
-      DB_ONLINE="true"
-    fi
+RESULTS_DIR="results/$(echo "$THERAPEUTIC_AREA" | tr ' ' '_' | tr '[:upper:]' '[:lower:]' | tr -d "'\"\\\\")"
+# Public-datasets-only runs use the flat layout; DB-backed runs nest per-DB.
+mkdir -p "$RESULTS_DIR"
+if [[ -z "$DB_IDS" && -z "$DB_CONFIG" ]]; then
+  mkdir -p "$RESULTS_DIR/protocols"
+fi
+
+# ---------------------------------------------------------------------------
+# Triage: resolve DB_IDS through tools.db_triage and capture disposition.
+# ---------------------------------------------------------------------------
+
+TRIAGE_JSON=""
+if [[ -n "$DB_IDS" ]]; then
+
+  TRIAGE_JSON="$RESULTS_DIR/db_triage.json"
+  if ! python3 -m tools.db_triage triage \
+        --selection "$DB_IDS" \
+        --project-root "$(pwd)" \
+        --mode "${DB_MODE:-}" > "$TRIAGE_JSON" 2> "$RESULTS_DIR/db_triage.err"; then
+    cat "$RESULTS_DIR/db_triage.err" >&2
+    rm -f "$TRIAGE_JSON" "$RESULTS_DIR/db_triage.err"
+    exit 1
   fi
+  rm -f "$RESULTS_DIR/db_triage.err"
+
+  # Print a human-readable summary.
+  python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+for r in rows:
+    tag = {'RUN': '[OK]', 'RUN_AUTO_ONBOARD': '[WARN]', 'SKIP': '[SKIP]'}.get(r['disposition'], '[???]')
+    print(f\"{tag} {r['id']} — {r['effective_mode']}; {r['disposition']}\")
+    if r.get('reason'):
+        print(f\"       reason: {r['reason']}\")
+    for w in r.get('warnings', []):
+        print(f\"       warn: {w}\")
+"
+
+  # Count live DBs (RUN or RUN_AUTO_ONBOARD).
+  LIVE_COUNT=$(python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+print(sum(1 for r in rows if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')))
+")
+  if [[ "$LIVE_COUNT" == "0" ]]; then
+    echo "ERROR: every selected DB was skipped. Nothing to run." >&2
+    exit 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# --resume-protocols: validate phases 1-2 artifacts and archive old protocols.
+# ---------------------------------------------------------------------------
+if [[ "$RESUME_PROTOCOLS" == "true" ]]; then
+  if [[ -z "$TRIAGE_JSON" ]]; then
+    echo "Error: --resume-protocols requires --dbs (no DB selected)." >&2
+    exit 2
+  fi
+
+  # Shared Phase 1 artifacts must exist.
+  for f in "$RESULTS_DIR/01_literature_scan.md" "$RESULTS_DIR/02_evidence_gaps.md"; do
+    if [[ ! -f "$f" ]]; then
+      echo "Error: --resume-protocols requires existing Phase 1 output: $f" >&2
+      exit 1
+    fi
+  done
+
+  # Per-DB Phase 2 artifacts must exist for every live DB.
+  ARCHIVE_TS=$(date +%Y%m%d_%H%M%S)
+  LIVE_IDS=$(python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+print('\n'.join(r['id'] for r in rows if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')))
+")
+  while IFS= read -r db; do
+    [[ -z "$db" ]] && continue
+    feas="$RESULTS_DIR/$db/03_feasibility.md"
+    if [[ ! -f "$feas" ]]; then
+      echo "Error: --resume-protocols requires existing feasibility: $feas" >&2
+      exit 1
+    fi
+    # Archive the existing protocols/ folder so the new Phase 3 run starts clean.
+    proto_dir="$RESULTS_DIR/$db/protocols"
+    if [[ -d "$proto_dir" ]]; then
+      mv "$proto_dir" "${proto_dir}_pre_${ARCHIVE_TS}"
+      echo "Archived $proto_dir → ${proto_dir}_pre_${ARCHIVE_TS}"
+    fi
+    mkdir -p "$proto_dir"
+  done <<< "$LIVE_IDS"
+fi
+
+# Dry-run stage 1: stop after argument parsing.
+if [[ "${AUTOTTE_DRY_RUN:-}" == "1" ]]; then
+  echo "AUTOTTE_DRY_RUN — stopping after parse. DB_IDS='$DB_IDS' DB_CONFIG='$DB_CONFIG' MODE='$DB_MODE'"
+  if [[ -z "$DB_IDS" && -z "$DB_CONFIG" ]]; then
+    echo "Public datasets only."
+  elif [[ -n "$TRIAGE_JSON" && -s "$TRIAGE_JSON" ]]; then
+    echo "triage written to $TRIAGE_JSON"
+  fi
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
@@ -140,50 +245,77 @@ echo " Therapeutic area: $THERAPEUTIC_AREA"
 if [[ -n "$STUDY_DESC" ]]; then
 echo " Study description: (provided, ${#STUDY_DESC} chars)"
 fi
-if [[ -n "$DB_CONFIG" ]]; then
-echo " Database:         $DB_NAME ($DB_ID)"
-echo " CDM:              $DB_CDM"
-echo " Engine:           $DB_ENGINE"
-echo " Mode:             $([ "$DB_ONLINE" = "true" ] && echo "ONLINE" || echo "OFFLINE")"
+if [[ -n "$TRIAGE_JSON" ]]; then
+  echo " Databases:        (see triage above / $TRIAGE_JSON)"
 else
-echo " Data sources:     Public datasets only"
+  echo " Data sources:     Public datasets only"
 fi
 echo " Max turns/sub-agent: $MAX_TURNS"
 echo " Results: $RESULTS_DIR/"
 if [[ "$RESUME_REPORTS" == "true" ]]; then
 echo " Mode:             RESUME REPORTS (skipping Phases 0-3)"
 fi
+if [[ "$RESUME_PROTOCOLS" == "true" ]]; then
+echo " Mode:             RESUME PROTOCOLS (skipping Phases 0-2; regenerating Phase 3)"
+fi
 echo "============================================="
 echo ""
 
 # ---------------------------------------------------------------------------
-# Build MCP session config for online mode
+# Build MCP session config when any selected DB needs online r_executor.
 # ---------------------------------------------------------------------------
+
 MCP_CONFIG_FLAG=""
 cleanup_session_config() {
   rm -f "$SCRIPT_DIR/.mcp-session.json"
 }
 
-if [[ "$DB_ONLINE" == "true" && -n "$DB_CONFIG" ]]; then
-  # Generate session-specific MCP config with r_executor
-  python3 -c "
+ONLINE_YAML_PATHS=""
+if [[ -n "$TRIAGE_JSON" ]]; then
+  ONLINE_YAML_PATHS=$(python3 -c "
 import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+paths = [r['yaml_path'] for r in rows
+         if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')
+         and r['effective_mode'] == 'online']
+print('\n'.join(paths))
+")
+fi
+
+if [[ -n "$ONLINE_YAML_PATHS" ]]; then
+  python3 -c "
+import json, sys
+paths = '''$ONLINE_YAML_PATHS'''.strip().splitlines()
+mode = '${DB_MODE:-}'
 with open('.mcp.json') as f:
     config = json.load(f)
+args = ['tools/r_executor_server.py']
+for p in paths:
+    args += ['--config', p]
+if mode:
+    args += ['--mode', mode]
 config['mcpServers']['r_executor'] = {
     'command': 'python',
-    'args': ['tools/r_executor_server.py', '--config', '$DB_CONFIG'],
-    'env': {}
+    'args': args,
+    'env': {},
 }
 with open('.mcp-session.json', 'w') as f:
     json.dump(config, f, indent=2)
 "
   MCP_CONFIG=".mcp-session.json"
-  trap cleanup_session_config EXIT
-  echo "Generated .mcp-session.json with r_executor for online mode."
-  echo ""
+  if [[ "${AUTOTTE_DRY_RUN:-}" != "2" ]]; then
+    trap cleanup_session_config EXIT
+  fi
+  echo "Generated .mcp-session.json with r_executor for $(echo "$ONLINE_YAML_PATHS" | wc -l | tr -d ' ') online DB(s)."
 else
   MCP_CONFIG=".mcp.json"
+fi
+
+# Dry-run stage 2: stop after session config generation.
+if [[ "${AUTOTTE_DRY_RUN:-}" == "2" ]]; then
+  echo "AUTOTTE_DRY_RUN=2 — stopping after MCP session generation."
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
@@ -195,7 +327,7 @@ CODE_TOOLS="mcp__rxnorm__search_drug,mcp__rxnorm__get_all_related,mcp__rxnorm__g
 FILE_TOOLS="Bash,Read,Write,Edit,WebSearch,WebFetch"
 
 R_EXECUTOR_TOOLS=""
-if [[ "$DB_ONLINE" == "true" ]]; then
+if [[ -n "$ONLINE_YAML_PATHS" ]]; then
   R_EXECUTOR_TOOLS=",mcp__r_executor__execute_r,mcp__r_executor__query_db,mcp__r_executor__list_tables,mcp__r_executor__describe_table,mcp__r_executor__dump_schema,mcp__r_executor__run_profiler"
 fi
 
@@ -205,32 +337,71 @@ REPORT_WRITER_TOOLS="Read,Write,Edit"
 COORDINATOR_TOOLS="Bash,Read,Write,Edit"
 
 # ---------------------------------------------------------------------------
-# Build coordinator prompt
+# Build coordinator prompt context.
 # ---------------------------------------------------------------------------
-DB_CONTEXT=""
-if [[ -n "$DB_CONFIG" ]]; then
-  DB_CONTEXT="
-Database configuration:
-- Config file: $DB_CONFIG
-- Database ID: $DB_ID
-- Database name: $DB_NAME
-- CDM type: $DB_CDM
-- Engine: $DB_ENGINE
-- Schema prefix: $DB_SCHEMA_PREFIX
-- Mode: $([ "$DB_ONLINE" = "true" ] && echo "ONLINE (agents can query the database)" || echo "OFFLINE (agents work from schema dump and data profile)")
 
-When launching sub-agents for this database:
-- Tell workers the database ID ('$DB_ID'), CDM type, engine, and schema prefix.
-- Tell workers to call get_schema('$DB_ID'), get_profile('$DB_ID'), and
-  get_conventions('$DB_ID') from the datasource MCP server to get database
-  details. Do NOT reference hardcoded file paths.
-- Tell workers to read and apply ALL database conventions before writing any
-  SQL or R code. Conventions are hard requirements, not suggestions.
-$([ "$DB_ONLINE" = "true" ] && echo "- Tell workers they have online access and can use execute_r() and query_db()
-  to validate their work against the live database.
-- During Phase 0 (Data Source Onboarding), check if schema dump and data profile
-  exist. If not, use dump_schema() and run_profiler() to generate them." || echo "- Workers do NOT have online database access. They must work from the schema
-  dump and data profile files.")"
+DB_CONTEXT=""
+if [[ -n "$TRIAGE_JSON" ]]; then
+  # Count RUN/RUN_AUTO_ONBOARD entries.
+  LIVE_COUNT=$(python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+print(sum(1 for r in rows if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')))
+")
+
+  if [[ "$LIVE_COUNT" == "1" ]]; then
+    HEADER="Single-DB run"
+  else
+    HEADER="Multi-DB run across $LIVE_COUNT databases"
+  fi
+
+  DB_CONTEXT=$(python3 -c "
+import json
+with open('$TRIAGE_JSON') as f:
+    rows = json.load(f)
+header = '$HEADER'
+lines = [f'{header}.', '']
+lines.append('Selected databases (from db_triage.json):')
+for r in rows:
+    lines.append(
+        f\"  - id={r['id']} name={r['name']!r} cdm={r['cdm']} engine={r['engine']} \"
+        f\"mode={r['effective_mode']} disposition={r['disposition']}\"
+    )
+    if r.get('reason'):
+        lines.append(f\"    reason: {r['reason']}\")
+    for w in r.get('warnings', []):
+        lines.append(f\"    warn: {w}\")
+lines += [
+    '',
+    'Triage file path: ' + '$TRIAGE_JSON',
+    'Read this file at startup to understand per-DB status and mode.',
+    '',
+    'For every sub-agent launch:',
+    '  - Tell workers the exact DB id they are targeting and its CDM/engine/mode.',
+    '  - Tell workers to call get_schema(id), get_profile(id), and get_conventions(id)',
+    '    from the datasource MCP server scoped to their DB id.',
+    '  - Tell workers that any r_executor call (execute_r, query_db, list_tables,',
+    '    describe_table, dump_schema, run_profiler) requires a db_id argument',
+    '    matching the DB they were told to target.',
+    '  - Feasibility, protocol, execution, and report workers each handle exactly',
+    '    one DB. Literature discovery is shared across all DBs (run once).',
+    '',
+    'Output layout:',
+    '  results/{ta}/{db_id}/ — per-DB feasibility, protocols, reports',
+    '  results/{ta}/         — shared literature, summary, coordinator_log, agent_state',
+]
+print('\n'.join(lines))
+")
+fi
+
+# Dry-run stage 3: stop after prompt context is built.
+if [[ "${AUTOTTE_DRY_RUN:-}" == "3" ]]; then
+  echo "AUTOTTE_DRY_RUN=3 — stopping after prompt context build."
+  echo "----- DB_CONTEXT -----"
+  echo "$DB_CONTEXT"
+  echo "----------------------"
+  exit 0
 fi
 
 STUDY_DESC_CONTEXT=""
@@ -287,9 +458,27 @@ the pipeline.
 $([ "$RESUME_REPORTS" = "true" ] && echo "
 RESUME MODE: REPORTS ONLY
 Skip Phases 0-3. The protocols and analysis scripts already exist.
-Check for protocol_NN_results.json files in \$RESULTS_DIR/protocols/.
+Check for protocol_NN_results.json files in \$RESULTS_DIR/*/protocols/
+(iterating every per-DB subdirectory).
 For each results file found, launch a report-writing worker (read REPORT_WRITER.md).
 For each protocol WITHOUT a results file, log a warning and skip it.
 Then produce the executive summary.
+")
+$([ "$RESUME_PROTOCOLS" = "true" ] && echo "
+RESUME MODE: PROTOCOLS ONLY
+Skip Phases 0, 1, and 2. Reuse the existing \$RESULTS_DIR/01_literature_scan.md,
+02_evidence_gaps.md, 01_02_review.md, and per-DB \${db_id}/03_feasibility.md +
+03_review.md. run.sh has already archived any existing protocols/ folder to
+protocols_pre_<ts>/ — the target protocols/ is empty and ready.
+
+For each DB listed in db_triage.json with disposition RUN or RUN_AUTO_ONBOARD:
+  1. Launch a Phase 3 protocol-writing worker (read WORKER.md). Point it at
+     the per-DB 03_feasibility.md and tell it to write fresh protocol files
+     into \$RESULTS_DIR/\${db_id}/protocols/.
+  2. Launch a protocol reviewer per DB (read REVIEW.md). Revise as needed
+     under the normal revision guardrails.
+
+Then fall through to Phase 4 as usual: online DBs execute; offline DBs get a
+fresh NEXT_STEPS.md and pause. Finish with the executive summary.
 ")
 PROMPT

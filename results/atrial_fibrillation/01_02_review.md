@@ -1,229 +1,296 @@
-# Literature Discovery Review — Atrial Fibrillation
+# Review: Literature Discovery — Atrial Fibrillation
 
-**Reviewer verdict: REVISE (minor)**
-**Date:** 2026-04-06
+## Summary Verdict: REVISE
 
-The worker produced a thorough, well-structured literature scan and evidence gap analysis covering >70 PMIDs across RCTs, observational studies, meta-analyses, and guidelines. The three-pass search strategy was executed and documented. However, I identified two factual discrepancies in PMID descriptions, one missed study with potential impact on Q2, and one missed RCT (BRAIN-AF) relevant to Q1. None of these are fatal, but the evidence gap file should be updated before advancing to feasibility.
-
----
-
-## PMID Verification
-
-I verified 11 PMIDs by fetching abstracts from PubMed and comparing them against the worker's descriptions. PMIDs were sampled across landmark RCTs, key observational studies, and newer papers to cover the full range of cited evidence.
-
-| PMID | Paper | Worker's Claim | Abstract Finding | Verdict |
-|------|-------|----------------|------------------|---------|
-| 19717844 | RE-LY (Connolly 2009) | Dabigatran 150mg: lower stroke/SE, similar bleeding; 110mg: similar stroke/SE, lower bleeding | Dabigatran 150mg: 1.11%/yr stroke vs 1.69%/yr warfarin (superior); 110mg: 1.53%/yr (noninferior). Major bleeding: 110mg 2.71% (lower), 150mg 3.11% (similar). N=18,113. | MATCH |
-| 32865375 | EAST-AFNET 4 (Kirchhof 2020) | Early rhythm control reduced composite CV outcome (HR 0.79); N=2,789 | HR 0.79 (3.9 vs 5.0 per 100 PY); N=2,789; stopped early for efficacy. | MATCH |
-| 25770314 | Lip 2015 (Danish cohort) | No benefit from OAC or aspirin at CHA2DS2-VASc 0-1 | CHA2DS2-VASc 0: 0.49/100 PY stroke; with 1 additional risk factor: 1.55/100 PY. Truly low-risk had minimal stroke risk. | MATCH (minor oversimplification; study focused on truly low risk = score 0) |
-| 39867851 | HERA-FIB (Yildirim 2025) | 20.7% under-dosed; underdosing: HR 1.98 for all-cause mortality | 20.7% under-dosed correct. BUT abstract reports HR 1.84 (95% CI 1.55-2.18) for **composite endpoint** (all-cause mortality + stroke + major bleeding + MI), NOT all-cause mortality alone. | **DISCREPANCY** — wrong endpoint and wrong HR magnitude |
-| 37839687 | Fu 2024 (AJKD) | Rivaroxaban and warfarin: higher major bleeding vs apixaban in advanced CKD | Rivaroxaban HR 1.69 (1.33-2.15) and warfarin HR 1.85 (1.59-2.15) for major bleeding vs apixaban in CKD 4/5. N=5,720 (riva vs apix), 12,488 (warf vs apix). | MATCH |
-| 35589174 | Kim 2022 (JACC:CEP) | Early rhythm control benefit ATTENUATES with increasing age | HR 0.80 for <75yr, HR 0.94 (0.87-1.03) for >=75yr. Linear decrease with advancing age. N=31,220. | MATCH (note: study uses >=75 cutoff, not >=80 as Q4 targets) |
-| 37952132 | ARTESiA (Healey 2024) | Apixaban reduced stroke vs aspirin in subclinical AF | HR 0.63 (0.45-0.88) for stroke/SE; major bleeding HR 1.80 (1.26-2.57). N=4,012, mean CHA2DS2-VASc 3.9. | MATCH |
-| 37712551 | Campbell 2024 (Ann Pharmacother) | 15% underdosed; higher mortality (10.9% vs 1.4%) | Abstract shows 17% underdosed (201/1172), not 15%. Mortality 10.9% vs 1.4% correct. Stroke/bleeding NOT significantly different. | **MINOR DISCREPANCY** — 17% not 15% |
-| 37713139 | Burnham 2023 (J Pharm Pract) | No difference in stroke/TIA/MI; small study, baseline differences | N=303. Composite 3.8% vs 1.7% (P=0.28). Not significant. | MATCH |
-| 26223245 | Lip 2015 (Thromb Haemost) | Positive NCB for warfarin vs no treatment at CHA2DS2-VASc = 1 | NCB positive for warfarin vs no treatment at 1-year and 5-year follow-up for patients with 1 risk factor. | MATCH |
-| 41733864 | Gillis 2026 (Int J Clin Pharm) | Scoping review; gaps in dose-comparison and non-dialysis CKD data | 34 studies reviewed. Identifies "limited dose-comparison studies, heterogeneous outcomes and sparse data in non-dialysis patients." | MATCH |
-
-**Summary:** 9/11 PMIDs match. Two discrepancies found:
-1. **PMID 39867851:** HR 1.84 for composite, not HR 1.98 for all-cause mortality. This inflates the apparent harm of underdosing in the evidence gaps file.
-2. **PMID 37712551:** 17% underdosed, not 15%. Minor.
+The literature scan and evidence gaps documents demonstrate thorough three-pass
+searching with strong coverage of the AF landscape. However, two critical errors
+require revision before approval: (1) the direction of effect for Liu 2025
+(PMID 41121356) is reversed — the worker wrote "digoxin associated with lower
+mortality" when the study found digoxin associated with **higher** mortality;
+(2) a TTE study directly comparing apixaban vs rivaroxaban (PMID 36252244,
+Annals of Internal Medicine 2022) was missed entirely, invalidating the
+Section 8 claim that TTE has "NOT been applied to head-to-head DOAC comparisons
+(apixaban vs rivaroxaban) in any population." Additionally, CLOSURE-AF results
+are mischaracterized. These errors affect gap scoring for Q1 and the
+characterization of Q7.
 
 ---
 
-## Independent Searches
+## 1. PMID Verification
 
-### Q1: OAC vs No OAC at CHA2DS2-VASc = 1
+Verified 10 key PMIDs via fetch_abstracts. Results:
 
-**Search 1:** `"target trial emulation" oral anticoagulant atrial fibrillation "low risk" OR "score 1" OR threshold`
-- Found TTE of OAC initiation strategies in AF+cancer (PMID: 38504063, Truong 2024). This uses TTE methodology with CHA2DS2-VASc thresholds but in cancer patients — different population, not directly applicable.
+| PMID | Worker's Claim | Abstract Says | Verdict |
+|------|---------------|---------------|---------|
+| 34271110 (Mei 2021) | TTE, Medicare, dabigatran superior for composite | Confirmed: emulated target trial, dabigatran superior (HR 1.232 for rivaroxaban) | **PASS** |
+| 41121356 (Liu 2025) | TTE, digoxin vs BB: digoxin associated with **lower** mortality | Digoxin associated with **higher** all-cause mortality (RR 1.21, 95% CI 1.17–1.26), **higher** CV mortality, **higher** HF hospitalization | **FAIL — direction reversed** |
+| 37839687 (Fu 2024) | Advanced CKD: apixaban lower bleeding than rivaroxaban/warfarin | Confirmed: rivaroxaban HR 1.69, warfarin HR 1.85 for major bleeding vs apixaban | **PASS** |
+| 38976880 (Simon 2024) | Cirrhosis: apixaban lowest bleeding | Confirmed: rivaroxaban HR 1.47, warfarin HR 1.38 for hemorrhage vs apixaban | **PASS** |
+| 40243977 (Martens 2025) | CABANA post-hoc: ablation beneficial in HFpEF | Confirmed: HR 0.82 for CV hospitalization/death in high HFpEF likelihood | **PASS** |
+| 39447815 (DeLuca 2025) | Ablation superior in HFpEF | Confirmed: CA associated with decreased mortality (HR 0.431) | **PASS** |
+| 40231086 (Lu 2025) | TTE, LAAC vs DOACs: LAAC lower dementia risk (HR 0.57) | Confirmed: HR 0.57 (95% CI 0.38–0.85) | **PASS** |
+| 36315950 (Lau 2022) | Multinational: apixaban lower bleeding, similar stroke | Confirmed: apixaban lower GIB risk vs all DOACs, similar ischemic stroke | **PASS** |
+| 39442621 (Dawwas & Cuker 2025) | Rivaroxaban vs apixaban: higher stroke (HR 1.23) and bleeding (HR 1.60) | Confirmed: stroke/SE HR 1.23, bleeding HR 1.60 | **PASS** |
+| 32865375 (EAST-AFNET 4) | RCT: early rhythm control reduced CV death/stroke/HF | Confirmed: HR 0.79 (96% CI 0.66–0.94) | **PASS** |
 
-**Search 2:** `BRAIN-AF trial rivaroxaban placebo low risk atrial fibrillation CHA2DS2-VASc 0 1`
-- **KEY FINDING — MISSED BY WORKER:** The BRAIN-AF trial (PMID: 41501492, published 2025 in Nature Medicine) is an RCT of rivaroxaban 15mg vs placebo in patients with AF and CHA2DS2-VASc 0-1 (excluding female sex). N=1,235, mean age 53, 53 centers in Canada. Primary endpoint: composite of cognitive decline + stroke/TIA. Result: NO benefit (HR 1.10, 95% CI 0.86-1.40, P=0.46). Stopped early for futility.
-- **Relevance to Q1:** This is the only RCT in low-risk AF with a placebo arm. However, it differs from Q1 in critical ways: (a) used rivaroxaban 15mg (reduced dose), (b) primary endpoint was cognitive decline not stroke, (c) mean age 53 (much younger than typical CHA2DS2-VASc = 1 patients), (d) included score 0 and 1 combined. The trial was underpowered for stroke alone. Still, it provides important context that the worker should have cited.
+Additionally verified:
+| PMID | Verification | Verdict |
+|------|-------------|---------|
+| 41849741 (CLOSURE-AF) | Worker said "results pending/recent" — actual result: LAAC was **NOT noninferior** to medical therapy (p=0.44 for noninferiority) | **FAIL — mischaracterized** |
+| 35968706 (Rillig 2022) | EAST-AFNET4 high comorbidity subanalysis | **PASS** |
+| 39191612, 38112741 | LAAC meta-analyses in CKD — confirmed real | **PASS** |
 
-**Search 3:** `apixaban "CHA2DS2-VASc 1" anticoagulation benefit stroke prevention observational 2024 2025`
-- Confirmed ARTESiA subgroup analysis (PMID: 39019530) already cited by worker. Found 2024 ESC guidelines (PMC: 11865665) also cited. No additional uncited studies found.
-
-**Verdict for Q1 searches:** Worker's core claim (no TTE exists for this question) is CONFIRMED. However, the BRAIN-AF trial (PMID: 41501492) should have been cited as the only RCT testing anticoagulation vs placebo in low-risk AF, even though it has a different primary endpoint and used reduced-dose rivaroxaban.
-
-### Q2: DOAC Underdosing vs Guideline-Concordant Dosing
-
-**Search 1:** `"target trial emulation" DOAC underdosing inappropriate dose anticoagulation outcomes`
-- No TTE for underdosing found. Confirmed worker's claim.
-
-**Search 2:** `DOAC "off-label" underdosing apixaban causal effect target trial emulation propensity score 2024 2025`
-- **KEY FINDING — MISSED BY WORKER:** The ASPIRE study (PMID: 40113236, Cha 2025) is a prospective multicenter Korean cohort (N=1,944) of AF patients with a single dose-reduction criterion randomized between off-label reduced-dose and standard-dose apixaban. 1-year results showed NO significant differences in stroke/SE, major bleeding, or all-cause mortality between groups.
-- This is important because it complicates the "underdosing = universally worse" narrative that the worker presents. While the ASPIRE population (single criterion, Asian) differs from Q2's target, it suggests the evidence is more nuanced than the worker indicates.
-- Also found: a 2025 Swedish registry study using propensity score-weighted Cox regression (off-label underdosing associated with higher MI HR 1.47, ischemic stroke HR 1.25, major bleeding HR 1.16) — consistent with worker's cited evidence.
-
-**Verdict for Q2 searches:** Worker's core claim (no TTE for underdosing) is CONFIRMED. The ASPIRE study should be cited as it provides conflicting evidence within the single-criterion subgroup.
-
-### Q3: Apixaban vs Rivaroxaban in CKD 3b-5
-
-**Search 1:** `apixaban vs rivaroxaban "chronic kidney disease" CKD stage 3b 4 head-to-head comparison 2024 2025 2026`
-- Confirmed Fu et al. (PMID: 37839687) remains the primary head-to-head study.
-- Confirmed 2026 scoping review (PMID: 41733864) identifies the gap.
-- Found an editorial in AJKD ("Anticoagulation for Atrial Fibrillation in Advanced CKD: Can Observational Studies Provide the Answer?") accompanying Fu et al. that explicitly calls for further comparative effectiveness research. Worker did not cite this editorial.
-
-**Verdict for Q3 searches:** Worker's assessment confirmed. Gap score of 7/10 is well-calibrated given emerging but limited evidence.
+**PMID verification score: 12/14 pass (2 failures)**
 
 ---
 
-## Stress-Testing of Claims
+## 2. Critical Error: Missed TTE Study (PMID 36252244)
 
-### Claim: "No TTE exists for OAC at CHA2DS2-VASc = 1" (Q1)
+**This is the most important finding of this review.**
 
-**Tests performed:**
-1. `"target trial emulation" oral anticoagulant atrial fibrillation "CHA2DS2-VASc" low risk` — No TTE found
-2. `"target trial emulation" "atrial fibrillation" anticoagulation oral causal inference 2023 2024 2025` — Found TTE in AF+cancer (different population) and TTE methodology papers, but none addressing CHA2DS2-VASc = 1 specifically
-3. Checked for any TTE in AF broadly — found TTE of OAC in AF+diabetes (Taiwan, propensity score weighting), TTE of LAAC vs DOAC (Medicare), and TTE of OAC initiation strategies in AF+cancer. None address the threshold question.
+PMID 36252244 (Annals of Internal Medicine, 2022) is titled: "Apixaban Versus
+Rivaroxaban in Patients With Atrial Fibrillation and Valvular Heart Disease:
+A Population-Based Study."
 
-**Verdict: CONFIRMED.** No TTE exists for OAC benefit at CHA2DS2-VASc = 1. However, the BRAIN-AF trial (an RCT with placebo arm in CHA2DS2-VASc 0-1) was missed and should be noted.
+The abstract explicitly states: **"To emulate a target trial of effectiveness
+and safety of apixaban and rivaroxaban in patients with AF and VHD."**
 
-### Claim: "No TTE exists for DOAC underdosing" (Q2)
+This study used a new-user, active comparator design with PS-matched cohorts
+(N=19,894) and found apixaban was associated with lower stroke/SE (HR 0.57)
+and lower bleeding (HR 0.51) compared with rivaroxaban.
 
-**Tests performed:**
-1. `"target trial emulation" DOAC underdosing inappropriate dose` — No results
-2. `"target trial" OR "trial emulation" DOAC dose underdose inappropriate anticoagulation atrial fibrillation causal` — Found conventional observational studies only; no TTE
-3. `DOAC "off-label" underdosing apixaban causal effect target trial emulation propensity score` — Found propensity-score-weighted studies but not formal TTE
+**Impact on worker's claims:**
 
-**Verdict: CONFIRMED.** No TTE exists for the underdosing question. All existing evidence uses conventional epidemiologic methods. The worker correctly identified a sequential TTE for DOAC reinitiation after ICH (different question) as the closest methodological analog.
+1. **Section 8 claim FALSIFIED:** "TTE methodology has NOT been applied to:
+   Head-to-head DOAC comparisons (apixaban vs rivaroxaban) in any population."
+   This is wrong — PMID 36252244 applied TTE to exactly this comparison.
 
-### Claim: "Limited head-to-head DOAC data in CKD" (Q3)
+2. **Q1 TTE novelty score overestimated:** The worker scored TTE novelty = 2
+   ("No TTE in this domain"), but TTE has been applied to apixaban vs rivaroxaban
+   in a related population (VHD). TTE novelty should be 1 ("TTE applied to related
+   question"), reducing Q1's gap score from 9 to **8**.
 
-**Tests performed:**
-1. `apixaban vs rivaroxaban "chronic kidney disease" CKD stage 3b 4 head-to-head comparison 2024 2025 2026` — Confirmed Fu et al. (2024) is the primary study
-2. Checked 2026 scoping review (PMID: 41733864) — explicitly states "limited dose-comparison studies" and "sparse data in non-dialysis patients"
+3. **Section 1 claim partially wrong:** "No TTE study has directly compared
+   apixaban vs rivaroxaban" is false in the general case. The narrower claim —
+   no TTE has compared them **in CKD** — is correct and should be the stated gap.
 
-**Verdict: CONFIRMED.** One key head-to-head study (Fu 2024) exists for CKD 4/5. Non-dialysis CKD 3b-4 remains understudied. Worker correctly revised gap score from 8/10 to 7/10.
-
----
-
-## Question-by-Question Assessment
-
-### Q1: OAC vs No OAC at CHA2DS2-VASc = 1 — **REVISED**
-
-**Gap Score: 9/10 (unchanged, but with caveats)**
-
-**What the worker got right:**
-- Correctly identified this as the highest-priority evidence gap
-- Thorough citation of existing observational studies on both sides of the debate
-- Correctly noted ethical barriers to randomization
-- Good CDW feasibility assessment
-- Appropriate acknowledgment of 2024 ESC guideline evolution (CHA2DS2-VA score)
-- Citation chaining from Lip 2015 was productive
-
-**What needs revision:**
-- **BRAIN-AF trial (PMID: 41501492) must be cited.** This is the only RCT testing anticoagulation vs placebo in CHA2DS2-VASc 0-1 patients. Though it used reduced-dose rivaroxaban, targeted cognitive decline, enrolled younger patients (mean age 53), and was stopped for futility (no benefit), it is directly relevant to the evidence landscape. It should be added to Section 2.8 of the literature scan and noted in Q1's justification.
-- The BRAIN-AF finding of NO benefit weakens the assumption of clinical equipoise slightly, though the population and intervention differences are substantial enough that Q1 remains a valid TTE target.
-- Gap score remains 9/10 given the important differences between BRAIN-AF and Q1 (different dose, endpoint, and population).
-
-**CDW note:** Time-zero definition will be critical. The worker correctly proposes "date of first AF diagnosis without prior anticoagulation" — this should be scrutinized for immortal time bias during protocol development.
-
-### Q2: DOAC Underdosing vs Guideline-Concordant Dosing — **REVISED**
-
-**Gap Score: 8/10 (unchanged, but corrections needed)**
-
-**What the worker got right:**
-- Correctly identified the absence of any TTE for this question
-- Comprehensive citation of underdosing prevalence data
-- Good identification of confounding by indication as the key analytic challenge
-- Excellent CDW feasibility assessment with dose-reduction criteria operationalized
-- Correctly distinguished the DOAC reinitiation TTE (PMC: 11934045) from the underdosing question
-
-**What needs revision:**
-1. **PMID 39867851 (HERA-FIB) correction required:** The worker reports "HR 1.98 for all-cause mortality" but the abstract reports HR 1.84 (95% CI 1.55-2.18) for a **composite endpoint** (all-cause mortality + stroke + major bleeding + MI). This is the wrong endpoint and wrong HR. Must be corrected in both the literature scan (Section 2.5) and the evidence gaps file (Q2 justification).
-2. **PMID 37712551 correction:** 17% underdosed, not 15%.
-3. **ASPIRE study (PMID: 40113236) should be cited.** This 2025 prospective Korean cohort (N=1,944) of AF patients with a single dose-reduction criterion found NO significant difference in stroke/SE, major bleeding, or mortality between off-label reduced dose and standard dose apixaban at 1 year. While the population is different (single criterion, Asian), it complicates the "underdosing = universally worse" narrative and should be noted as a counterpoint.
-4. The evidence on underdosing harm is more heterogeneous than the worker presents. Large meta-analyses show consistent harm, but studies in specific subgroups (single criterion, elderly with matching) show weaker or null effects. This nuance should be reflected.
-
-**Gap score remains 8/10** because the core question (causal effect via TTE) is unanswered, even with heterogeneous observational evidence.
-
-### Q3: Apixaban vs Rivaroxaban in CKD 3b-5 — **VERIFIED**
-
-**Gap Score: 7/10 (confirmed)**
-
-**What the worker got right:**
-- Correctly identified Fu et al. (PMID: 37839687) as the key study
-- Appropriate downward revision from 8/10 to 7/10 after finding more evidence
-- Good pharmacokinetic rationale (apixaban 27% vs rivaroxaban 36% renal clearance)
-- Correctly identified non-dialysis CKD 3b-4 as the largest remaining gap
-- 2026 scoping review (PMID: 41733864) appropriately cited as confirming the gap
-- CDW feasibility is accurately assessed
-
-**Minor note:** Could have cited the AJKD editorial accompanying Fu et al. that explicitly calls for further comparative effectiveness research, but this is not a required addition.
-
-### Q4: Early Rhythm vs Rate Control in Age >= 80 — **VERIFIED**
-
-**Gap Score: 7/10 (confirmed)**
-
-**What the worker got right:**
-- Critical finding from Kim 2022 (PMID: 35589174) that benefit attenuates with age
-- Important note that Kim uses >=75 cutoff, supporting but not directly addressing the >=80 question
-- Frailty attenuation finding (PMID: 36684588) adds depth
-- 2019 systematic review (PMID: 31745834) showing insufficient evidence in >=65
-- Appropriate CDW feasibility concerns about treatment crossover
-
-**Note:** The CDW feasibility rating of MODERATE is accurate. Treatment strategy classification from EHR data is indeed challenging.
-
-### Q5: Apixaban vs Rivaroxaban in Morbid Obesity — **VERIFIED**
-
-**Gap Score: 5/10 (confirmed)**
-
-Worker's downward revision from 7/10 was appropriate given the 2023 direct comparison study (PMID: 37713139). Small sample (N=303) limits conclusions, but the gap has meaningfully narrowed.
-
-### Q6: Apixaban vs Rivaroxaban in Liver Disease — **VERIFIED**
-
-**Gap Score: 6/10 (confirmed)**
-
-Limited evidence cited (only 2 PMIDs), but this is appropriate given the sparse literature. CDW feasibility concern (cannot determine Child-Pugh score) is well-noted.
-
-### Q7: LAAC vs DOAC — **REVISED**
-
-**Gap Score: 6/10 -> 4/10**
-
-**Issue:** A target trial emulation of LAAC vs DOAC has now been published (2026, Journal of Interventional Cardiac Electrophysiology) using Medicare data. N=3,692 pLAAO + 11,076 DOAC. Found no significant difference in stroke/TIA/SE. This substantially reduces the evidence gap. Combined with low CDW feasibility for single-site study, this question should be deprioritized.
+**Action required:** Add PMID 36252244 to Section 1, add to Section 8 TTE
+inventory, correct Section 8 claims, and revise Q1 gap score to 8.
 
 ---
 
-## What Was Done Well
+## 3. Critical Error: Liu 2025 Direction of Effect
 
-1. **Three-pass search strategy** was genuinely executed and documented. The targeted per-question searches in Pass 2 found meaningful new papers (e.g., the age-attenuation finding for Q4, the direct obesity comparison for Q5).
-2. **Gap score self-revision** — the worker appropriately revised gap scores downward when Pass 2 found new evidence (Q3: 8->7, Q5: 7->5). This demonstrates honest assessment rather than confirmation bias.
-3. **Diverse source coverage** — papers cited span cardiology, nephrology, geriatrics, pharmacy, and PK journals. Not just high-impact general medicine journals.
-4. **CDW feasibility assessments** are specific and operationalizable, with correct PCORnet CDM table references (PRESCRIBING, DIAGNOSIS, LAB_RESULT_CM, VITAL, DEMOGRAPHIC, DEATH).
-5. **Stress-testing documentation** — the worker documented their own stress-testing of key claims, which is commendable.
+In Sections 2 and 7 of the literature scan, the worker wrote:
 
----
+> "Liu et al. 2025 | **TTE** | Digoxin vs beta-blocker in AF+HF: digoxin
+> associated with lower mortality"
 
-## Approved Questions for Feasibility
+The abstract states the exact opposite: **"digoxin was associated with
+significantly higher risks of all-cause mortality (AR: 51.2% vs 42.2%;
+RR: 1.21), cardiovascular mortality (AR: 25.1% vs 21.0%; RR: 1.20), and
+heart failure hospitalization."**
 
-The following questions should advance to Phase 2 (feasibility assessment), pending the corrections noted above:
+This error appears in two tables (Sections 2 and 7) and could mislead
+downstream protocol design.
 
-| Rank | Question | Gap Score | Verdict | Condition for Advancement |
-|------|----------|-----------|---------|---------------------------|
-| 1 | OAC vs no OAC at CHA2DS2-VASc = 1 | 9/10 | REVISED | Add BRAIN-AF trial citation; note it tested OAC vs placebo in this population with null result |
-| 2 | DOAC underdosing vs correct dosing | 8/10 | REVISED | Correct HERA-FIB HR (1.84 composite, not 1.98 mortality); add ASPIRE study; correct Campbell underdosing prevalence |
-| 3 | Apixaban vs rivaroxaban in CKD 3b-5 | 7/10 | VERIFIED | No changes needed |
-| 4 | Early rhythm vs rate control in age >= 80 | 7/10 | VERIFIED | No changes needed |
-
-**Questions NOT advancing:**
-
-| Rank | Question | Gap Score | Reason |
-|------|----------|-----------|--------|
-| 5 | Apixaban vs rivaroxaban in obesity | 5/10 | Gap score below threshold; direct comparison exists |
-| 6 | Apixaban vs rivaroxaban in liver disease | 6/10 | Smaller population, CDW feasibility concerns |
-| 7 | LAAC vs DOAC | 4/10 (revised down) | TTE now exists (2026); low CDW feasibility |
+**Action required:** Correct the finding description in both sections to:
+"digoxin associated with **higher** mortality and HF hospitalization vs
+beta-blocker."
 
 ---
 
-## Required Corrections Before Advancing
+## 4. CLOSURE-AF Mischaracterization
 
-These are specific, actionable changes the worker must make:
+The worker listed CLOSURE-AF (PMID 41849741) as "LAAC vs medical therapy:
+results pending/recent." The trial has been published (NEJM) and showed
+**LAAC was NOT noninferior** to physician-directed best medical care
+(difference in RMST: −0.36 years; p=0.44 for noninferiority).
 
-1. **01_literature_scan.md, Section 2.5 (DOAC Dosing):** Change HERA-FIB entry from "HR 1.98 for all-cause mortality" to "HR 1.84 for composite of all-cause mortality, stroke, major bleeding, and MI."
-2. **01_literature_scan.md, Section 2.8:** Add BRAIN-AF trial (PMID: 41501492, Healey 2025, Nature Medicine): RCT of rivaroxaban 15mg vs placebo in CHA2DS2-VASc 0-1, N=1,235, stopped for futility, no benefit on cognitive decline + stroke composite.
-3. **02_evidence_gaps.md, Q2 justification:** Correct HERA-FIB HR. Change PMID 37712551 prevalence from 15% to 17%. Add ASPIRE study (PMID: 40113236) as counterpoint showing null results in single-criterion patients.
-4. **02_evidence_gaps.md, Q1 justification:** Note BRAIN-AF trial existence and explain why it does not close the gap (different dose, endpoint, population).
-5. **02_evidence_gaps.md, Q7:** Update gap score to 4/10 and note 2026 LAAC vs DOAC TTE.
+This is significant context for Q5 (LAAC in dialysis), as it undermines
+the case for LAAC over medical therapy in high-risk patients.
+
+**Action required:** Update Section 6 to reflect the actual CLOSURE-AF
+result.
+
+---
+
+## 5. Search Completeness Verification
+
+### Pass 2 (Targeted per-question PICO searches)
+
+**Q1 (Apixaban vs rivaroxaban in CKD):** I ran `"apixaban" AND "rivaroxaban"
+AND ("chronic kidney disease" OR "CKD" OR "renal insufficiency" OR "dialysis")
+AND "atrial fibrillation"` — 191 results. Worker captured the key primary
+studies (Fu 2024, Siontis 2018, Lau 2022). Additional meta-analyses found
+(Kao 2024 PMID 38606775, Hashimoto 2025 PMID 40468697, de Lucena 2024
+PMID 38281231) are secondary sources. No major primary studies missed in CKD.
+**However**, the broader apixaban vs rivaroxaban TTE (PMID 36252244) was missed.
+
+**Q2 (Catheter ablation in HFpEF):** I ran `"catheter ablation" AND ("heart
+failure with preserved ejection fraction" OR "HFpEF") AND "atrial fibrillation"`
+— 134 results. Worker captured the most important papers (CABANA subanalysis,
+DeLuca 2025, Oraii 2024 meta-analysis, CABA-HFPEF protocol). Additional
+meta-analyses found (Bulhões 2024 PMID 38621498, Mahalleh 2025 PMID 39278992,
+Wani 2025 PMID 41426236, Gu 2022 PMID 35544952) and an observational study
+(Zylla 2022 PMID 36126143). These are secondary/confirmatory — no TTE studies
+found. Search completeness adequate.
+
+**Q3 (DOACs in cirrhosis):** I ran `("direct oral anticoagulant" OR "DOAC" OR
+"apixaban" OR "rivaroxaban") AND ("cirrhosis" OR "liver disease") AND "atrial
+fibrillation"` — 87 results. Worker captured key papers (Simon 2024, Lawal 2023,
+Song 2024). Additional studies found include Chou 2025 (PMID 39495818), network
+meta-analysis (Shaikh 2024 PMID 39583376), and multinational cohort study. No
+TTE studies found. Search completeness adequate.
+
+### Pass 3 (Citation chaining and TTE verification)
+
+**TTE inventory verification:** I searched PubMed for `"target trial emulation"
+AND ("DOAC" OR "apixaban" OR "rivaroxaban") AND "atrial fibrillation"` — 6
+results. Worker's inventory of 10 TTE studies is largely accurate, but:
+- **Missing:** PMID 36252244 (apixaban vs rivaroxaban in VHD — explicit TTE)
+- **Potentially missing:** PMID 39992678 (Quinlan 2025, comparative bleeding
+  in HIV+AF — appeared in TTE search; may use TTE methodology)
+
+**No TTE for rhythm control confirmed:** PubMed search for TTE + rhythm/rate
+control + AF returned 0 results. WebSearch found only RCTs (EAST-AFNET4,
+AF-CHF, RAFT-AF). Worker's claim verified.
+
+**No TTE for ablation in HF confirmed:** WebSearch found no TTE studies.
+Only RCTs (CASTLE-AF, CASTLE-HTx, CAMTAF). Worker's claim verified.
+
+**No TTE for cirrhosis confirmed:** WebSearch found no TTE studies in
+anticoagulation + cirrhosis + AF. Worker's claim verified.
+
+### Stress-testing "no study" claims
+
+| Claim | Search Method | Verdict |
+|-------|--------------|---------|
+| "No TTE comparing apixaban vs rivaroxaban" (Section 1) | PubMed + WebSearch | **FALSE** — PMID 36252244 is an explicit TTE of this comparison |
+| "No TTE in CKD" (Q1) | PubMed + WebSearch | Correct — no TTE in CKD specifically |
+| "No TTE for ablation in HFpEF" (Q2) | PubMed + WebSearch | Correct |
+| "No TTE for anticoag in cirrhosis" (Q3) | PubMed + WebSearch | Correct |
+| "No TTE for rhythm vs rate in HF" (Q4) | PubMed + WebSearch | Correct |
+| "Mei 2021 is the only DOAC-vs-DOAC TTE" (Section 1) | PubMed TTE+DOAC search | **FALSE** — PMID 36252244 is also a DOAC-vs-DOAC TTE |
+
+---
+
+## 6. Per-Question Verdicts
+
+### Q1: Apixaban vs Rivaroxaban in AF + Advanced CKD — **REVISED**
+
+- **PMIDs:** All verified correctly
+- **Gap characterization:** Sound for CKD specifically, but the broader "no TTE"
+  framing is wrong (PMID 36252244 exists)
+- **Gap score:** Revise from 9 → **8** (TTE novelty = 1, not 2)
+- **Required changes:**
+  1. Add PMID 36252244 to Section 1 and Section 8
+  2. Narrow TTE novelty claim to CKD specifically
+  3. Correct Section 8 broad claims about DOAC TTE
+
+### Q2: Catheter Ablation vs AADs in AF + HFpEF — **VERIFIED**
+
+- **PMIDs:** All verified correctly
+- **Gap characterization:** Accurate — no TTE confirmed
+- **Gap score:** 8 is justified
+- **Notes:** Rich meta-analysis literature confirms the gap. Worker's coverage
+  of primary studies is adequate.
+
+### Q3: DOACs vs Warfarin in AF + Liver Cirrhosis — **VERIFIED**
+
+- **PMIDs:** All verified correctly
+- **Gap characterization:** Accurate — no TTE, all patients excluded from RCTs
+- **Gap score:** 8 is justified
+- **Notes:** Additional studies found (Chou 2025, network meta-analyses) are
+  confirmatory.
+
+### Q4: Early Rhythm Control vs Usual Care in AF + HF — **VERIFIED**
+
+- **PMIDs:** All verified correctly (including Rillig 2022 = EAST subanalysis)
+- **Gap characterization:** Accurate — no TTE for rhythm vs rate in HF subgroups
+- **Gap score:** 7 is justified
+- **Notes:** Worker appropriately distinguished Liu 2025 TTE (rate-control drug
+  choice) from the rhythm-vs-rate strategy question.
+
+### Q5: LAAC vs Continued Anticoagulation in AF + Dialysis — **REVISED**
+
+- **PMIDs:** Verified (including meta-analyses)
+- **Gap characterization:** Mostly accurate, but CLOSURE-AF result must be updated
+- **Gap score:** 6 remains reasonable, possibly should be lower given CLOSURE-AF failure
+- **Required changes:**
+  1. Update CLOSURE-AF characterization to reflect that LAAC was NOT noninferior
+  2. Note that this negative result may dampen enthusiasm for LAAC-focused TTE
+
+### Q6: DOAC Dose Reduction in Elderly — **VERIFIED**
+
+- **Gap score:** 6 is reasonable
+- **No issues identified**
+
+### Q7: Digoxin vs BB for Rate Control in AF + HF — **REVISED**
+
+- **Direction of effect error is critical** — must be corrected
+- **Gap score:** 5 is appropriate (TTE already applied, as correctly noted)
+- **Required changes:**
+  1. Fix Liu 2025 finding in Sections 2 and 7: "higher mortality" not "lower"
+
+---
+
+## 7. What Was Done Well
+
+1. **Three-pass strategy executed thoroughly.** The worker documented 8 broad
+   searches, 5 targeted PICO searches, and citation chaining — a systematic
+   approach that covered the landscape effectively.
+
+2. **TTE inventory is valuable.** Compiling 10 TTE studies in AF is genuinely
+   useful for identifying methodological gaps. The inventory is mostly accurate
+   (9/10 correctly characterized).
+
+3. **Gap scoring methodology is transparent.** The 5-dimension scoring framework
+   is well-defined and applied consistently.
+
+4. **Q7 correctly flagged as having an existing TTE.** Identifying Liu 2025 as
+   prior art for digoxin vs BB shows appropriate methodological awareness (despite
+   the direction-of-effect error).
+
+5. **Self-consistency checks were attempted.** The stress-testing documentation in
+   Q1–Q3 shows the worker tried to verify their own claims, though the verification
+   was incomplete (missed PMID 36252244).
+
+6. **Strong clinical framing.** The PICO specifications are well-constructed and
+   the clinical rationale for each gap is sound.
+
+---
+
+## 8. Summary of Required Revisions
+
+| Priority | Issue | Affected Sections | Action |
+|----------|-------|-------------------|--------|
+| **Critical** | Liu 2025 direction of effect reversed | Sections 2, 7 | Change "lower mortality" → "higher mortality" |
+| **Critical** | Missed PMID 36252244 (TTE of apixaban vs rivaroxaban) | Sections 1, 8; Q1 gap score | Add paper, revise TTE novelty claims, lower Q1 gap score to 8 |
+| **Major** | CLOSURE-AF mischaracterized as "pending/recent" | Section 6 | Update to reflect negative result (not noninferior) |
+| **Minor** | Section 8 TTE inventory incomplete | Section 8 | Add PMID 36252244 to inventory |
+| **Minor** | Simon 2024 characterized as "rivaroxaban comparable to warfarin" | Section 5 | More accurate: both rivaroxaban and warfarin had higher bleeding vs apixaban |
+
+---
+
+## 9. Approved Questions (Pending Revision)
+
+After the required revisions are made, the following questions are approved
+for protocol development:
+
+1. **Apixaban vs rivaroxaban in AF + advanced CKD** — Approved at revised gap
+   score 8. Narrow the TTE novelty claim to CKD-specific gap.
+2. **Catheter ablation vs AADs in AF + HFpEF** — Approved at gap score 8.
+3. **DOACs vs warfarin in AF + liver cirrhosis** — Approved at gap score 8.
+4. **Early rhythm control vs usual care in AF + HF** — Approved at gap score 7.
+5. **LAAC vs anticoag in AF + dialysis** — Conditionally approved at gap score 6,
+   pending CLOSURE-AF characterization update.
+6. **DOAC dose reduction in elderly** — Approved at gap score 6.
+7. **Digoxin vs BB in AF + HF** — **Not approved** for protocol development
+   (TTE already exists; Liu 2025). Approved as correctly identified prior art
+   once the direction of effect is corrected.
+
+**Recommended top 3 for protocol development (unchanged):**
+1. Apixaban vs rivaroxaban in AF + advanced CKD (revised score: 8)
+2. Catheter ablation vs AADs in AF + HFpEF (score: 8)
+3. DOACs vs warfarin in AF + liver cirrhosis (score: 8)

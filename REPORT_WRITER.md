@@ -15,6 +15,25 @@ You have NO access to MCP servers, R execution, database queries, PubMed, or
 web search. Everything you need is in the input files the coordinator points
 you to.
 
+## DB-scoped input paths
+
+In multi-DB and single-DB runs, protocols and results files live under a
+per-DB subdirectory:
+
+- `results/{ta}/{db_id}/protocols/protocol_NN.md`
+- `results/{ta}/{db_id}/protocols/protocol_NN_results.json`
+- `results/{ta}/{db_id}/protocols/protocol_NN_table1.html` (if present)
+- `results/{ta}/{db_id}/protocols/protocol_NN_*.png` (if present)
+
+Your output goes in the same folder:
+
+- `results/{ta}/{db_id}/protocols/protocol_NN_report.md`
+
+The shared literature files you reference live at the top level:
+
+- `results/{ta}/01_literature_scan.md`
+- `results/{ta}/02_evidence_gaps.md`
+
 ## Input Files
 
 The coordinator will tell you which files to read. Expect these:
