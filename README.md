@@ -449,9 +449,25 @@ Flags:
                       with --dbs.
   --db-mode MODE      Override connectivity mode uniformly: "online" or "offline".
                       Applied to every selected DB.
+  --study-desc TEXT   Study description — a detailed paragraph describing the
+                      intended study design, comparators, population, and
+                      clinical context. Passed verbatim to all sub-agents to
+                      guide literature search focus, feasibility assessment,
+                      and protocol design. Mutually exclusive with
+                      --study-desc-file.
+  --study-desc-file PATH
+                      Path to a text file containing the study description.
+                      Contents are read and passed to sub-agents the same way
+                      as --study-desc. Mutually exclusive with --study-desc.
   --resume-reports    Skip Phases 0-3. Generate reports from existing
                       protocol_NN_results.json files (per-DB folders are
                       iterated automatically) and produce the executive summary.
+  --resume-protocols  Skip Phases 0-2. Reuse existing literature and
+                      feasibility outputs; archive any previous protocols/
+                      folder and regenerate Phase 3 from scratch. Then fall
+                      through to Phase 4 (execute or write NEXT_STEPS.md)
+                      and the executive summary. Requires --dbs.
+                      Cannot be combined with --resume-reports.
 
 Discovery subcommands (no therapeutic area required):
   --list-dbs          Print a table of all configured DBs with their
@@ -484,8 +500,15 @@ Examples:
   ./run.sh --list-dbs
   ./run.sh --show-db nhanes
 
+  # Study description to focus the pipeline on a specific design
+  ./run.sh "type 2 diabetes" --study-desc "Parallel group cohort comparing canagliflozin to DPP-4 inhibitors for 3P-MACE"
+  ./run.sh "type 2 diabetes" --study-desc-file studies/canagliflozin_vs_dpp4i.txt --dbs secure_pcornet_cdw
+
   # Resume reports across every per-DB folder
   ./run.sh "atrial fibrillation" --dbs all --resume-reports
+
+  # Regenerate protocols from existing literature + feasibility
+  ./run.sh "atrial fibrillation" --dbs nhanes --resume-protocols
 ```
 
 ## File Structure
