@@ -1,0 +1,162 @@
+{
+  "protocol_id": "protocol_01",
+  "protocol_title": "SGLT2i Class vs DPP-4i for 3P-MACE in Type 2 Diabetes",
+  "database": {
+    "id": "secure_pcornet_cdw",
+    "name": "PCORnet CDW v6.1 (MSSQL)"
+  },
+  "execution_timestamp": "2026-04-16T08:36:31",
+  "execution_status": "success",
+  "consort": {
+    "1a_sglt2i_new_users": 8372,
+    "1b_dpp4i_new_users": 7685,
+    "1c_su_new_users": 18834,
+    "2_all_initiators": 26931,
+    "3_eligible": 13745,
+    "4_outcomes": 13745,
+    "5_analytic_cohort": 13745
+  },
+  "primary_analysis": {
+    "comparison": "SGLT2i vs DPP-4i",
+    "method": "IPW-weighted Cox PH (overlap weights)",
+    "estimand": "ATO",
+    "effect_measure": "HR",
+    "point_estimate": 0.9272,
+    "ci_lower": 0.6152,
+    "ci_upper": 1.3974,
+    "p_value": 0.7179,
+    "n_treated": 3436,
+    "n_control": 3084,
+    "events_treated": 47,
+    "events_control": 64
+  },
+  "balance_diagnostics": {
+    "pre_weighting_max_smd": 0.7763,
+    "post_weighting_max_smd": 0.0001,
+    "all_below_threshold": true,
+    "threshold": 0.1
+  },
+  "outcome_summary": {
+    "total_events": 111,
+    "events_treated": 47,
+    "events_control": 64,
+    "median_followup_days": 1353
+  },
+  "secondary_analysis": {
+    "comparison": "SGLT2i vs SU",
+    "method": "IPW-weighted Cox PH (overlap weights)",
+    "estimand": "ATO",
+    "effect_measure": "HR",
+    "point_estimate": 0.7014,
+    "ci_lower": 0.4954,
+    "ci_upper": 0.993,
+    "p_value": 0.0455,
+    "n_treated": 3436,
+    "n_control": 7225
+  },
+  "sensitivity_canagliflozin": {
+    "comparison": "Canagliflozin vs DPP-4i (descriptive)",
+    "n_canagliflozin": 762,
+    "point_estimate": 1.2764,
+    "ci_lower": 0.6738,
+    "ci_upper": 2.4179,
+    "note": "Underpowered; interpret with caution"
+  },
+  "sensitivity_analyses": {
+    "e_value": {
+      "point": 1.3696,
+      "ci_bound": "NA"
+    }
+  },
+  "subgroup_analyses": [
+    {
+      "subgroup": "Age",
+      "level": "<65",
+      "n": 3596,
+      "events": 46,
+      "hr": 1.2712,
+      "ci_lower": 0.6854,
+      "ci_upper": 2.358
+    },
+    {
+      "subgroup": "Age",
+      "level": ">=65",
+      "n": 2924,
+      "events": 65,
+      "hr": 0.7605,
+      "ci_lower": 0.4211,
+      "ci_upper": 1.3733
+    },
+    {
+      "subgroup": "Sex",
+      "level": "Male",
+      "n": 3080,
+      "events": 51,
+      "hr": 0.8955,
+      "ci_lower": 0.488,
+      "ci_upper": 1.6435
+    },
+    {
+      "subgroup": "Sex",
+      "level": "Female",
+      "n": 3438,
+      "events": 60,
+      "hr": 0.99,
+      "ci_lower": 0.5641,
+      "ci_upper": 1.7375
+    },
+    {
+      "subgroup": "Sex",
+      "level": "No info",
+      "n": 2,
+      "events": 0,
+      "hr": "NA",
+      "ci_lower": "NA",
+      "ci_upper": "NA"
+    },
+    {
+      "subgroup": "Prior ASCVD",
+      "level": "No ASCVD",
+      "n": 4834,
+      "events": 39,
+      "hr": 1.1444,
+      "ci_lower": 0.5675,
+      "ci_upper": 2.308
+    },
+    {
+      "subgroup": "Prior ASCVD",
+      "level": "ASCVD",
+      "n": 1686,
+      "events": 72,
+      "hr": 0.9493,
+      "ci_lower": 0.5655,
+      "ci_upper": 1.5935
+    },
+    {
+      "subgroup": "CKD Status",
+      "level": "CKD",
+      "n": 1038,
+      "events": 36,
+      "hr": 1.0595,
+      "ci_lower": 0.4627,
+      "ci_upper": 2.4259
+    },
+    {
+      "subgroup": "CKD Status",
+      "level": "No CKD",
+      "n": 5482,
+      "events": 75,
+      "hr": 0.9509,
+      "ci_lower": 0.5821,
+      "ci_upper": 1.5533
+    }
+  ],
+  "figure_paths": {
+    "consort": "protocol_01_consort.pdf",
+    "table1": "protocol_01_table1.html",
+    "love_plot": "protocol_01_loveplot.pdf",
+    "ps_distribution": "protocol_01_ps_dist.pdf",
+    "km_curve": "protocol_01_km.pdf",
+    "forest_plot": "protocol_01_forest.pdf"
+  }
+}

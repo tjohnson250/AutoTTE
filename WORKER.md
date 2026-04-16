@@ -202,7 +202,11 @@ Each target trial emulation protocol should include:
    - Confounder identification and DAG reasoning
    - Balance diagnostics plan
    - Sensitivity analyses (E-value, quantitative bias analysis)
-5. **R Analysis Script** — Complete, runnable R code
+5. **R Analysis Script** — Complete, runnable R code that implements
+   **every** analysis described in the protocol, including all sensitivity
+   analyses. Every row in the protocol's sensitivity analysis table must
+   have corresponding code in the script. Do not specify a sensitivity
+   analysis in the protocol that you do not implement.
 6. **Limitations and Threats to Validity**
 
 ## Key Principles

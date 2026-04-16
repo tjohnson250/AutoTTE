@@ -1,0 +1,31 @@
+{
+  "therapeutic_area": "type 2 diabetes",
+  "study_description": "This study will involve a new user, parallel group, cohort study design comparing canagliflozin to the DPP-4 inhibitor (DPP4i) antidiabetic class. DPP4is serve as a proxy for placebo, since this class of antidiabetic drugs is not known to have an impact on the outcome of interest. The comparison against DPP4 inhibitors is the primary comparison. Initiators of 2nd generation sulfonylureas are used as a secondary comparator group. The patients will be required to have continuous enrollment during the baseline period of 180 days before initiation of canagliflozin or a comparator drug (cohort entry date). Follow-up for the outcome (3P-MACE), begins the day after drug initiation. As in the trial, patients are allowed to take other antidiabetic medications during the study.",
+  "database": {
+    "id": "secure_pcornet_cdw",
+    "name": "Secure PCORnet CDW",
+    "cdm": "pcornet",
+    "cdm_version": "6.1",
+    "engine": "mssql",
+    "schema_prefix": "CDW.dbo",
+    "mode": "offline"
+  },
+  "current_phase": "done",
+  "revision_counts": {"discovery": 0, "feasibility": 0, "protocol": 1},
+  "backtrack_count": 0,
+  "total_sub_agents_launched": 6,
+  "history": [
+    {"phase": "onboarding", "action": "complete", "reason": "All database files verified.", "timestamp": "2026-04-15T00:00:00Z"},
+    {"phase": "discovery", "action": "worker_complete", "reason": "32 PMIDs, 7 ranked PICO questions.", "timestamp": "2026-04-15T00:10:00Z"},
+    {"phase": "discovery", "action": "review_complete", "reason": "Filion 2020 omission found; all 7 questions approved.", "timestamp": "2026-04-15T00:20:00Z"},
+    {"phase": "discovery", "action": "advance", "reason": "Core TTE gap validated. Advancing to feasibility.", "timestamp": "2026-04-15T00:21:00Z"},
+    {"phase": "feasibility", "action": "worker_complete", "reason": "Canagliflozin N=142 fatal barrier. Adopted Alternative D.", "timestamp": "2026-04-15T00:40:00Z"},
+    {"phase": "feasibility", "action": "advance", "reason": "Unambiguous finding. No review needed.", "timestamp": "2026-04-15T00:41:00Z"},
+    {"phase": "protocol", "action": "worker_complete", "reason": "Protocol 01 with 1372-line R script.", "timestamp": "2026-04-15T01:00:00Z"},
+    {"phase": "protocol", "action": "review_complete", "reason": "Two SQL bugs fixed. Protocol accepted.", "timestamp": "2026-04-15T01:10:00Z"},
+    {"phase": "protocol", "action": "advance", "reason": "Bugs fixed. Advancing to Phase 4.", "timestamp": "2026-04-15T01:11:00Z"},
+    {"phase": "awaiting_results", "action": "next_steps_written", "reason": "NEXT_STEPS.md written for offline execution.", "timestamp": "2026-04-15T01:15:00Z"},
+    {"phase": "summary", "action": "complete", "reason": "Executive summary written.", "timestamp": "2026-04-15T01:20:00Z"},
+    {"phase": "done", "action": "pipeline_complete", "reason": "All phases complete. Awaiting R script execution.", "timestamp": "2026-04-15T01:21:00Z"}
+  ]
+}

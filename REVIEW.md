@@ -166,6 +166,11 @@ that all three passes were actually performed:
 - Is the bootstrap correct for g-computation?
 - Are balance diagnostics checking the right thing?
 - Does the E-value computation use the right effect measure?
+- **Sensitivity analysis completeness (CRITICAL):** Cross-reference the
+  protocol's sensitivity analysis table (Section 4.6 or equivalent) against
+  the R script. Every sensitivity analysis described in the protocol MUST
+  have corresponding implementation in the code. If any are missing, this
+  is an automatic **REVISE**. List each missing analysis by name.
 
 **Database-Specific Code Review (required for all database-targeted protocols):**
 
