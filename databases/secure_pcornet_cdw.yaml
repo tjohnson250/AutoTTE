@@ -3,6 +3,7 @@ name: "Secure PCORnet CDW"
 cdm: "pcornet"
 cdm_version: "7"
 engine: "mssql"
+engine_version: "17.0.27"
 online: false
 
 connection:
