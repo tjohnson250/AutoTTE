@@ -37,6 +37,32 @@ and MeSH terms that are far more useful for this task.
 - **Save your work as you go.** Write intermediate results to files so nothing
   is lost if the session is interrupted.
 
+## Study Description
+
+The coordinator may provide a **study description** in your prompt — a detailed
+paragraph describing the intended study design, comparators, population, and
+clinical context.
+
+When a study description is present:
+- **Phase 1 (Literature Discovery):** Include targeted searches for the
+  described comparators and population. When ranking evidence gaps in
+  `02_evidence_gaps.md`, weight questions that align with the study description
+  higher. Still perform the full broad landscape search — the description
+  narrows your focus, it does not replace thorough literature review.
+- **Phase 2 (Feasibility):** Assess feasibility specifically for the
+  comparators and population in the study description. If the described study
+  is not feasible in the target dataset, explain why and suggest alternatives.
+- **Phase 3 (Protocol Generation):** Frame the first protocol directly around
+  the study description. Use the described comparators, population, and design
+  as the starting point. Additional protocols can explore related questions
+  from the evidence gaps.
+- The study description is guidance, not a rigid constraint. If clinical
+  evidence or data availability suggests a modification, document the rationale
+  for the change.
+
+When no study description is present, use the therapeutic area alone to guide
+your work (this is the default behavior).
+
 ## Literature Search Protocol (Three-Pass Strategy)
 
 Literature discovery MUST follow this three-pass strategy. Broad thematic searches
@@ -583,16 +609,20 @@ results$outcome_summary <- list(
 
 ```r
 # ── Save Results ──
-results_path <- file.path(
-  dirname(if (interactive()) rstudioapi::getActiveDocumentContext()$path else {
-    args <- commandArgs(trailingOnly = FALSE)
-    normalizePath(sub("--file=", "", args[grep("--file=", args)]))
-  }),
-  paste0(results$protocol_id, "_results.json")
-)
-# Fallback: save in current directory
-if (is.na(results_path)) results_path <- paste0(results$protocol_id, "_results.json")
+# Determine script directory (works from Rscript CLI AND RStudio Run button)
+script_dir <- tryCatch({
+  args <- commandArgs(trailingOnly = FALSE)
+  file_arg <- args[grep("--file=", args)]
+  if (length(file_arg) > 0) {
+    normalizePath(dirname(sub("--file=", "", file_arg)))
+  } else if (rstudioapi::isAvailable()) {
+    dirname(rstudioapi::getSourceEditorContext()$path)
+  } else {
+    getwd()
+  }
+}, error = function(e) getwd())
 
+results_path <- file.path(script_dir, paste0(results$protocol_id, "_results.json"))
 jsonlite::write_json(results, results_path, pretty = TRUE, auto_unbox = TRUE)
 message(sprintf("Results saved to: %s", results_path))
 ```

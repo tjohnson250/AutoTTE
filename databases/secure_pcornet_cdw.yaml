@@ -1,7 +1,7 @@
 id: "secure_pcornet_cdw"
 name: "Secure PCORnet CDW"
 cdm: "pcornet"
-cdm_version: "6.1"
+cdm_version: "7"
 engine: "mssql"
 online: false
 

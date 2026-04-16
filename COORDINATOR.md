@@ -401,6 +401,7 @@ Maintain `{results_dir}/agent_state.json` with:
 ```json
 {
   "therapeutic_area": "...",
+  "study_description": "",
   "database": {"id": "...", "name": "...", "cdm": "...", "engine": "...", "mode": "online|offline"},
   "current_phase": "discovery|feasibility|protocol|execution|reporting|awaiting_results|summary|done",
   "revision_counts": {"discovery": 0, "feasibility": 0, "protocol": 0},
@@ -431,6 +432,29 @@ MCP tools, or incomplete clinical code lists. Specifically:
 4. **Log the archival** in your coordinator_log.md with a note about why the
    re-run was triggered.
 
+## Study Description
+
+Your initial prompt may include a **study description** — a detailed paragraph
+(or more) describing the intended study design, comparators, population, and
+clinical context.
+
+When a study description is present:
+- Store it in `agent_state.json` under `"study_description"`.
+- Pass it **verbatim** to every sub-agent (workers and reviewers).
+- In Phase 1 (literature discovery), instruct the worker to prioritize PICO
+  questions aligned with the described design. The worker should still perform
+  broad landscape searches, but weight evidence gap rankings toward questions
+  that match the description.
+- In Phase 3 (protocol generation), the first protocol should directly target
+  the described study design. Additional protocols can explore related questions
+  from the evidence gaps.
+- In reviews, the reviewer should verify that the work is responsive to the
+  study description. A discovery that ignores the description and produces
+  unrelated questions is a red flag.
+
+When no study description is present, the system operates exactly as before —
+the therapeutic area alone guides the agents.
+
 ## Launching Your First Sub-Agent
 
 When you start, the therapeutic area will be provided in your initial prompt.
@@ -440,9 +464,11 @@ Set up the results directory, initialize `agent_state.json` and
 Your prompt to each sub-agent should:
 1. Tell it to read WORKER.md (for workers) or REVIEW.md (for reviewers)
 2. Specify the therapeutic area
-3. Specify exactly which files to read and write
-4. If this is a revision: tell it to read the review notes and fix issues
-5. If this is a review: tell it which files to review and what to check
+3. If a study description was provided, include it verbatim and instruct the
+   sub-agent to use it to guide their work
+4. Specify exactly which files to read and write
+5. If this is a revision: tell it to read the review notes and fix issues
+6. If this is a review: tell it which files to review and what to check
 
 Be specific in your prompts. The sub-agent has no memory of prior rounds —
 you are its only source of context about what happened before.

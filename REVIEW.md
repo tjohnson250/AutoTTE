@@ -191,6 +191,12 @@ awareness of the conventions in their code, this is an automatic REVISE.
   `pivot_longer()`? `N = n()` returns integer while `sprintf()` returns
   character — mixing them causes `pivot_longer()` to fail. Verify
   `N = as.character(n())` is used. **Flag as REVISE if not.**
+- Does the script path / output directory detection handle both `Rscript`
+  CLI and RStudio interactive sessions? The pattern must check
+  `commandArgs()` for `--file=` first, then fall back to
+  `rstudioapi::getSourceEditorContext()$path`, then `getwd()`. Using only
+  `commandArgs()` with `normalizePath()` crashes in RStudio because
+  `--file=` is absent. **Flag as REVISE if not.**
 
 **Per-protocol verdict in your markdown review:**
 - **ACCEPT** — Ready to execute, no major issues

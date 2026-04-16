@@ -11,6 +11,8 @@
 #   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --db-mode offline
 #   ./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --resume-reports
 #   ./run.sh "type 2 diabetes" --db-config databases/my_cdw.yaml 75
+#   ./run.sh "type 2 diabetes" --study-desc "Parallel group cohort comparing canagliflozin to DPP-4 inhibitors for 3P-MACE"
+#   ./run.sh "type 2 diabetes" --study-desc-file studies/canagliflozin_vs_dpp4i.txt --db-config databases/my_cdw.yaml
 #
 # Prerequisites:
 #   - Claude Code CLI installed (npm install -g @anthropic-ai/claude-code)
@@ -21,11 +23,13 @@
 
 set -euo pipefail
 
-THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--db-config <path>] [--db-mode online|offline] [max_turns]}"
+THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--study-desc \"...\"] [--study-desc-file path] [--db-config <path>] [--db-mode online|offline] [max_turns]}"
 
 # Parse optional flags
 DB_CONFIG=""
 DB_MODE=""
+STUDY_DESC=""
+STUDY_DESC_FILE=""
 RESUME_REPORTS=false
 MAX_TURNS="50"
 SKIP_NEXT=false
@@ -46,6 +50,16 @@ for i in $(seq 2 $#); do
       DB_MODE="${!next_i}"
       SKIP_NEXT=true
       ;;
+    --study-desc)
+      next_i=$((i + 1))
+      STUDY_DESC="${!next_i}"
+      SKIP_NEXT=true
+      ;;
+    --study-desc-file)
+      next_i=$((i + 1))
+      STUDY_DESC_FILE="${!next_i}"
+      SKIP_NEXT=true
+      ;;
     --resume-reports)
       RESUME_REPORTS=true
       ;;
@@ -56,6 +70,21 @@ for i in $(seq 2 $#); do
       ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# Resolve study description
+# ---------------------------------------------------------------------------
+if [[ -n "$STUDY_DESC" && -n "$STUDY_DESC_FILE" ]]; then
+  echo "ERROR: --study-desc and --study-desc-file are mutually exclusive." >&2
+  exit 1
+fi
+if [[ -n "$STUDY_DESC_FILE" ]]; then
+  if [[ ! -f "$STUDY_DESC_FILE" ]]; then
+    echo "ERROR: Study description file not found: $STUDY_DESC_FILE" >&2
+    exit 1
+  fi
+  STUDY_DESC="$(cat "$STUDY_DESC_FILE")"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -108,6 +137,9 @@ fi
 echo "============================================="
 echo " Auto-Protocol Designer"
 echo " Therapeutic area: $THERAPEUTIC_AREA"
+if [[ -n "$STUDY_DESC" ]]; then
+echo " Study description: (provided, ${#STUDY_DESC} chars)"
+fi
 if [[ -n "$DB_CONFIG" ]]; then
 echo " Database:         $DB_NAME ($DB_ID)"
 echo " CDM:              $DB_CDM"
@@ -201,6 +233,19 @@ $([ "$DB_ONLINE" = "true" ] && echo "- Tell workers they have online access and 
   dump and data profile files.")"
 fi
 
+STUDY_DESC_CONTEXT=""
+if [[ -n "$STUDY_DESC" ]]; then
+  STUDY_DESC_CONTEXT="
+Study description (pass this verbatim to all sub-agents to guide their work):
+---
+$STUDY_DESC
+---
+The therapeutic area is used for directory naming and broad topic classification.
+The study description above provides specific guidance about the intended study
+design, comparators, and clinical context. When launching sub-agents, always pass
+both the therapeutic area AND the study description verbatim."
+fi
+
 cat <<PROMPT | claude -p \
   --verbose \
   --max-turns 200 \
@@ -218,6 +263,7 @@ Your configuration:
 - Max turns per sub-agent: $MAX_TURNS (pass this as --max-turns to sub-agents)
 - MCP config: $MCP_CONFIG (pass this as --mcp-config to sub-agents)
 $DB_CONTEXT
+$STUDY_DESC_CONTEXT
 
 When launching sub-agents, always pipe through stream_viewer.py with a label:
 cat <<'SUBPROMPT' | claude -p --verbose --max-turns \$MAX_TURNS \\
