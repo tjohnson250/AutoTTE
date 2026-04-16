@@ -180,8 +180,13 @@ If a database was configured in your initial prompt:
 1. Write `{results_dir}/NEXT_STEPS.md` with instructions for the user:
    - List all protocol analysis scripts that need to be run
    - Explain that each script saves a `_results.json` file
-   - Tell the user to copy the results files back and re-run with
-     `--resume-reports`
+   - Tell the user to re-run with `--resume-reports` using the **exact
+     `run.sh` syntax** (positional therapeutic area, `--db-config`, etc.):
+     ```
+     ./run.sh "{therapeutic_area}" --db-config {db_config_path} --resume-reports
+     ```
+     Do NOT invent flags like `--therapeutic-area` or `--database` — these
+     do not exist. The therapeutic area is always the first positional argument.
 2. Set `current_phase` to `"awaiting_results"` in agent_state.json.
 3. Log this in coordinator_log.md and stop the pipeline.
 

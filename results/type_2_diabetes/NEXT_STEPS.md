@@ -63,8 +63,8 @@ The script saves results to `protocols/protocol_01_results.json`. It also genera
 Once `protocol_01_results.json` exists, re-run the pipeline with `--resume-reports` to generate the narrative report:
 
 ```bash
-./run.sh --therapeutic-area "type 2 diabetes" \
-  --database databases/secure_pcornet_cdw.yaml \
+./run.sh "type 2 diabetes" \
+  --db-config databases/secure_pcornet_cdw.yaml \
   --resume-reports
 ```
 
