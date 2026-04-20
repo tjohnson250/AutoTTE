@@ -912,13 +912,22 @@ main <- function() {
     if (isFALSE(fit$ok)) {
       # fit_model signalled a non-error early-exit (empty cohort, single
       # treatment arm, power-gate failure, etc.). Record it as a gate
-      # failure so resume mode can distinguish "ran and gated out" from
-      # "never ran" or "errored." Do NOT call save_outputs -- it has its
-      # own fit$ok guard but skipping it here makes the intent explicit.
+      # failure AND carry forward the CONSORT attrition trail (and any
+      # other structured cohort-construction diagnostics fit_model exposed)
+      # so the coordinator/summary-writer can see WHICH step(s) dropped
+      # the cohort to zero -- not just that it did. Without this, the
+      # executive summary has no way to reason about the cause.
+      # Do NOT call save_outputs -- it has its own fit$ok guard but
+      # skipping it here makes the intent explicit.
       reason <- if (!is.null(fit$reason)) fit$reason else "fit_model returned ok=FALSE"
       results$execution_status <- "gate_failed"
       results$gate <- list(gate_pass = FALSE, reason = reason,
-                           n_rows = nrow(df))
+                           n_rows = fit$n_rows, n_arms = fit$n_arms)
+      # fit_model's ok=FALSE return MUST include bundle$consort (and any
+      # other cohort-build diagnostics). Copy them through verbatim.
+      results$consort     <- fit$consort
+      results$dc_coverage <- fit$dc_coverage
+      results$dc_probe    <- fit$dc_probe
       message(sprintf("Cohort-viability gate failed: %s", reason))
     } else {
       save_outputs(fit, df, out_dir)
@@ -949,6 +958,15 @@ main()
 5. **Checkpoint after `fit_model()` via `saveRDS(list(fit, df, config), state_path)`**, and honor `AUTOTTE_PUBONLY=1` at the top of `main()` to skip SQL+fit and rerun only `save_outputs()` from the checkpoint. Saves hours when publication output fails.
 5. `save_fig()` is inline (stays in the script).
 6. Error handling inside `main()`. No mega-tryCatch wrapping the whole file.
+7. **Gate-failed paths MUST carry CONSORT forward.** `build_cohort` always
+   returns a bundle with a `consort` attrition list. `fit_model`'s
+   non-error early-exits (empty cohort, single treatment arm, power-gate
+   failure, etc.) MUST include `consort = bundle$consort` (plus any other
+   structured diagnostics such as `dc_coverage`, `dc_probe`) in their
+   `ok = FALSE` return. `main()` then copies those into the
+   `gate_failed` `results` payload. Without this, the coordinator and
+   summary-writer can only see "cohort collapsed" with no way to reason
+   about which eligibility step excluded everyone.
 
 ## Structured Results Output (JSON)
 

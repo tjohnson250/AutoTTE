@@ -362,12 +362,19 @@ When the coordinator prompt says "Resume mode: REPORTS_ONLY":
      Log "status=success but results.json absent — likely mislabelled
      gate/fit failure; check state.rds for the real outcome" to
      `coordinator_log.md` and surface it in the executive summary.
-   - `gate_failed` → do NOT launch a report worker. Read
-     `protocol_NN_gate.json` for the gating metric and the
-     `collapse_recommendation` field (if present). Log the gate-failure
-     reason to `coordinator_log.md` under the DB's resume section. The
-     protocol appears in the executive summary as "run — gate failed" with
-     the gating detail, not as missing.
+   - `gate_failed` → do NOT launch a report worker. The status file's
+     `gate` block carries the pass/fail, reason, and `n_rows` / `n_arms`;
+     the `consort` field carries the CONSORT attrition trail (list of
+     `{step, n_pat, n_rows}` keyed by build_cohort step), and
+     `dc_coverage` / `dc_probe` carry any DEATH_CAUSE diagnostic probe.
+     If `protocol_NN_gate.json` exists as a sibling sidecar, it may add a
+     `collapse_recommendation` string. Log the gate reason AND the
+     attrition trail in `coordinator_log.md` under the DB's resume
+     section so a human reader can see WHICH eligibility step excluded
+     everyone. Surface the same detail in the executive summary: a one-
+     line "run -- gate failed: <reason>" followed by a compact table of
+     the CONSORT steps and the row counts after each, so the user can
+     diagnose the cause without re-running the R script.
    - `error` → do NOT launch a report worker. Log `error_message` from the
      status file to `coordinator_log.md` and surface it in the executive
      summary as "run — errored."
