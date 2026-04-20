@@ -344,12 +344,39 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
 **Resume mode (--resume-reports):**
 When the coordinator prompt says "Resume mode: REPORTS_ONLY":
 1. Skip Phases 0-3.
-2. Check for `protocol_NN_results.json` files in each per-DB `{db_id}/protocols/` folder (i.e., `$RESULTS_DIR/*/protocols/`).
-3. For each results file found, launch a report-writing worker.
-4. After each accepted report, render it to PDF and Word (see step 3 of the
+2. For each per-DB `{db_id}/protocols/` folder (i.e.,
+   `$RESULTS_DIR/*/protocols/`), enumerate `protocol_NN_results_status.json`
+   files. This file is the canonical "protocol was run" marker: every
+   analysis script writes it regardless of outcome (success, gate_failed,
+   error, or pending if the script crashed mid-run). Do NOT use
+   `protocol_NN_results.json` as the "was run" signal — gate-failed and
+   errored runs never write it, so that check would misreport them as
+   "not yet run."
+3. For each status file found, parse `execution_status` and dispatch:
+   - `success` → confirm `protocol_NN_results.json` exists, then launch a
+     report-writing worker exactly as in the Phase 4 online flow.
+   - `gate_failed` → do NOT launch a report worker. Read
+     `protocol_NN_gate.json` for the gating metric and the
+     `collapse_recommendation` field (if present). Log the gate-failure
+     reason to `coordinator_log.md` under the DB's resume section. The
+     protocol appears in the executive summary as "run — gate failed" with
+     the gating detail, not as missing.
+   - `error` → do NOT launch a report worker. Log `error_message` from the
+     status file to `coordinator_log.md` and surface it in the executive
+     summary as "run — errored."
+   - `pending` → the R script began but did not reach its terminal write
+     (likely crash or kill). Log the status-file path to
+     `coordinator_log.md` and ask the user to check the R session's stderr.
+4. If a per-DB protocols folder contains a `protocol_NN_analysis.R` with no
+   `protocol_NN_results_status.json` sibling, the protocol has not yet been
+   run. Log "not yet run — status file absent" and skip.
+5. Legacy runs (pre-status-file): if `protocol_NN_results.json` exists but
+   `protocol_NN_results_status.json` does not, treat as success.
+6. After each accepted report, render it to PDF and Word (see step 3 of the
    online mode flow above).
-5. If some protocols have no results file, log a warning and skip them.
-6. Then proceed to the Executive Summary phase.
+7. Then proceed to the Executive Summary phase. The summary MUST include
+   any gate_failed or errored protocols with their failure reason —
+   silently dropping them misrepresents the state of the evidence.
 
 **Resume mode (--resume-protocols):**
 When the coordinator prompt says "Resume mode: PROTOCOLS_ONLY":

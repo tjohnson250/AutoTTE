@@ -460,12 +460,30 @@ Begin by reading COORDINATOR.md, then initialize your state files and start
 the pipeline.
 $([ "$RESUME_REPORTS" = "true" ] && echo "
 RESUME MODE: REPORTS ONLY
-Skip Phases 0-3. The protocols and analysis scripts already exist.
-Check for protocol_NN_results.json files in \$RESULTS_DIR/*/protocols/
-(iterating every per-DB subdirectory).
-For each results file found, launch a report-writing worker (read REPORT_WRITER.md).
-For each protocol WITHOUT a results file, log a warning and skip it.
-Then produce the executive summary.
+Skip Phases 0-3. The protocols and analysis scripts already exist. Follow
+the 'Resume mode (--resume-reports)' section of COORDINATOR.md.
+
+Short version: enumerate protocol_NN_results_status.json files in
+\$RESULTS_DIR/*/protocols/ — that file is the canonical 'protocol was run'
+marker (every script writes it regardless of outcome). Dispatch on its
+execution_status field:
+  - success     → launch a report-writing worker (read REPORT_WRITER.md).
+  - gate_failed → do NOT launch a report worker. Read the sibling
+                  protocol_NN_gate.json for the gating metric and
+                  collapse_recommendation, log both to coordinator_log.md,
+                  and surface the gate failure in the executive summary.
+  - error       → do NOT launch a report worker. Log error_message and
+                  surface it in the executive summary.
+  - pending     → script crashed mid-run. Log and ask the user to check
+                  stderr from the R session.
+
+A protocol whose status file is ABSENT has not been run — log and skip.
+Legacy case: if protocol_NN_results.json exists but no status file, treat
+as success.
+
+After all dispatch completes, produce the executive summary. It MUST
+include gate_failed and errored protocols with their failure reason;
+silently dropping them misrepresents the state of the evidence.
 ")
 $([ "$RESUME_PROTOCOLS" = "true" ] && echo "
 RESUME MODE: PROTOCOLS ONLY
