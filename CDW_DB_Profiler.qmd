@@ -934,6 +934,83 @@ profile_cdw_for_autoTTE <- function(con,
     ln("")
   }
 
+  # ---- DEATH_CAUSE sub-profile ----
+  # Absence of this block made colonoscopy Protocol_01 learn at runtime that
+  # DEATH_CAUSE_CODE='10' returns nothing. Report row/patient counts, coverage
+  # vs DEATH, and the full code-system / source / type / confidence breakdowns
+  # so downstream designs can gate cause-of-death endpoints at design time.
+  dc_res <- safe_query(sprintf("
+    SELECT COUNT(*) AS n_rows,
+           COUNT(DISTINCT PATID) AS n_patients
+    FROM %s.DEATH_CAUSE
+  ", schema_name), "DEATH_CAUSE count")
+
+  if (nrow(dc_res) > 0 && !is.na(dc_res$n_rows[1])) {
+    ln("### DEATH_CAUSE Table")
+    ln("")
+    ln("Distinct patients with cause-of-death records: ", sup(dc_res$n_patients[1]))
+    ln("Total rows: ", format(dc_res$n_rows[1], big.mark = ","))
+
+    if (nrow(death_res) > 0 && death_res$n_patients[1] > 0) {
+      cov <- dc_res$n_patients[1] / death_res$n_patients[1]
+      ln("Coverage vs DEATH: ", sprintf("%.1f%%", 100 * cov),
+         " of deceased patients have \u2265 1 DEATH_CAUSE row")
+    }
+    ln("")
+
+    for (dim in list(
+      list(col = "DEATH_CAUSE_CODE",       title = "DEATH_CAUSE_CODE (code system)"),
+      list(col = "DEATH_CAUSE_SOURCE",     title = "DEATH_CAUSE_SOURCE"),
+      list(col = "DEATH_CAUSE_TYPE",       title = "DEATH_CAUSE_TYPE"),
+      list(col = "DEATH_CAUSE_CONFIDENCE", title = "DEATH_CAUSE_CONFIDENCE")
+    )) {
+      dist <- safe_query(sprintf("
+        SELECT %s AS val,
+               COUNT(*) AS n_rows,
+               COUNT(DISTINCT PATID) AS n_patients
+        FROM %s.DEATH_CAUSE
+        GROUP BY %s
+        ORDER BY n_rows DESC
+      ", dim$col, schema_name, dim$col), dim$col)
+
+      if (nrow(dist) > 0) {
+        ln("#### ", dim$title)
+        ln("")
+        ln("| ", dim$col, " | Rows | Patients |")
+        ln("|", strrep("-", nchar(dim$col) + 2), "|------|----------|")
+        for (i in seq_len(nrow(dist))) {
+          v <- dist$val[i]
+          if (is.na(v) || v == "") v <- "NULL"
+          ln("| ", v, " | ", sup(dist$n_rows[i]),
+             " | ", sup(dist$n_patients[i]), " |")
+        }
+        ln("")
+      }
+    }
+
+    # Storage-format read: dotted vs dotless. Mirrors the DX probe in
+    # tools/diagnose_cdw_dx_format.qmd but for DEATH_CAUSE specifically,
+    # whose varchar(8) storage is NOT covered by the DIAGNOSIS convention.
+    fmt <- safe_query(sprintf("
+      SELECT
+        SUM(CASE WHEN CHARINDEX('.', DEATH_CAUSE) > 0 THEN 1 ELSE 0 END) AS n_dotted,
+        SUM(CASE WHEN CHARINDEX('.', DEATH_CAUSE) = 0 THEN 1 ELSE 0 END) AS n_dotless,
+        COUNT(*) AS n_total
+      FROM %s.DEATH_CAUSE
+      WHERE DEATH_CAUSE IS NOT NULL
+    ", schema_name), "DEATH_CAUSE format")
+
+    if (nrow(fmt) > 0 && !is.na(fmt$n_total[1]) && fmt$n_total[1] > 0) {
+      ln("#### DEATH_CAUSE storage format (non-NULL rows)")
+      ln("")
+      ln("| Format | Rows |")
+      ln("|--------|------|")
+      ln("| Contains period (dotted) | ", sup(fmt$n_dotted[1]), " |")
+      ln("| No period (dotless)      | ", sup(fmt$n_dotless[1]), " |")
+      ln("")
+    }
+  }
+
   # ================================================================
   # SECTION 12: Column completeness (NULL rates) for key tables
   # ================================================================
