@@ -909,8 +909,21 @@ main <- function() {
     saveRDS(list(fit = fit, df = df, config = config), state_path)
     message(sprintf("State checkpointed to: %s", state_path))
 
-    save_outputs(fit, df, out_dir)
-    results$execution_status <- "success"
+    if (isFALSE(fit$ok)) {
+      # fit_model signalled a non-error early-exit (empty cohort, single
+      # treatment arm, power-gate failure, etc.). Record it as a gate
+      # failure so resume mode can distinguish "ran and gated out" from
+      # "never ran" or "errored." Do NOT call save_outputs -- it has its
+      # own fit$ok guard but skipping it here makes the intent explicit.
+      reason <- if (!is.null(fit$reason)) fit$reason else "fit_model returned ok=FALSE"
+      results$execution_status <- "gate_failed"
+      results$gate <- list(gate_pass = FALSE, reason = reason,
+                           n_rows = nrow(df))
+      message(sprintf("Cohort-viability gate failed: %s", reason))
+    } else {
+      save_outputs(fit, df, out_dir)
+      results$execution_status <- "success"
+    }
   }, error = function(e) {
     results$execution_status <<- "error"
     results$error_message   <<- conditionMessage(e)

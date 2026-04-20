@@ -355,6 +355,13 @@ When the coordinator prompt says "Resume mode: REPORTS_ONLY":
 3. For each status file found, parse `execution_status` and dispatch:
    - `success` → confirm `protocol_NN_results.json` exists, then launch a
      report-writing worker exactly as in the Phase 4 online flow.
+     Defensive check: if the status file says `success` but
+     `protocol_NN_results.json` is missing, the analysis script mislabelled
+     a non-error early-exit (e.g. `fit_model` returned `ok=FALSE` but
+     `main()` did not branch on `fit$ok`). Do NOT launch a report worker.
+     Log "status=success but results.json absent — likely mislabelled
+     gate/fit failure; check state.rds for the real outcome" to
+     `coordinator_log.md` and surface it in the executive summary.
    - `gate_failed` → do NOT launch a report worker. Read
      `protocol_NN_gate.json` for the gating metric and the
      `collapse_recommendation` field (if present). Log the gate-failure
