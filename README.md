@@ -1,10 +1,52 @@
 # Auto-Protocol Designer (AutoTTE)
 
-An autonomous multi-agent system that discovers causal questions from the
-clinical literature and generates target trial emulation protocols -- complete
-with analysis code, independent review loops, and optional execution against
-a configured database. The coordinator agent drives the entire pipeline using
-its own judgment, not hardcoded logic.
+**From a therapeutic area to a reviewed, runnable causal-inference protocol — without writing the boilerplate.**
+
+AutoTTE is an autonomous multi-agent system that surveys the clinical
+literature for unresolved causal questions and produces rigorous **target
+trial emulation** protocols to answer them — complete with runnable R
+analysis code, an independent peer-review loop, and optional execution
+against a configured real-world database. The coordinator agent drives the
+whole pipeline with its own judgment, the way a PI directs a team of
+postdocs. After the protocol(s) run against your database, AutoTTE writes a
+report for each protocol along with an overall summary of all protocols.
+
+## Why researchers use AutoTTE
+
+- **Built around the Hernán & Robins target trial framework.** Every
+  protocol specifies the target trial components — eligibility, treatment
+  strategies, assignment, time zero, follow-up, outcomes, and causal
+  contrasts — with explicit checks for the failure modes that sink most
+  observational studies: immortal time bias, prevalent-user bias,
+  time-varying confounding, and post-baseline selection.
+- **Independent peer review, baked in.** Reviewer agents run in fresh
+  Claude Code sessions and see only the worker's output files, never its
+  reasoning — so they cannot be anchored into agreement. Protocols, SQL,
+  and R code face the same scrutiny a journal peer reviewer would apply,
+  on every revision.
+- **Works with your data, wherever it lives.** *Online* mode lets agents
+  query a live database, validate cohort sizes, and execute analyses
+  end-to-end. *Offline* mode produces the same protocols and R scripts
+  from a schema dump and data profile alone — designed for firewalled
+  institutional CDWs, IRB-restricted environments, and enclave data
+  (MIMIC-IV, PhysioNet) where the LLM can never see a row.
+- **Multiple CDMs, out of the box.** First-class support for **PCORnet**,
+  **OMOP**, **MIMIC-IV**, and **NHANES**, plus deterministic Quarto
+  profiling templates so every site produces comparable, reproducible
+  data profiles that don't drift with the LLM.
+- **Cross-database replication for free.** Point a single run at multiple
+  databases and AutoTTE branches feasibility, protocol generation, and
+  execution per DB, then synthesizes a side-by-side comparison of effect
+  estimates — a natural replication signal that strengthens causal
+  inference.
+- **Transparent and auditable.** Every coordinator decision is logged and
+  every state transition is captured as JSON — a full audit trail
+  suitable for reproducibility sections, pre-registration, and regulatory
+  review.
+- **Database conventions as a first-class concept.** Each configured
+  database carries a conventions file documenting its SQL-dialect quirks,
+  legacy-data caveats, and known quality issues, which every agent reads
+  and applies before writing a single query.
 
 ## Architecture
 
