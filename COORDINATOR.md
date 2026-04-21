@@ -321,6 +321,14 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
      figure `.pdf`/`.png` pairs and a `protocol_NN_table1.html` sibling.
    - Tell the user to copy the results files back into the same per-DB
      `{db_id}/protocols/` folder before running the resume command.
+   - **PHI boundary (REQUIRED):** explicitly warn the user that
+     `protocol_NN_state.rds` files contain patient-level rows (the
+     analytic `df` is serialized to the checkpoint so
+     `AUTOTTE_PUBONLY=1` fast-resume works) and **MUST NOT** be copied
+     off the secure host. The AutoTTE pipeline does not read `.rds`
+     files — only the `.json`, `.html`, `.pdf`, and `.png` outputs need
+     to return. State this as an explicit bullet in the copy-back
+     section, not as an afterthought.
 
 4. Write a separate `RUN_INSTRUCTIONS.md` inside the per-DB `protocols/`
    folder. This file travels with the analysis scripts to the secure
@@ -335,6 +343,20 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
      leak between scripts.
    - What files appear next to each script on success.
    - Where to copy results back in the AutoTTE worktree.
+   - **PHI boundary (REQUIRED):** a dedicated "Security / data
+     handling" section that states the rule in unambiguous terms:
+     `protocol_NN_state.rds` contains patient-level rows (the analytic
+     data frame `df` is serialized so `AUTOTTE_PUBONLY=1` fast-resume
+     can skip SQL + fit). This file stays on the secure host. **Do NOT
+     copy any `*.rds` file back to the AutoTTE worktree or off the
+     secure host by any channel.** Copy back only `.json`, `.html`,
+     `.pdf`, and `.png` outputs. The same section should name the
+     `protocol_NN_results.json` as the sole PHI-free deliverable and
+     tell the user to eyeball it once (aggregate counts / HRs, no
+     PATID, no dates) before transferring out. If the instructions
+     describe a `tar` or `scp` copy-back, the file-list must be an
+     explicit allowlist (`*.json *.html *.pdf *.png`) and must NOT use
+     a glob that would sweep in `*.rds`.
    - A short troubleshooting section for the common failures:
      missing DSN, `library(odbc)` not loaded, `smd` missing, stale
      `shutdown = TRUE` copy.

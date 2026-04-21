@@ -59,6 +59,18 @@ The script saves results to `protocols/protocol_01_results.json`. It also genera
 | `protocol_01_forest.pdf` | Subgroup forest plot |
 | `protocol_01_consort.pdf` | CONSORT flow diagram |
 
+If the analysis script writes a `protocol_01_state.rds` checkpoint
+(current versions of `WORKER.md` do), **DO NOT copy it — or any other
+`*.rds` file — off the secure host.** The checkpoint contains the
+analytic data frame with patient-level rows and exists solely to
+support `AUTOTTE_PUBONLY=1` fast-resume on the secure host. The
+AutoTTE pipeline does not read `.rds` files; only the `.json`,
+`.html`, and `.pdf` outputs listed above need to return. Before
+transferring any file out of the secure environment, eyeball
+`protocol_01_results.json` once to confirm it is aggregate (HRs,
+CONSORT counts, no PATID, no DEATH_DATE, no rare-cell counts below
+the disclosure threshold).
+
 ### Step 4: Generate Reports
 Once `protocol_01_results.json` exists, re-run the pipeline with `--resume-reports` to generate the narrative report:
 

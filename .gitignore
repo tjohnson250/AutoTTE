@@ -30,3 +30,8 @@ databases/data/*
 # the setup script committed but exclude the materialized .duckdb files.
 !databases/data/setup_omop.R
 Rplots.pdf
+# Serialized R objects (e.g. protocol_NN_state.rds) can contain patient-
+# level rows from the analytic data frame and must never be committed.
+# They are local checkpoints for AUTOTTE_PUBONLY=1 fast-resume on the
+# secure host — the AutoTTE pipeline does not read them.
+*.rds
