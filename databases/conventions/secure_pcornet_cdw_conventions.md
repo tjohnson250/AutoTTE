@@ -50,6 +50,50 @@ Key data eras:
 
 Choose the study start date based on data volume and document the choice.
 
+### Inpatient Discharge Dates (CRITICAL — unreliable)
+
+`ENCOUNTER.DISCHARGE_DATE` is not trustworthy for inpatient encounters in this
+CDW. When the source discharge date was NA, the ETL architect set it to
+`ADMIT_DATE + 1`, so a large share of inpatient encounters appear to have a
+1-day length of stay regardless of the true LOS. Using `DISCHARGE_DATE` or
+`DATEDIFF(DAY, ADMIT_DATE, DISCHARGE_DATE)` directly will systematically
+underestimate LOS and mis-date discharges.
+
+`PX_DATE` on inpatient E/M billing codes is generally correct (it is the date
+of service on the billing record), but it can have gap days — most commonly
+2-day weekend gaps where no E/M code was billed. It is not a continuous daily
+record; it is a set of reliable anchor dates.
+
+**Rule:** Any protocol built around inpatient admissions, discharges, LOS,
+direct ICU admits, critical care admits, or 30-day readmissions MUST derive
+admit and discharge dates from the combination of the inpatient ENCOUNTER row
+and its E/M `PX_DATE`s, not from `ENCOUNTER.DISCHARGE_DATE`.
+
+Working pattern (see the Duplicate Records TTE study one level above this repo
+— `Duplicate Records TTE.qmd`, Phase 1 Diagnostics and Step 8):
+
+1. Identify the admission via the inpatient ENCOUNTER row (respect the
+   Legacy Encounter filter and realistic date bounds). `ADMIT_DATE` is
+   generally correct; `PX_DATE` of the initial inpatient E/M code
+   (`99221`/`99222`/`99223`) is an acceptable alternative when needed.
+2. Pull E/M `PX_DATE`s for that `ENCOUNTERID` from `PROCEDURES`
+   (`CDW_Source = 'GECBI'`) using this code set:
+   - Initial hospital care: `99221`, `99222`, `99223`
+   - Subsequent hospital care: `99231`, `99232`, `99233`
+   - Observation / same-day admit-discharge: `99234`, `99235`, `99236`
+   - Hospital discharge: `99238`, `99239`
+   - Critical care: `99291`, `99292`
+3. Derive the discharge date as
+   `MAX(PX_DATE) WHERE RAW_PX IN ('99238','99239')`, falling back to the
+   last E/M `PX_DATE` on the encounter when no explicit discharge code was
+   billed. Infer LOS as `discharge_date - admission_date`.
+4. Treat 2-day gaps between consecutive E/M dates within an admission as
+   expected (weekends), not as separate stays.
+
+Do not paper over the issue by adding a small constant to `DISCHARGE_DATE` or
+by trusting `DISCHARGE_DATE` only when `DATEDIFF(..) > 1` — the next-day
+default is indistinguishable from a true 1-day stay.
+
 ## Coding System Requirements
 
 ### ICD-9/10 Transition
@@ -129,6 +173,29 @@ using the MCP tools before the protocol is finalized.
 
 All tables must be fully qualified as `CDW.dbo.TABLE_NAME`, not bare
 `dbo.TABLE_NAME`.
+
+### Reserved-Word Aliases (SQL Server parser)
+
+SQL Server treats a bare table/CTE alias as a keyword if the token matches
+a reserved word, so `LEFT JOIN #ascvd asc` fails with `Incorrect syntax
+near the keyword 'asc'`. The shorthand looks natural (the temp table is
+`#ascvd`, the alias is its first three letters) but the parser still
+rejects it.
+
+**Rule:** Never alias a table, CTE, or temp table with a reserved word.
+Use a 2-4 character abbreviation that is not a SQL keyword. When the
+obvious abbreviation collides, pick the next most readable variant (e.g.
+`#ascvd acv`, `#desc d_t`, `#order ord_t`).
+
+Common offenders to avoid as aliases: `asc`, `desc`, `order`, `group`,
+`select`, `from`, `where`, `join`, `on`, `as`, `by`, `top`, `into`,
+`is`, `not`, `and`, `or`, `case`, `when`, `then`, `else`, `end`, `key`,
+`user`, `table`, `index`, `view`, `with`, `set`, `values`, `inner`,
+`outer`, `left`, `right`, `full`, `cross`, `union`, `all`, `any`, `some`,
+`exists`, `between`, `like`, `in`, `having`, `over`, `partition`,
+`rank`, `row`, `rows`, `range`, `current`, `date`, `time`, `timestamp`,
+`year`, `month`, `day`, `percent`, `null`. When in doubt, pick a longer
+alias — two extra characters is cheaper than a runtime SQL error.
 
 ### DEATH Table Deduplication
 
