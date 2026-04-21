@@ -223,6 +223,111 @@ awareness of the conventions in their code, this is an automatic REVISE.
 - **REVISE** — Fixable issues, list specific changes needed
 - **REJECT** — Fatal methodological flaw, explain why
 
+### For Security Reviews (Phase 3.5)
+
+Phase 3.5 is a dedicated security / disclosure / supply-chain pass that
+runs AFTER the protocol review has returned ACCEPT and BEFORE the script
+is handed off to the secure host. Its purpose is narrow: confirm the
+`analysis.R` cannot leak patient-level data and does not reach for an
+untrusted R package or external URL.
+
+You read two files only: `protocol_NN.md` and `protocol_NN_analysis.R`.
+Do **not** re-review methodology here — Phase 3 already did that. Write
+your verdict to `protocol_NN_security_review.md` in the same
+`{db_id}/protocols/` folder as the other reviews.
+
+**Verdicts (same grammar as other reviews):**
+- **ACCEPT** — Script is safe to hand off. Disclosure gate is fully
+  wired, every package is on the allowlist, no network/exec escape
+  hatches.
+- **REVISE** — Fixable issues. The coordinator routes the script back
+  through the Phase 3 revision loop with your findings appended.
+- **REJECT** — The protocol's methodology requires something this
+  phase cannot sign off on (e.g. a package the allowlist does not
+  cover, a required external URL fetch). The coordinator stops the
+  pipeline; resolution requires a protocol redesign, not just a
+  script edit.
+
+**Checklist — PHI / disclosure gate (per WORKER.md):**
+
+1. **Config.** `config` contains `disclosure_k` with a default of `11`
+   (HIPAA Safe Harbor). Any lower value needs a written justification
+   elsewhere in the protocol; note the justification in your review.
+2. **Helpers present.** Both `disclosure_check(df, k, label)` and
+   `disclosure_check_json(x, k)` are defined inline in the script. If
+   the author imported them from elsewhere, REJECT — the skeleton
+   requires them to travel with the protocol.
+3. **Call-site coverage inside `save_outputs()`.** Enumerate every
+   `write.csv`, `jsonlite::write_json`, `gt::gtsave`, `gtsummary`
+   render, or any other disk-writing call. Each one operating on a
+   data frame with counts MUST be preceded by
+   `disclosure_check(<df>, k = config$disclosure_k, label = "<what>")`.
+   Expected minimum coverage: Table 1 counts, CONSORT counts, Table 2
+   counts, any negative-control counts, any subgroup counts. Missing
+   coverage is REVISE; explicitly defeated coverage (e.g., a
+   `suppressMessages({disclosure_check(...); ...})`) is REJECT.
+4. **`main()` gate on `results.json`.** `main()` calls
+   `disclosure_check_json(results, k = config$disclosure_k)`
+   immediately before `jsonlite::write_json(results, …)`. Missing gate
+   is REVISE.
+5. **Direct-identifier hygiene.** No `PATID`, `MRN`, `DOB`,
+   `DEATH_DATE`, `ADMIT_DATE`, `DISCHARGE_DATE`, `ENCOUNTERID` (or
+   plausible aliases — grep case-insensitive) ever appears as a
+   column name in any data frame the script writes via `save_outputs()`
+   or into `results`. Raw dates in baseline characteristics should be
+   year- or year-month only. Any hit is REVISE.
+6. **Error-branch hygiene.** The top-level `tryCatch` in `main()`
+   records `conditionMessage(e)` into `results$error_message`, not the
+   data frame or any patient row. `dput(df)` / `str(df)` / `print(df)`
+   inside the error handler is REVISE.
+7. **State file is local-only.** `saveRDS(...)` targets `state_path`
+   under `checkpoint_dir`, never under `return_dir`. Any `saveRDS` or
+   `save.image` writing to `return_dir` or any path outside
+   `checkpoint_dir` is REJECT.
+
+**Checklist — package allowlist:**
+
+Enumerate every `library(pkg)`, `require(pkg)`, `requireNamespace(pkg)`,
+and `pkg::fn` call in the script. Build a de-duplicated set of package
+names. Every name must be in the APPROVED PACKAGES block below.
+
+REJECT-level findings (no revision path from inside this phase —
+coordinator routes back to Phase 3 or stops):
+- `install.packages(...)`, `utils::install.packages(...)` anywhere in
+  the script body. The dependency preflight block is allowed to call
+  `stop()` with instructions — it is NOT allowed to call
+  `install.packages` itself.
+- `remotes::install_*`, `devtools::install_*`, `pak::*`, `renv::install`.
+- `source("http…")`, `source("https…")`, `source(url(…))`.
+- `download.file(…)`, `curl::*`, `httr::*`, `httr2::*`, `RCurl::*`,
+  `url(…)` used for network I/O.
+- `system(...)`, `system2(...)`, `shell(...)` where the command
+  includes anything other than trivially-safe local utilities. When in
+  doubt, REJECT.
+- `setInternet2`, `options(repos = …)` reassignment at script runtime.
+- Any package name not on the allowlist, even if only referenced via
+  `pkg::fn` (the bare mention implies it must be installed).
+
+**APPROVED PACKAGES (v1 allowlist).** Extensions require a protocol
+revision that explains why the analysis cannot be done with what's on
+the list, plus evidence the new package is reputable (CRAN-hosted,
+actively maintained, widely used in epi/biostats).
+
+- **DB:** `DBI`, `odbc`, `duckdb`, `pcornet.synthetic`
+- **Data wrangling:** `dplyr`, `tidyr`, `glue`, `jsonlite`
+- **Causal / stats:** `WeightIt`, `cobalt`, `survival`, `survminer`,
+  `EValue`, `MatchIt`, `cmprsk`, `sandwich`, `lmtest`, `mediation`,
+  `smd`, `nnet`
+- **Tables / figures:** `gtsummary`, `gt`, `cardx`, `cards`, `ggplot2`,
+  `grid`, `gridExtra`, `consort`
+- **Utilities:** `rstudioapi`, `base`, `stats`, `utils`, `grDevices`,
+  `methods` (the last five are R base — bare mentions are fine)
+
+**Review file format.** `protocol_NN_security_review.md` should follow
+the existing review file structure: verdict at top, then Detailed
+findings organized by checklist section above, then Specific issues
+(each actionable), then What was done well.
+
 ### For Revision Reviews (Round 2+)
 
 When reviewing revised work, you MUST:

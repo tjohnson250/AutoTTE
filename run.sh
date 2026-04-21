@@ -11,6 +11,7 @@
 #   ./run.sh "atrial fibrillation" --dbs all --db-mode offline
 #   ./run.sh "atrial fibrillation" --db-config databases/my_cdw.yaml
 #   ./run.sh "atrial fibrillation" --dbs all --resume-reports
+#   ./run.sh "atrial fibrillation" --dbs all --resume-security-review
 #   ./run.sh "type 2 diabetes" --study-desc "Parallel group cohort comparing canagliflozin to DPP-4 inhibitors for 3P-MACE"
 #   ./run.sh "type 2 diabetes" --study-desc-file studies/canagliflozin_vs_dpp4i.txt --db-config databases/my_cdw.yaml
 #   ./run.sh --list-dbs
@@ -40,7 +41,7 @@ case "${1:-}" in
     ;;
 esac
 
-THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--dbs <id,id,...>|all] [--db-config <path>] [--db-mode online|offline] [--resume-reports|--resume-protocols] [max_turns]}"
+THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--dbs <id,id,...>|all] [--db-config <path>] [--db-mode online|offline] [--resume-reports|--resume-protocols|--resume-security-review] [max_turns]}"
 shift
 
 # Parse optional flags.
@@ -51,6 +52,7 @@ STUDY_DESC=""
 STUDY_DESC_FILE=""
 RESUME_REPORTS=false
 RESUME_PROTOCOLS=false
+RESUME_SECURITY_REVIEW=false
 MAX_TURNS="50"
 
 while [[ $# -gt 0 ]]; do
@@ -79,6 +81,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --resume-protocols)
       RESUME_PROTOCOLS=true; shift
+      ;;
+    --resume-security-review)
+      RESUME_SECURITY_REVIEW=true; shift
       ;;
     [0-9]*)
       MAX_TURNS="$1"; shift
@@ -109,8 +114,12 @@ if [[ -n "$DB_CONFIG" && -n "$DB_IDS" ]]; then
   exit 2
 fi
 
-if [[ "$RESUME_REPORTS" == "true" && "$RESUME_PROTOCOLS" == "true" ]]; then
-  echo "Error: cannot combine --resume-reports and --resume-protocols." >&2
+RESUME_COUNT=0
+[[ "$RESUME_REPORTS"         == "true" ]] && RESUME_COUNT=$((RESUME_COUNT + 1))
+[[ "$RESUME_PROTOCOLS"       == "true" ]] && RESUME_COUNT=$((RESUME_COUNT + 1))
+[[ "$RESUME_SECURITY_REVIEW" == "true" ]] && RESUME_COUNT=$((RESUME_COUNT + 1))
+if [[ $RESUME_COUNT -gt 1 ]]; then
+  echo "Error: --resume-reports, --resume-protocols, and --resume-security-review are mutually exclusive." >&2
   exit 2
 fi
 
@@ -179,6 +188,32 @@ print(sum(1 for r in rows if r['disposition'] in ('RUN', 'RUN_AUTO_ONBOARD')))
 ")
   if [[ "$LIVE_COUNT" == "0" ]]; then
     echo "ERROR: every selected DB was skipped. Nothing to run." >&2
+    exit 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# --resume-security-review: validate that protocols exist and have an
+# ACCEPT verdict from their most recent Phase 3 review. The coordinator
+# takes over from there. We only sanity-check that there's something to
+# review — the coordinator enumerates protocols and routes verdicts.
+# ---------------------------------------------------------------------------
+if [[ "$RESUME_SECURITY_REVIEW" == "true" ]]; then
+  if [[ -z "$TRIAGE_JSON" ]]; then
+    echo "Error: --resume-security-review requires --dbs (no DB selected)." >&2
+    exit 2
+  fi
+
+  # At least one protocol_NN_analysis.R must exist somewhere under
+  # $RESULTS_DIR/*/protocols/ or there is nothing to review.
+  FOUND_ANY=0
+  while IFS= read -r -d '' _; do
+    FOUND_ANY=1
+    break
+  done < <(find "$RESULTS_DIR" -type f -path '*/protocols/protocol_*_analysis.R' -print0 2>/dev/null)
+  if [[ $FOUND_ANY -eq 0 ]]; then
+    echo "Error: --resume-security-review found no protocol_*_analysis.R under $RESULTS_DIR/*/protocols/." >&2
+    echo "       Run Phase 3 first (e.g. via --resume-protocols) to produce protocols, then rerun this flag." >&2
     exit 1
   fi
 fi
@@ -498,8 +533,36 @@ For each DB listed in db_triage.json with disposition RUN or RUN_AUTO_ONBOARD:
      into \$RESULTS_DIR/\${db_id}/protocols/.
   2. Launch a protocol reviewer per DB (read REVIEW.md). Revise as needed
      under the normal revision guardrails.
+  3. Run Phase 3.5 Security Review on every ACCEPTed protocol per the
+     Phase 3.5 spec in COORDINATOR.md. Do NOT skip this phase on resume.
 
 Then fall through to Phase 4 as usual: online DBs execute; offline DBs get a
 fresh NEXT_STEPS.md and pause. Finish with the executive summary.
+")
+$([ "$RESUME_SECURITY_REVIEW" = "true" ] && echo "
+RESUME MODE: SECURITY_REVIEW ONLY
+Skip Phases 0-3 entirely. Protocol files and their Phase 3 reviews already
+exist. Your job is to run Phase 3.5 Security Review on every protocol whose
+most recent Phase 3 verdict is ACCEPT and which does not yet have a
+Phase 3.5 ACCEPT verdict on file.
+
+Follow the 'Resume mode (--resume-security-review)' section of
+COORDINATOR.md. Short version:
+  1. Enumerate \$RESULTS_DIR/*/protocols/protocol_NN_analysis.R files.
+  2. For each, confirm the most recent protocol_NN_review*.md has an
+     ACCEPT verdict. Skip (and log) any without ACCEPT.
+  3. Skip any protocol whose most recent protocol_NN_security_review*.md
+     already has an ACCEPT verdict (idempotent rerun).
+  4. For the remaining protocols, launch one security-reviewer sub-agent
+     per protocol. The sub-agent reads REVIEW.md's 'For Security Reviews
+     (Phase 3.5)' section plus protocol_NN.md and
+     protocol_NN_analysis.R ONLY. It does NOT access any DB tool.
+  5. Route verdicts per COORDINATOR.md Phase 3.5 spec: ACCEPT advances,
+     REVISE routes back through Phase 3 revision, REJECT drops the
+     protocol from Phase 4.
+
+Then fall through to Phase 4: online DBs execute the ACCEPTed protocols;
+offline DBs get a fresh NEXT_STEPS.md that excludes any protocol without
+a Phase 3.5 ACCEPT. Finish with the executive summary.
 ")
 PROMPT

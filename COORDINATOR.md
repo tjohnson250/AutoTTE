@@ -151,11 +151,17 @@ phases in this order:
    When the same PICO question is feasible on multiple DBs, each DB's
    worker produces a protocol tailored to its own CDM and conventions
    (peer protocols, not copies). Launch one reviewer per DB.
-5. **Phase 4 (per-DB, mode-dependent):** For each online DB, launch an
+5. **Phase 3.5 (per-protocol, gating):** For each ACCEPTed protocol,
+   launch a security-reviewer sub-agent that audits
+   `protocol_NN_analysis.R` for PHI / disclosure / supply-chain risk
+   against the checklist in REVIEW.md. Verdicts route ACCEPT → Phase 4,
+   REVISE → Phase 3 revision loop, REJECT → drop from Phase 4.
+6. **Phase 4 (per-DB, mode-dependent):** For each online DB, launch an
    execution worker per protocol and then a report writer. For each
    offline DB, write a per-DB `NEXT_STEPS.md` and transition that DB to
-   `awaiting_results`. Continue other DBs regardless.
-6. **Executive summary (shared):** Read every per-DB feasibility file and
+   `awaiting_results`. Continue other DBs regardless. Only protocols
+   with a Phase 3.5 ACCEPT verdict enter Phase 4.
+7. **Executive summary (shared):** Read every per-DB feasibility file and
    every per-protocol report, then write `results/{ta}/summary.md`.
 
 ### Failure isolation
@@ -250,7 +256,70 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
 - **Worker reads:** WORKER.md + feasibility results from Phase 2
 - **Worker produces:** `protocols/protocol_NN.md`, `protocols/protocol_NN_analysis.R`
 
+### Phase 3.5: Security Review (per-DB, per-protocol, gating)
+
+**Goal:** before any `protocol_NN_analysis.R` ships to the secure host,
+confirm it cannot leak patient-level data and does not reach for an
+untrusted R package or external URL. This phase runs AFTER the Phase 3
+protocol review returns ACCEPT and BEFORE Phase 4 (whether online
+execution or offline handoff).
+
+**Flow:**
+1. For each `protocol_NN_analysis.R` whose Phase 3 review verdict is
+   ACCEPT, launch a security-reviewer sub-agent.
+2. The sub-agent reads `REVIEW.md` (the "For Security Reviews
+   (Phase 3.5)" section), `protocol_NN.md`, and
+   `protocol_NN_analysis.R` only. It does NOT re-review methodology
+   and does NOT access r_executor or any DB tool.
+3. Sub-agent produces
+   `results/{ta}/{db_id}/protocols/protocol_NN_security_review.md`
+   with a verdict of ACCEPT, REVISE, or REJECT.
+4. Coordinator routes on the verdict:
+   - **ACCEPT** → advance this protocol to Phase 4.
+   - **REVISE** → route back to Phase 3 revision with the security
+     findings appended to the revision worker's input. When the
+     revised script comes back through Phase 3 re-review (ACCEPT),
+     re-run Phase 3.5 on it. Follow the same 3-revision guardrail
+     as other phases; on the third failed revision, mark the
+     protocol `security_review_failed` in `agent_state.json`, log,
+     and DROP the protocol from Phase 4 (other protocols in the
+     same DB proceed independently).
+   - **REJECT** → log the rejection reason in `coordinator_log.md`,
+     mark the protocol `security_review_rejected` in
+     `agent_state.json`, and DROP it from Phase 4. REJECT is
+     reserved for protocols whose methodology itself is
+     incompatible with the allowlist (e.g., the science requires a
+     package not on the list); resolution requires a protocol
+     redesign, not a script edit.
+5. Phase 4 is BLOCKED for a protocol until Phase 3.5 returns ACCEPT
+   for that protocol. Failures isolate per protocol — other
+   protocols in the same DB can proceed through Phase 3.5 in
+   parallel.
+
+**Per-DB vs per-protocol.** Launch one security-reviewer per protocol,
+not per DB. Protocols in the same DB can be reviewed concurrently; the
+sub-agents have no side effects on the DB or each other.
+
+**File placement.** Security reviews live alongside the other review
+files: `protocol_NN_security_review.md`, and `…_r1.md` / `…_r2.md` for
+subsequent revision rounds, just like `protocol_NN_review.md`.
+
+**What this phase does NOT do.** It does not rerun the methodology
+review, it does not execute the script, and it does not read the
+results / feasibility / literature files. Its scope is deliberately
+narrow — PHI / disclosure / supply-chain only. If it catches a
+methodology issue as a side effect, that is reviewer bleed-through
+and should be ignored.
+
 ### Phase 4: Execution & Reporting
+
+**Phase 4 entry requirement.** Every protocol proceeding to Phase 4
+MUST have a Phase 3.5 verdict of ACCEPT. Protocols marked
+`security_review_rejected` or `security_review_failed` are DROPPED
+from Phase 4 (online execution is not launched, offline handoff does
+not include them). The executive summary must list them with their
+rejection reason.
+
 
 **Online mode:**
 1. For each approved protocol with a `protocol_NN_analysis.R` file:
@@ -316,7 +385,12 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
    The NEXT_STEPS.md body should also:
    - List all protocol analysis scripts that need to be run, with exact
      `Rscript results/{ta}/{db_id}/protocols/protocol_NN_analysis.R`
-     commands.
+     commands. Only include protocols whose Phase 3.5 Security Review
+     verdict was ACCEPT. For each protocol, reference the review file
+     path (`protocols/protocol_NN_security_review.md`) so the operator
+     knows a PHI / disclosure / supply-chain audit was performed.
+     Protocols that failed Phase 3.5 must be listed separately under a
+     "NOT shipped" heading with their rejection reason.
    - Explain the on-secure-host layout the scripts produce. Per
      `WORKER.md`, each script creates two sibling subdirectories under
      the folder containing the script:
@@ -462,12 +536,44 @@ When the coordinator prompt says "Resume mode: PROTOCOLS_ONLY":
    no top-level tryCatch).
 3. Launch a protocol reviewer per DB (read `REVIEW.md`). Revise under
    the normal revision guardrails (max 3 revisions per phase per DB).
-4. Fall through to Phase 4 per the existing flow:
+4. Run Phase 3.5 Security Review on every ACCEPTed protocol per the
+   Phase 3.5 spec. Do NOT skip this phase even on resume — the script
+   must pass Security Review before it ships.
+5. Fall through to Phase 4 per the existing flow:
    - Online DBs: execute protocols via `execute_r(db_id, code)`, then
      launch report writers and render PDF/DOCX.
    - Offline DBs: write a fresh `NEXT_STEPS.md` and transition to
      `awaiting_results`.
+6. Finish with the Executive Summary phase.
+
+**Resume mode (--resume-security-review):**
+When the coordinator prompt says "Resume mode: SECURITY_REVIEW_ONLY":
+1. Skip Phases 0-3 entirely. `run.sh` has validated that every
+   expected protocol file exists:
+   `01_literature_scan.md`, `02_evidence_gaps.md`, `01_02_review.md`,
+   per-DB `03_feasibility.md` + `03_review.md`, and
+   `{db_id}/protocols/protocol_NN.md` +
+   `{db_id}/protocols/protocol_NN_analysis.R` for each protocol.
+   Phase 3 reviewer verdicts (most recent `protocol_NN_review*.md`)
+   must be ACCEPT; any protocol without an ACCEPT Phase 3 verdict
+   is skipped and logged.
+2. For each `protocol_NN_analysis.R` whose Phase 3 verdict is ACCEPT
+   and whose `protocol_NN_security_review.md` is either absent or
+   whose most recent security-review verdict is not ACCEPT, launch a
+   Phase 3.5 security-reviewer per the spec above.
+3. Route verdicts exactly as in the normal Phase 3.5 flow: ACCEPT
+   advances the protocol to Phase 4, REVISE routes back through
+   Phase 3 revision (which then re-enters Phase 3.5), REJECT drops
+   the protocol. The 3-revision guardrail applies to the combined
+   Phase 3 + Phase 3.5 revision count.
+4. Fall through to Phase 4 per the existing flow (online execution
+   or offline NEXT_STEPS.md regeneration, scoped to protocols that
+   now have a Phase 3.5 ACCEPT).
 5. Finish with the Executive Summary phase.
+
+This resume mode exists so the Security Review phase can be added to
+runs whose protocols were written before Phase 3.5 existed, without
+re-running the expensive Phase 1 / Phase 2 / Phase 3 work.
 
 ### Final: Executive Summary
 - **Goal:** Synthesize everything into a summary document

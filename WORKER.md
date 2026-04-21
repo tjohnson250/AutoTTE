@@ -651,17 +651,26 @@ Model the script on the old Quarto `.qmd` templates, translated to a plain
 7. `save_fig(plot_or_fn, basename, width, height)` — inline helper
    defined right before `save_outputs()`. ~12 lines, stays in the
    script so the protocol travels as one file.
-8. `save_outputs(fit, df, out_dir)` — writes the JSON, Table 1, CONSORT,
+8. `disclosure_check(df, k, label)` and `disclosure_check_json(x, k)`
+   — inline helpers right alongside `save_fig()`. Runtime disclosure
+   gate: refuse to write any table whose counts fall below `k`
+   (default `config$disclosure_k = 11`) or whose columns include
+   direct identifiers (PATID, DOB, DEATH_DATE, …). `save_outputs()`
+   calls `disclosure_check()` before each table write; `main()` calls
+   `disclosure_check_json()` before the final `results.json` write.
+   These helpers are the enforcement boundary — the Phase 3.5
+   reviewer audits their presence and coverage.
+9. `save_outputs(fit, df, out_dir)` — writes the JSON, Table 1, CONSORT,
    love plot, PS distribution, KM curves, etc. Uses `save_fig()` for
-   every figure.
-9. `main()` — the entrypoint. Creates `out_dir`, opens the connection,
-   calls the pipeline, handles errors, saves outputs. **Register
-   `on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)` here,
-   inside `main()`** — not at the top level. That way `on.exit` fires
-   exactly when `main()` returns or errors, which is what `on.exit` is
-   designed for and avoids the "external pointer is not valid" class of
-   bugs caused by unclear top-level lifetime.
-10. A final line that calls `main()` so `Rscript protocol_NN_analysis.R`
+   every figure and `disclosure_check()` before every table write.
+10. `main()` — the entrypoint. Creates `out_dir`, opens the connection,
+    calls the pipeline, handles errors, saves outputs. **Register
+    `on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)` here,
+    inside `main()`** — not at the top level. That way `on.exit` fires
+    exactly when `main()` returns or errors, which is what `on.exit` is
+    designed for and avoids the "external pointer is not valid" class of
+    bugs caused by unclear top-level lifetime.
+11. A final line that calls `main()` so `Rscript protocol_NN_analysis.R`
     does the work.
 
 Do NOT wrap the whole script in a single top-level `tryCatch(...)`. Put
@@ -855,6 +864,13 @@ config <- list(
   study_start = "2016-09-01",
   study_end   = "2023-03-31",
   # ... everything a human would tune ...
+
+  # Minimum cell size below which disclosure_check() refuses to write
+  # a table. HIPAA Safe Harbor guidance is typically k = 11; epi
+  # convention is often k = 5. Lowering this on the secure host is a
+  # protocol-revision-level change, NOT a knob the operator should
+  # flip at run time.
+  disclosure_k = 11
 )
 
 connect_db <- function() {
@@ -882,8 +898,90 @@ save_fig <- function(plot_or_fn, basename, width = 8, height = 6, out_dir = ".")
   }
 }
 
+# Runtime disclosure gate. Call this on any data frame destined for
+# return_dir BEFORE writing it (Table 1 counts, CONSORT, Table 2,
+# negative-control results, subgroup counts, etc.). stop()s on
+# violation so the offending artifact never lands on disk.
+#
+# Two classes of violation:
+#   1. Direct-identifier column names (PATID, DOB, DEATH_DATE, etc.).
+#      These should never appear in a returnable artifact.
+#   2. Small non-zero integer cells (0 < n < k) in any count column.
+#      Counts exactly equal to 0 are allowed (structural zeros are
+#      not a re-identification risk).
+#
+# If a legitimate analysis produces an unavoidable small cell (e.g.,
+# a pre-specified rare-outcome subgroup), suppress it upstream with
+# an explicit NA or "<k" label BEFORE calling disclosure_check, and
+# record the suppression in the protocol's limitations section.
+disclosure_check <- function(df, k = 11, label = "") {
+  forbidden <- c(
+    "PATID", "PATIENTID", "PATIENT_ID", "MRN", "SUBJECT_ID",
+    "DOB", "BIRTH_DATE", "BIRTHDATE",
+    "DEATH_DATE", "DEATHDATE",
+    "ADMIT_DATE", "ADMITDATE", "DISCHARGE_DATE", "DISCHARGEDATE",
+    "ENCOUNTERID", "ENCOUNTER_ID"
+  )
+  hit <- intersect(toupper(names(df)), forbidden)
+  if (length(hit)) stop(sprintf(
+    "disclosure_check[%s]: direct-identifier column(s) present: %s",
+    label, paste(hit, collapse = ", ")), call. = FALSE)
+
+  is_count_col <- vapply(df, function(x) {
+    is.numeric(x) &&
+      all(is.na(x) | (x >= 0 & x == floor(x)))
+  }, logical(1))
+  for (c in names(df)[is_count_col]) {
+    vals  <- df[[c]]
+    small <- !is.na(vals) & vals > 0 & vals < k
+    if (any(small)) stop(sprintf(
+      "disclosure_check[%s]: column '%s' has %d cell(s) with 0 < n < %d",
+      label, c, sum(small), k), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# JSON-structured-results walker. Before writing results.json, recurse
+# through the list and stop() if any leaf vector is a named count
+# vector with 0 < n < k, or if any field name is a direct identifier.
+# Complements disclosure_check() (which operates on data frames).
+disclosure_check_json <- function(x, k = 11, path = "results") {
+  forbidden <- c("PATID", "PATIENTID", "PATIENT_ID", "MRN", "SUBJECT_ID",
+                 "DOB", "BIRTH_DATE", "DEATH_DATE", "ENCOUNTERID")
+  if (!is.null(names(x))) {
+    hit <- intersect(toupper(names(x)), forbidden)
+    if (length(hit)) stop(sprintf(
+      "disclosure_check_json[%s]: forbidden field name(s): %s",
+      path, paste(hit, collapse = ", ")), call. = FALSE)
+  }
+  if (is.list(x)) {
+    for (nm in names(x) %||% seq_along(x)) {
+      disclosure_check_json(x[[nm]], k = k,
+                            path = paste0(path, "$", nm))
+    }
+  } else if (is.numeric(x) && length(x) > 0 &&
+             all(is.na(x) | (x >= 0 & x == floor(x)))) {
+    small <- !is.na(x) & x > 0 & x < k
+    if (any(small)) stop(sprintf(
+      "disclosure_check_json[%s]: %d cell(s) with 0 < n < %d",
+      path, sum(small), k), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
 save_outputs <- function(fit, df, out_dir) {
   # Write protocol_NN_results.json + table1.html + figures via save_fig().
+  #
+  # Disclosure-gate call sites (REQUIRED — reviewer enforces):
+  #   disclosure_check(table1_counts_df, k = config$disclosure_k, label = "table1")
+  #   disclosure_check(consort_df,        k = config$disclosure_k, label = "consort")
+  #   disclosure_check(table2_counts_df,  k = config$disclosure_k, label = "table2")
+  #   disclosure_check(neg_control_df,    k = config$disclosure_k, label = "neg_control")
+  # …before the corresponding gtsummary / gt / write.csv / jsonlite write.
+  # The main() write of protocol_NN_results.json is gated by
+  # disclosure_check_json(results, k = config$disclosure_k) — that call
+  # is in main(), not here.
 }
 
 script_dir <- function() {
@@ -977,6 +1075,12 @@ main <- function() {
     results$error_message   <<- conditionMessage(e)
     message(sprintf("ERROR: %s", conditionMessage(e)))
   })
+
+  # Disclosure gate on the structured results before write. Refuses
+  # any leaf with 0 < n < config$disclosure_k, and any forbidden field
+  # name (PATID, DEATH_DATE, etc.). If this stops(), the results.json
+  # is NOT written and the operator sees the specific violation.
+  disclosure_check_json(results, k = config$disclosure_k)
 
   jsonlite::write_json(
     results, file.path(return_dir, "protocol_NN_results.json"),
