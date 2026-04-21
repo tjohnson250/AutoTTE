@@ -1,0 +1,641 @@
+---
+title: "PCORnet CDM Data Profiler"
+format: html
+editor: visual
+params:
+  db_config: "databases/secure_pcornet_cdw.yaml"
+---
+
+# PCORnet CDM Data Profiler
+
+Generic profiler for any database conforming to the [PCORnet Common Data
+Model](https://pcornet.org/data/). Produces a schema dump and a PHI-safe
+data profile at the paths declared in the YAML config pointed to by the
+`db_config` param above.
+
+**To use for a different PCORnet site:** edit `params.db_config` to point at
+your DB's YAML config, then **Restart R + Run All Chunks**.
+
+**SQL dialect:** queries assume **MS SQL Server** (the most common engine for
+production PCORnet CDWs). For PCORnet on DuckDB or Postgres, swap `TOP N` →
+`LIMIT N`, `FORMAT(date,'yyyy-MM')` → `strftime`/`to_char`, `ISNULL` →
+`COALESCE`, `DATEDIFF(year,a,b)` → `EXTRACT(year FROM age(b,a))`.
+
+```{r load-libraries}
+library(tidyverse)
+library(DBI)
+library(yaml)
+library(here)
+options(encoding = "UTF-8")
+```
+
+## Load configuration and shared scaffolding
+
+```{r load-config}
+#| code-fold: true
+source(here::here("profilers/_helpers.R"))
+
+# `params` is only defined during `quarto render`. Fall back to the default
+# for interactive "Run All Chunks" in RStudio.
+db_config_path <- if (exists("params") && !is.null(params$db_config)) {
+  params$db_config
+} else {
+  "databases/secure_pcornet_cdw.yaml"
+}
+
+config <- load_profiler_config(db_config_path)
+cfg     <- config$cfg
+paths   <- config$paths
+schema  <- schema_name_from_cfg(cfg)
+suppress_threshold <- 11
+sup     <- make_suppress(suppress_threshold)
+```
+
+## Preflight
+
+```{r preflight}
+preflight_check(cfg$connection$r_code, label = cfg$id %||% "db")
+```
+
+## Schema extraction
+
+```{r fn-extract-schema}
+#| code-fold: true
+
+# MS SQL Server schema introspection. Produces a markdown-ish text file with
+# tables, columns, types, nullability, primary keys, and FKs.
+extract_schema_pcornet <- function(con,
+                                   schema_name = "dbo",
+                                   output_file = "schema.txt") {
+  tables <- DBI::dbGetQuery(con, sprintf("
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = '%s' AND TABLE_TYPE = 'BASE TABLE'
+    ORDER BY TABLE_NAME
+  ", schema_name))
+
+  out <- c(
+    paste0("# PCORnet CDM Schema (", cfg$id %||% "db", ")"),
+    paste0("# Generated: ", Sys.time()),
+    paste0("# Schema: ", schema_name),
+    ""
+  )
+
+  for (table_name in tables$TABLE_NAME) {
+    columns <- DBI::dbGetQuery(con, sprintf("
+      SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'
+      ORDER BY ORDINAL_POSITION
+    ", schema_name, table_name))
+
+    pks <- DBI::dbGetQuery(con, sprintf("
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+      WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'
+        AND CONSTRAINT_NAME LIKE 'PK_%%'
+    ", schema_name, table_name))
+
+    fks <- DBI::dbGetQuery(con, sprintf("
+      SELECT fk.COLUMN_NAME, pk.TABLE_NAME AS REFERENCES_TABLE,
+             pk.COLUMN_NAME AS REFERENCES_COLUMN
+      FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE fk
+        ON rc.CONSTRAINT_NAME = fk.CONSTRAINT_NAME
+      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pk
+        ON rc.UNIQUE_CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+      WHERE fk.TABLE_SCHEMA = '%s' AND fk.TABLE_NAME = '%s'
+    ", schema_name, table_name))
+
+    out <- c(out, paste0("## Table: ", table_name), "", "### Columns:")
+    for (i in seq_len(nrow(columns))) {
+      col <- columns[i, ]
+      type_info <- col$DATA_TYPE
+      if (!is.na(col$CHARACTER_MAXIMUM_LENGTH))
+        type_info <- paste0(type_info, "(", col$CHARACTER_MAXIMUM_LENGTH, ")")
+      nullable  <- ifelse(col$IS_NULLABLE == "YES", "NULL", "NOT NULL")
+      pk_marker <- ifelse(col$COLUMN_NAME %in% pks$COLUMN_NAME, " [PRIMARY KEY]", "")
+      fk_info <- ""
+      if (col$COLUMN_NAME %in% fks$COLUMN_NAME) {
+        fk_row <- fks[fks$COLUMN_NAME == col$COLUMN_NAME, ]
+        fk_info <- paste0(" [FK -> ", fk_row$REFERENCES_TABLE, ".",
+                          fk_row$REFERENCES_COLUMN, "]")
+      }
+      out <- c(out, paste0("- ", col$COLUMN_NAME, ": ", type_info,
+                           " (", nullable, ")", pk_marker, fk_info))
+    }
+    out <- c(out, "")
+  }
+  out <- c(out, "---", "## Summary", paste0("Total tables: ", nrow(tables)))
+  writeLines(out, output_file)
+  message("Schema written to: ", output_file)
+}
+```
+
+## Data profile
+
+```{r fn-profile-pcornet}
+#| code-fold: true
+
+profile_pcornet <- function(con,
+                            schema_name = "dbo",
+                            output_file,
+                            suppress_threshold = 11) {
+
+  safe_query <- make_safe_query(con)
+  sup <- make_suppress(suppress_threshold)
+
+  out <- character()
+  ln  <- function(...) out <<- c(out, paste0(...))
+
+  ln("# PCORnet CDM Data Profile")
+  ln("# Generated: ", Sys.time())
+  ln("# Schema: ", schema_name)
+  ln("# This file contains ONLY aggregate counts and de-identified")
+  ln("# distributions. Counts < ", suppress_threshold, " are suppressed.")
+  ln("# Ages \u2265 90 are top-coded per HIPAA Safe Harbor.")
+  ln("")
+
+  # ---------------------------------------------------------------
+  # 1. Overall size and temporal coverage
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 1. Overall Size and Temporal Coverage")
+  ln("")
+  total_pts <- safe_query(sprintf(
+    "SELECT COUNT(DISTINCT PATID) AS n FROM %s.DEMOGRAPHIC", schema_name),
+    "DEMOGRAPHIC")
+  if (nrow(total_pts) > 0) {
+    ln("Total distinct patients in DEMOGRAPHIC: ", sup(total_pts$n[1]))
+    ln("")
+  }
+
+  table_dates <- list(
+    list(tbl = "ENCOUNTER",     date_col = "ADMIT_DATE"),
+    list(tbl = "DIAGNOSIS",     date_col = "ADMIT_DATE"),
+    list(tbl = "PROCEDURES",    date_col = "PX_DATE"),
+    list(tbl = "PRESCRIBING",   date_col = "RX_ORDER_DATE"),
+    list(tbl = "DISPENSING",    date_col = "DISPENSE_DATE"),
+    list(tbl = "LAB_RESULT_CM", date_col = "RESULT_DATE"),
+    list(tbl = "VITAL",         date_col = "MEASURE_DATE"),
+    list(tbl = "MED_ADMIN",     date_col = "MEDADMIN_START_DATE"),
+    list(tbl = "CONDITION",     date_col = "ONSET_DATE"),
+    list(tbl = "DEATH",         date_col = "DEATH_DATE"),
+    list(tbl = "ENROLLMENT",    date_col = "ENR_START_DATE")
+  )
+
+  ln("| Table | Distinct Patients | Rows | Earliest (YYYY-MM) | Latest (YYYY-MM) |")
+  ln("|-------|-------------------|------|---------------------|-------------------|")
+  for (td in table_dates) {
+    res <- safe_query(sprintf("
+      SELECT COUNT(DISTINCT PATID) AS n_patients,
+             COUNT(*)              AS n_rows,
+             FORMAT(MIN(%s), 'yyyy-MM') AS earliest,
+             FORMAT(MAX(%s), 'yyyy-MM') AS latest
+      FROM %s.%s
+    ", td$date_col, td$date_col, schema_name, td$tbl), td$tbl)
+    if (nrow(res) > 0 && !is.na(res$n_patients[1]) && res$n_patients[1] > 0) {
+      ln("| ", td$tbl, " | ", sup(res$n_patients[1]), " | ",
+         format(res$n_rows[1], big.mark = ","), " | ",
+         res$earliest[1] %||% "—", " | ",
+         res$latest[1]   %||% "—", " |")
+    }
+  }
+  ln("")
+
+  # ---------------------------------------------------------------
+  # 2. Year-by-year encounter volume
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 2. Year-by-Year Patient Volume (ENCOUNTER)")
+  ln("")
+  yearly <- safe_query(sprintf("
+    SELECT YEAR(ADMIT_DATE) AS yr,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_encounters
+    FROM %s.ENCOUNTER
+    WHERE ADMIT_DATE IS NOT NULL
+    GROUP BY YEAR(ADMIT_DATE)
+    ORDER BY yr
+  ", schema_name), "yearly encounters")
+  if (nrow(yearly) > 0) {
+    ln("| Year | Distinct Patients | Encounters |")
+    ln("|------|-------------------|------------|")
+    for (i in seq_len(nrow(yearly))) {
+      ln("| ", yearly$yr[i], " | ", sup(yearly$n_patients[i]), " | ",
+         format(yearly$n_encounters[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 3. Age distributions (PHI-safe aggregates)
+  # ---------------------------------------------------------------
+  # DOB is queried but never written. Outputs are bins only, with 90+
+  # top-coded per HIPAA Safe Harbor. See feedback_phi_in_profilers memory.
+  ln("---")
+  ln("## 3. Age Distributions")
+  ln("")
+  ln("Aggregate distributions derived from `DEMOGRAPHIC.BIRTH_DATE`. The DOB")
+  ln("itself is never written to this profile. Ages \u2265 90 are top-coded.")
+  ln("")
+
+  ln("### 3a. Birth Decade Histogram")
+  ln("")
+  bd <- safe_query(sprintf("
+    SELECT (YEAR(BIRTH_DATE) / 10) * 10 AS birth_decade,
+           COUNT(DISTINCT PATID) AS n
+    FROM %s.DEMOGRAPHIC
+    WHERE BIRTH_DATE IS NOT NULL
+    GROUP BY (YEAR(BIRTH_DATE) / 10) * 10
+    ORDER BY birth_decade
+  ", schema_name), "birth decade")
+  if (nrow(bd) > 0) {
+    ln("| Birth Decade | Patients |")
+    ln("|--------------|----------|")
+    for (i in seq_len(nrow(bd))) {
+      ln("| ", bd$birth_decade[i], "s | ", sup(bd$n[i]), " |")
+    }
+    ln("")
+  }
+
+  ln("### 3b. Current Age Distribution")
+  ln("")
+  ln("Age in years from BIRTH_DATE to today, binned. 90+ top-coded.")
+  ln("")
+  age_now <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT PATID) AS n
+    FROM (
+      SELECT PATID,
+        CASE
+          WHEN DATEDIFF(year, BIRTH_DATE, GETDATE()) < 18 THEN '0-17'
+          WHEN DATEDIFF(year, BIRTH_DATE, GETDATE()) < 45 THEN '18-44'
+          WHEN DATEDIFF(year, BIRTH_DATE, GETDATE()) < 65 THEN '45-64'
+          WHEN DATEDIFF(year, BIRTH_DATE, GETDATE()) < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s.DEMOGRAPHIC
+      WHERE BIRTH_DATE IS NOT NULL
+    ) t
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", schema_name), "age now")
+  if (nrow(age_now) > 0) {
+    ln("| Age Bin | Patients |")
+    ln("|---------|----------|")
+    for (i in seq_len(nrow(age_now))) {
+      ln("| ", age_now$age_bin[i], " | ", sup(age_now$n[i]), " |")
+    }
+    ln("")
+  }
+
+  ln("### 3c. Age at First Encounter")
+  ln("")
+  ln("More relevant for TTE feasibility than current age — answers 'how old")
+  ln("are patients when they first appear in this CDW?'. 90+ top-coded.")
+  ln("")
+  age_first <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT PATID) AS n
+    FROM (
+      SELECT d.PATID,
+        CASE
+          WHEN DATEDIFF(year, d.BIRTH_DATE, f.first_date) < 18 THEN '0-17'
+          WHEN DATEDIFF(year, d.BIRTH_DATE, f.first_date) < 45 THEN '18-44'
+          WHEN DATEDIFF(year, d.BIRTH_DATE, f.first_date) < 65 THEN '45-64'
+          WHEN DATEDIFF(year, d.BIRTH_DATE, f.first_date) < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s.DEMOGRAPHIC d
+      INNER JOIN (
+        SELECT PATID, MIN(ADMIT_DATE) AS first_date
+        FROM %s.ENCOUNTER
+        WHERE ADMIT_DATE IS NOT NULL
+        GROUP BY PATID
+      ) f ON d.PATID = f.PATID
+      WHERE d.BIRTH_DATE IS NOT NULL
+    ) t
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", schema_name, schema_name), "age at first encounter")
+  if (nrow(age_first) > 0) {
+    ln("| Age Bin | Patients |")
+    ln("|---------|----------|")
+    for (i in seq_len(nrow(age_first))) {
+      ln("| ", age_first$age_bin[i], " | ", sup(age_first$n[i]), " |")
+    }
+    ln("")
+  }
+
+  ln("### 3d. Age at Death")
+  ln("")
+  ln("Among patients with a DEATH record. 90+ top-coded.")
+  ln("")
+  age_death <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT d.PATID) AS n
+    FROM (
+      SELECT d.PATID,
+        CASE
+          WHEN DATEDIFF(year, d.BIRTH_DATE, de.DEATH_DATE) < 18 THEN '0-17'
+          WHEN DATEDIFF(year, d.BIRTH_DATE, de.DEATH_DATE) < 45 THEN '18-44'
+          WHEN DATEDIFF(year, d.BIRTH_DATE, de.DEATH_DATE) < 65 THEN '45-64'
+          WHEN DATEDIFF(year, d.BIRTH_DATE, de.DEATH_DATE) < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s.DEMOGRAPHIC d
+      INNER JOIN %s.DEATH de ON d.PATID = de.PATID
+      WHERE d.BIRTH_DATE IS NOT NULL AND de.DEATH_DATE IS NOT NULL
+    ) d
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", schema_name, schema_name), "age at death")
+  if (nrow(age_death) > 0) {
+    ln("| Age Bin | Patients |")
+    ln("|---------|----------|")
+    for (i in seq_len(nrow(age_death))) {
+      ln("| ", age_death$age_bin[i], " | ", sup(age_death$n[i]), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 4. Diagnosis coding by year (ICD-9 vs ICD-10)
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 4. Diagnosis Coding Systems by Year")
+  ln("")
+  ln("DX_TYPE: '09' = ICD-9-CM, '10' = ICD-10-CM, 'SM' = SNOMED, etc.")
+  ln("US transitioned ICD-9 \u2192 ICD-10 on 2015-10-01.")
+  ln("")
+  dx <- safe_query(sprintf("
+    SELECT YEAR(ADMIT_DATE) AS yr, DX_TYPE,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_rows
+    FROM %s.DIAGNOSIS
+    WHERE ADMIT_DATE IS NOT NULL
+    GROUP BY YEAR(ADMIT_DATE), DX_TYPE
+    ORDER BY yr, DX_TYPE
+  ", schema_name), "DX by year")
+  if (nrow(dx) > 0) {
+    ln("| Year | DX_TYPE | Patients | Rows |")
+    ln("|------|---------|----------|------|")
+    for (i in seq_len(nrow(dx))) {
+      ln("| ", dx$yr[i], " | ", dx$DX_TYPE[i], " | ",
+         sup(dx$n_patients[i]), " | ",
+         format(dx$n_rows[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 5. Procedure coding systems
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 5. Procedure Coding Systems")
+  ln("")
+  ln("PX_TYPE: 'CH' = CPT/HCPCS, '10' = ICD-10-PCS, '09' = ICD-9-CM, etc.")
+  ln("")
+  px <- safe_query(sprintf("
+    SELECT PX_TYPE,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_rows,
+           FORMAT(MIN(PX_DATE), 'yyyy-MM') AS earliest,
+           FORMAT(MAX(PX_DATE), 'yyyy-MM') AS latest
+    FROM %s.PROCEDURES
+    WHERE PX_DATE IS NOT NULL
+    GROUP BY PX_TYPE
+    ORDER BY n_patients DESC
+  ", schema_name), "PX_TYPE")
+  if (nrow(px) > 0) {
+    ln("| PX_TYPE | Patients | Rows | Earliest | Latest |")
+    ln("|---------|----------|------|----------|--------|")
+    for (i in seq_len(nrow(px))) {
+      ln("| ", px$PX_TYPE[i], " | ", sup(px$n_patients[i]), " | ",
+         format(px$n_rows[i], big.mark = ","), " | ",
+         px$earliest[i], " | ", px$latest[i], " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 6. Top labs by patient count
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 6. Top 50 LAB_LOINCs by Patient Count")
+  ln("")
+  top_labs <- safe_query(sprintf("
+    SELECT TOP 50 LAB_LOINC,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_results
+    FROM %s.LAB_RESULT_CM
+    WHERE LAB_LOINC IS NOT NULL
+    GROUP BY LAB_LOINC
+    ORDER BY n_patients DESC
+  ", schema_name), "top labs")
+  if (nrow(top_labs) > 0) {
+    ln("| LAB_LOINC | Patients | Results |")
+    ln("|-----------|----------|---------|")
+    for (i in seq_len(nrow(top_labs))) {
+      r <- top_labs[i, ]
+      ln("| ", r$LAB_LOINC, " | ", sup(r$n_patients), " | ",
+         format(r$n_results, big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 7. Top medications
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 7. Top 50 Medications by Patient Count")
+  ln("")
+  has_raw <- safe_query(sprintf("
+    SELECT TOP 1 COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = 'PRESCRIBING'
+      AND COLUMN_NAME = 'RAW_RX_MED_NAME'
+  ", schema_name), "RAW_RX_MED_NAME check")
+  med_col <- if (nrow(has_raw) > 0) "RAW_RX_MED_NAME" else "RXNORM_CUI"
+
+  top_rx <- safe_query(sprintf("
+    SELECT TOP 50 %s AS med,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_rx
+    FROM %s.PRESCRIBING
+    WHERE %s IS NOT NULL AND %s <> ''
+    GROUP BY %s
+    ORDER BY n_patients DESC
+  ", med_col, schema_name, med_col, med_col, med_col), "top Rx")
+  if (nrow(top_rx) > 0) {
+    ln("Search column: **", med_col, "**")
+    ln("")
+    ln("| Medication | Patients | Prescriptions |")
+    ln("|------------|----------|---------------|")
+    for (i in seq_len(nrow(top_rx))) {
+      r <- top_rx[i, ]
+      ln("| ", r$med, " | ", sup(r$n_patients), " | ",
+         format(r$n_rx, big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 8. Demographic distributions
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 8. Demographic Distributions")
+  ln("")
+  for (col in c("SEX", "RACE", "HISPANIC")) {
+    dist <- safe_query(sprintf("
+      SELECT ISNULL(CAST(%s AS varchar(20)), '(NULL)') AS val,
+             COUNT(DISTINCT PATID) AS n
+      FROM %s.DEMOGRAPHIC
+      GROUP BY %s
+      ORDER BY n DESC
+    ", col, schema_name, col), paste0("DEMOGRAPHIC.", col))
+    if (nrow(dist) > 0) {
+      ln("### ", col)
+      ln("")
+      ln("| Value | Patients |")
+      ln("|-------|----------|")
+      for (i in seq_len(nrow(dist))) {
+        ln("| ", dist$val[i], " | ", sup(dist$n[i]), " |")
+      }
+      ln("")
+    }
+  }
+
+  # ---------------------------------------------------------------
+  # 9. Encounter type distribution
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 9. Encounter Types")
+  ln("")
+  ln("AV=Ambulatory, ED=Emergency, EI=ED-to-Inpt, IP=Inpatient, IS=Institutional,")
+  ln("OS=Outpt Surgery, OA=Other Ambulatory, TH=Telehealth, NI/UN=No info, OT=Other.")
+  ln("")
+  enc <- safe_query(sprintf("
+    SELECT ISNULL(ENC_TYPE, '(NULL)') AS ENC_TYPE,
+           COUNT(DISTINCT PATID) AS n_patients,
+           COUNT(*) AS n_encounters
+    FROM %s.ENCOUNTER
+    GROUP BY ENC_TYPE
+    ORDER BY n_patients DESC
+  ", schema_name), "ENC_TYPE")
+  if (nrow(enc) > 0) {
+    ln("| ENC_TYPE | Patients | Encounters |")
+    ln("|----------|----------|------------|")
+    for (i in seq_len(nrow(enc))) {
+      ln("| ", enc$ENC_TYPE[i], " | ", sup(enc$n_patients[i]), " | ",
+         format(enc$n_encounters[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 10. Death records
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 10. Death Records")
+  ln("")
+  death_res <- safe_query(sprintf("
+    SELECT COUNT(DISTINCT PATID) AS n_patients, COUNT(*) AS n_rows
+    FROM %s.DEATH
+  ", schema_name), "DEATH count")
+  if (nrow(death_res) > 0) {
+    ln("Distinct patients with death records: ", sup(death_res$n_patients[1]))
+    ln("Total rows: ", format(death_res$n_rows[1], big.mark = ","))
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 11. Column completeness (NULL rates) for key tables
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 11. Column Completeness — Key Tables")
+  ln("")
+  ln("Percentage of rows where the column is NOT NULL.")
+  ln("")
+  completeness_tables <- list(
+    list(tbl = "DEMOGRAPHIC", cols = c("BIRTH_DATE", "SEX", "RACE", "HISPANIC")),
+    list(tbl = "PRESCRIBING", cols = c("RXNORM_CUI", "RX_ORDER_DATE",
+                                       "RX_QUANTITY", "RX_DAYS_SUPPLY")),
+    list(tbl = "DIAGNOSIS",   cols = c("DX", "DX_TYPE", "ADMIT_DATE", "DX_DATE")),
+    list(tbl = "LAB_RESULT_CM", cols = c("LAB_LOINC", "RESULT_NUM", "RESULT_QUAL",
+                                         "RESULT_DATE"))
+  )
+  for (ct in completeness_tables) {
+    total <- safe_query(sprintf("SELECT COUNT(*) AS n FROM %s.%s",
+                                schema_name, ct$tbl), paste0(ct$tbl, " total"))
+    if (nrow(total) == 0 || total$n[1] == 0) next
+    ln("### ", ct$tbl, " (", format(total$n[1], big.mark = ","), " rows)")
+    ln("")
+    ln("| Column | % Non-NULL |")
+    ln("|--------|-----------|")
+    for (col in ct$cols) {
+      r <- safe_query(sprintf("
+        SELECT COUNT(*) AS n FROM %s.%s WHERE %s IS NOT NULL
+      ", schema_name, ct$tbl, col), paste0(ct$tbl, ".", col))
+      if (nrow(r) > 0) {
+        pct <- round(100 * r$n[1] / total$n[1], 1)
+        ln("| ", col, " | ", pct, "% |")
+      }
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 12. Top 30 ICD-10 codes
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 12. Top 30 ICD-10 Diagnosis Codes")
+  ln("")
+  top_dx <- safe_query(sprintf("
+    SELECT TOP 30 DX, COUNT(DISTINCT PATID) AS n_patients
+    FROM %s.DIAGNOSIS
+    WHERE DX_TYPE = '10' AND DX IS NOT NULL
+    GROUP BY DX
+    ORDER BY n_patients DESC
+  ", schema_name), "top ICD-10")
+  if (nrow(top_dx) > 0) {
+    ln("| ICD-10 Code | Patients |")
+    ln("|-------------|----------|")
+    for (i in seq_len(nrow(top_dx))) {
+      ln("| ", top_dx$DX[i], " | ", sup(top_dx$n_patients[i]), " |")
+    }
+    ln("")
+  }
+
+  writeLines(out, output_file)
+  message("Data profile written to: ", output_file)
+  invisible(out)
+}
+```
+
+## Run everything
+
+```{r run-schema}
+#| code-fold: true
+with_db_connection(cfg$connection$r_code, function(con) {
+  extract_schema_pcornet(con, schema_name = schema, output_file = paths$schema)
+})
+```
+
+```{r run-profile}
+#| code-fold: true
+with_db_connection(cfg$connection$r_code, function(con) {
+  profile_pcornet(con, schema_name = schema, output_file = paths$data_profile,
+                  suppress_threshold = suppress_threshold)
+})
+```
+
+```{r done-banner}
+#| echo: false
+done_banner(`schema  ` = paths$schema,
+            `profile ` = paths$data_profile)
+```

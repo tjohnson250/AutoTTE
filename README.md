@@ -62,7 +62,10 @@ Auto-generates schema dump and data profile for any DB marked
 `RUN_AUTO_ONBOARD` in `db_triage.json`. In online mode the coordinator uses
 `dump_schema(db_id=…)` and `run_profiler(db_id=…, code=…)` from the R executor
 MCP server. In offline mode the schema dump and profile must already exist
-on disk; DBs missing them are skipped at startup.
+on disk; DBs missing them are skipped at startup. For deterministic,
+reproducible profiles (whether online or offline), `profilers/<cdm>.qmd`
+ships per-CDM Quarto templates (PCORnet, OMOP, MIMIC) you can render
+directly — see [Adding a New Database](#adding-a-new-database).
 
 **Phase 1 -- Literature Discovery**
 Worker searches PubMed using a three-pass strategy (broad landscape, targeted
@@ -221,6 +224,37 @@ To run against the bundled synthetic PCORnet database (requires R and the
 This runs in online mode -- agents query the synthetic DuckDB database,
 validate cohort sizes, and execute analysis scripts end-to-end. Results
 appear in `results/atrial_fibrillation/`.
+
+## Quick Start (OMOP via OMOPSynth)
+
+To run against a synthetic OMOP CDM database (Eunomia datasets bundled
+through the [OMOPSynth](https://github.com/tjohnson250/OMOPSynth) R
+package). Two materialized DuckDB files are supported out of the box:
+
+| YAML | Source dataset | Size | Best for |
+|------|----------------|------|----------|
+| `databases/omop_test.yaml` | `GiBleed` | ~6 MB download | Fast iteration, CI tests |
+| `databases/omop_demo.yaml` | `synthea-heart-10k` | ~800 MB download | Cardiac-themed end-to-end demos |
+
+```bash
+# One-time prerequisites
+Rscript -e 'install.packages(c("DBI", "duckdb", "CDMConnector", "here"))'
+Rscript -e 'devtools::install_github("tjohnson250/OMOPSynth")'
+
+# One-time DB materialization (idempotent — safe to re-run)
+Rscript -e 'source("databases/data/setup_omop.R"); setup_omop_test()'
+Rscript -e 'source("databases/data/setup_omop.R"); setup_omop_demo()'
+
+# Run AutoTTE end-to-end against the demo DB
+./run.sh "atrial fibrillation" --db-config databases/omop_demo.yaml
+```
+
+The `.duckdb` files land in `databases/data/` (gitignored). The OMOP
+profile and schema for AutoTTE are generated on first run by Phase 0; for
+a deterministic profile (recommended for sharing or comparing runs), open
+`profilers/omop.qmd` in RStudio and **Restart R + Run All Chunks**. See
+`databases/conventions/omop_test_conventions.md` and `omop_demo_conventions.md`
+for SQL-dialect notes and refresh instructions.
 
 ## Multi-Database Runs
 
@@ -418,11 +452,45 @@ executive summary.
    requirements that agents must follow when writing queries.
 
 3. **For offline mode**, generate the schema dump and data profile manually
-   and place them at the paths declared in the config. For PCORnet CDWs,
-   `CDW_DB_Profiler.qmd` can generate these on a secure machine.
+   and place them at the paths declared in the config. Two options:
+
+   - **Option A — Use a per-CDM Quarto template** (recommended if your DB
+     matches a known CDM). Open the matching template in RStudio, edit
+     the `db_config` param at the top to point at your YAML, then
+     **Restart R + Run All Chunks**. Output lands at the paths declared
+     in your YAML automatically.
+
+     | CDM | Template | Default engine | Default test DB |
+     |-----|----------|----------------|-----------------|
+     | PCORnet | `profilers/pcornet.qmd` | MS SQL Server | (your CDW) |
+     | OMOP    | `profilers/omop.qmd`    | DuckDB | `omop_test.yaml` (GiBleed via OMOPSynth) |
+     | MIMIC-IV | `profilers/mimic.qmd`  | DuckDB | `mimic_iv.yaml` |
+
+     For OMOP, materialize the test DB once before rendering:
+
+     ```r
+     source("databases/data/setup_omop.R")
+     setup_omop_test()   # ~6 MB GiBleed (fast tests)
+     setup_omop_demo()   # ~800 MB synthea-heart-10k (cardiac demos)
+     ```
+
+     The `omop.qmd` template defaults to DuckDB SQL because that is what
+     OMOPSynth/Eunomia/CDMConnector ship; production OMOP installations
+     are usually PostgreSQL. The header comment in the template lists the
+     ~3 function swaps needed for Postgres or SQL Server.
+
+     For institution-specific extensions (e.g., the user's secure CDW has
+     legacy-encounter handling and an MPI sub-section), copy a template
+     and add your sections, or look at `CDW_DB_Profiler.qmd` at the repo
+     root as a worked example.
+
+   - **Option B — Hand-write** the schema dump and profile if your DB
+     doesn't match a known CDM.
 
 4. **For online mode**, the coordinator auto-generates the schema dump and
-   data profile during Phase 0 if the files do not yet exist.
+   data profile during Phase 0 if the files do not yet exist. You can also
+   use the per-CDM Quarto templates above for a deterministic, reproducible
+   profile that does not vary with the LLM.
 
 5. **Run it**:
 
@@ -530,10 +598,18 @@ AutoTTE/
 │   ├── nhanes.yaml                    # Config: NHANES via nhanesA + DuckDB
 │   ├── secure_pcornet_cdw.yaml        # Config: institutional PCORnet CDW
 │   ├── synthetic_pcornet.yaml         # Config: synthetic DuckDB for testing
+│   ├── omop_test.yaml                 # Config: OMOP GiBleed (small, via OMOPSynth)
+│   ├── omop_demo.yaml                 # Config: OMOP synthea-heart-10k (cardiac demos)
 │   ├── schemas/                       # Schema dumps (auto-generated or manual)
 │   ├── profiles/                      # Data profiles (auto-generated or manual)
 │   ├── conventions/                   # Per-database conventions (markdown)
 │   └── data/                          # Database files (gitignored)
+│       └── setup_omop.R               # On-demand fetch for OMOP test/demo DBs
+├── profilers/                         # Per-CDM Quarto profile templates
+│   ├── _helpers.R                     # Shared scaffolding (connection, suppression)
+│   ├── pcornet.qmd                    # Vanilla PCORnet profiler (MSSQL)
+│   ├── omop.qmd                       # OMOP profiler (DuckDB; notes for Postgres/MSSQL)
+│   └── mimic.qmd                      # MIMIC-IV profiler (DuckDB)
 ├── tools/
 │   ├── pubmed_server.py               # MCP: PubMed search + abstract retrieval
 │   ├── datasource_server.py           # MCP: unified datasource registry

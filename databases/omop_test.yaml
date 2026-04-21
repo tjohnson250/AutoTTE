@@ -1,0 +1,23 @@
+id: "omop_test"
+name: "OMOP CDM Test (GiBleed via OMOPSynth)"
+cdm: "omop"
+cdm_version: "5.3"
+engine: "duckdb"
+online: true
+
+# Materialize the .duckdb file by running:
+#   source("databases/data/setup_omop.R")
+#   setup_omop_test()
+# Then this connection block works as-is.
+connection:
+  r_code: |
+    library(DBI)
+    library(duckdb)
+    con <- DBI::dbConnect(duckdb::duckdb(), "databases/data/omop_test.duckdb")
+
+# DuckDB OMOP tables live in the `main` schema. profilers/omop.qmd's
+# load-config chunk derives the schema from this prefix.
+schema_prefix: "main"
+schema_dump: "databases/schemas/omop_test_schema.txt"
+data_profile: "databases/profiles/omop_test_profile.md"
+conventions: "databases/conventions/omop_test_conventions.md"

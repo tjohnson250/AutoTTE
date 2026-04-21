@@ -1,0 +1,21 @@
+id: "omop_demo"
+name: "OMOP CDM Demo (synthea-heart-10k via OMOPSynth)"
+cdm: "omop"
+cdm_version: "5.3"
+engine: "duckdb"
+online: true
+
+# Materialize the .duckdb file by running:
+#   source("databases/data/setup_omop.R")
+#   setup_omop_demo()
+# Note: ~800 MB download, ~1.5 GB on disk after unzip.
+connection:
+  r_code: |
+    library(DBI)
+    library(duckdb)
+    con <- DBI::dbConnect(duckdb::duckdb(), "databases/data/omop_demo.duckdb")
+
+schema_prefix: "main"
+schema_dump: "databases/schemas/omop_demo_schema.txt"
+data_profile: "databases/profiles/omop_demo_profile.md"
+conventions: "databases/conventions/omop_demo_conventions.md"

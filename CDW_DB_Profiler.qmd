@@ -4,6 +4,7 @@ bibliography: references.bib
 format: html
 editor: visual
 params:
+  db_config: "databases/secure_pcornet_cdw.yaml"
   save_temp_tables: false
 ---
 
@@ -18,8 +19,47 @@ library(dbplyr)
 library(pointblank)
 library(SqlRender)
 library(gtsummary)
+library(yaml)
+library(here)
 options(encoding = "UTF-8") # Needed since winterm Locale defaults to 1252 instead of UTF-8
 
+```
+
+## Load configuration
+
+Reads the database YAML config so output paths, DSN, and schema all come from
+one source of truth. To profile a different offline DB, copy this .qmd and
+change the `db_config` param at the top.
+
+```{r load-config}
+#| code-fold: true
+# Shared scaffolding: with_db_connection, load_profiler_config,
+# schema_name_from_cfg, make_suppress, make_safe_query, preflight_check,
+# done_banner. Same helpers used by every profilers/<cdm>.qmd.
+source(here::here("profilers/_helpers.R"))
+
+# `params` is only defined during `quarto render`. Fall back to the default
+# for interactive "Run All Chunks" in RStudio.
+db_config_path <- if (exists("params") && !is.null(params$db_config)) {
+  params$db_config
+} else {
+  "databases/secure_pcornet_cdw.yaml"
+}
+
+config <- load_profiler_config(db_config_path)
+cfg     <- config$cfg
+paths   <- config$paths
+cdw_schema_name <- schema_name_from_cfg(cfg)
+```
+
+## Preflight connectivity check
+
+Fail fast with a readable message if the DSN is wrong, before kicking off the
+hours-long profile queries.
+
+```{r preflight}
+#| code-fold: true
+preflight_check(cfg$connection$r_code, label = cfg$id %||% "cdw")
 ```
 
 This function:
@@ -55,7 +95,6 @@ The output format looks like:
 -   PATID: varchar(50) (NOT NULL) \[FK -\> DEMOGRAPHIC.PATID\] ...
 
 ```{r fn-extract-schema}
-#| eval: false
 #| code-fold: true
 extract_schema_for_claude <- function(con, 
                                       schema_name = "dbo",
@@ -204,20 +243,8 @@ extract_schema_for_claude <- function(con,
 # extract_schema_for_claude(con, schema_name = "myschema", output_file = "schema.txt")
 ```
 
-Get schemas for Claude
-
-```{r extract-schema-cdw}
-#| code-fold: true
-con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
-DBI::dbExecute(con, "USE CDW")
-
-# Verify
-dbGetQuery(con, "SELECT DB_NAME() AS current_database")  # Should now show "CDW"
-
-# Now extract schema with the original function
-extract_schema_for_claude(con, schema_name = "dbo", output_file = "CDW_DBO_database_schema.txt")
-dbDisconnect(con)
-```
+The actual schema dump is invoked from the unified run section at the end of
+this document so it shares the connection-lifecycle helper.
 
 ## CDW Data Profile for AutoTTE
 
@@ -1310,14 +1337,242 @@ profile_cdw_for_autoTTE <- function(con,
 }
 ```
 
-Run the profiler against the CDW.
+## MPI Data Profile
 
-```{r run-profile}
+The MPI database holds patient-identity / cross-system linkage data. The
+function below queries ONLY non-PHI aggregate columns: row counts, the
+MPI_Src system inventory, source-system ID coverage, cross-system overlap,
+and deceased-flag distribution.
+
+**PHI exclusion list** — these columns are NEVER queried:
+First/Last/Middle name, SSN, DateOfBirth/DoB, address fields, phone,
+email, MaidenName, AKA, any free-text identifier column.
+
+The MPI profile is appended to the same `data_profile` file as the CDW
+profile so AutoTTE sees one consolidated profile per database.
+
+```{r fn-profile-mpi}
 #| code-fold: true
-con <- DBI::dbConnect(odbc::odbc(), "SQLODBCD17CDM")
-DBI::dbExecute(con, "USE CDW")
 
-profile_cdw_for_autoTTE(con, schema_name = "dbo",
-                        output_file = "CDW_data_profile.md")
-dbDisconnect(con)
+profile_mpi_for_autoTTE <- function(con,
+                                    schema_name = "dbo",
+                                    output_file,
+                                    suppress_threshold = 11) {
+
+  safe_query <- function(sql, label = "") {
+    tryCatch(
+      dbGetQuery(con, sql),
+      error = function(e) {
+        message("  [SKIP] ", label, ": ", conditionMessage(e))
+        data.frame()
+      }
+    )
+  }
+
+  sup <- function(n) {
+    ifelse(is.na(n), NA_character_,
+           ifelse(n < suppress_threshold, "<11", format(n, big.mark = ",")))
+  }
+
+  out <- character()
+  ln  <- function(...) out <<- c(out, paste0(...))
+
+  ln("")
+  ln("---")
+  ln("# MPI Database (linkage and source coverage)")
+  ln("# Generated: ", Sys.time())
+  ln("# Schema: ", schema_name)
+  ln("# NOTE: This section contains ONLY aggregate counts and source-system")
+  ln("#       definitions. Patient-identifying columns (name, SSN, DOB,")
+  ln("#       address, phone) are NEVER queried. Counts < ",
+     suppress_threshold, " are suppressed.")
+  ln("")
+
+  # ---------------- M1. Row counts per MPI table ----------------
+  ln("## M1. MPI Table Row Counts")
+  ln("")
+  ln("| Table | Rows |")
+  ln("|-------|------|")
+  for (tbl in c("EnterpriseRecords", "EnterpriseRecords_Ext", "Mpi", "MPI_Src")) {
+    rc <- safe_query(sprintf(
+      "SELECT COUNT(*) AS n FROM %s.%s", schema_name, tbl), tbl)
+    if (nrow(rc) > 0 && !is.na(rc$n[1])) {
+      ln("| ", tbl, " | ", format(rc$n[1], big.mark = ","), " |")
+    }
+  }
+  ln("")
+
+  # ---------------- M2. Source-system inventory (MPI_Src) ----------------
+  # MPI_Src contains source-system *definitions*, not patient data.
+  ln("## M2. Source-System Inventory (MPI_Src)")
+  ln("")
+  ln("Full dump of MPI_Src — this table holds source-system definitions,")
+  ln("not patient records.")
+  ln("")
+  src <- safe_query(sprintf("SELECT * FROM %s.MPI_Src", schema_name), "MPI_Src")
+  if (nrow(src) > 0) {
+    ln("```")
+    ln(paste(capture.output(print(src, row.names = FALSE)), collapse = "\n"))
+    ln("```")
+    ln("")
+  }
+
+  # ---------------- M3. Distinct Uid count ----------------
+  ln("## M3. Distinct Patients (Uid)")
+  ln("")
+  uid <- safe_query(sprintf(
+    "SELECT COUNT(DISTINCT Uid) AS n FROM %s.EnterpriseRecords", schema_name),
+    "Uid count")
+  if (nrow(uid) > 0 && !is.na(uid$n[1])) {
+    ln("Distinct Uids in EnterpriseRecords: ", sup(uid$n[1]))
+    ln("")
+  }
+
+  # ---------------- M4. Source-system ID coverage ----------------
+  # Per-source-system non-NULL rate on EnterpriseRecords_Ext. Reports only
+  # counts and percentages — the ID values themselves are never selected.
+  ln("## M4. Source-System ID Coverage (EnterpriseRecords_Ext)")
+  ln("")
+  ln("Percentage of EnterpriseRecords_Ext rows with a non-NULL source ID.")
+  ln("")
+
+  source_id_cols <- c("EPIC_PAT_ID", "ALLSCRIPTS_PERSON_ID",
+                      "MHH_MRN", "UTP_MRN")
+
+  total_ext <- safe_query(sprintf(
+    "SELECT COUNT(*) AS n FROM %s.EnterpriseRecords_Ext", schema_name),
+    "ER_Ext total")
+
+  if (nrow(total_ext) > 0 && total_ext$n[1] > 0) {
+    ln("Total rows: ", format(total_ext$n[1], big.mark = ","))
+    ln("")
+    ln("| Source ID Column | Non-NULL Rows | % Coverage |")
+    ln("|------------------|---------------|------------|")
+    for (col in source_id_cols) {
+      r <- safe_query(sprintf("
+        SELECT COUNT(*) AS n
+        FROM %s.EnterpriseRecords_Ext
+        WHERE %s IS NOT NULL
+      ", schema_name, col), paste0("ER_Ext.", col))
+      if (nrow(r) > 0 && !is.na(r$n[1])) {
+        pct <- round(100 * r$n[1] / total_ext$n[1], 1)
+        ln("| ", col, " | ", sup(r$n[1]), " | ", pct, "% |")
+      }
+    }
+    ln("")
+  }
+
+  # ---------------- M5. Cross-system overlap (EPIC vs ALLSCRIPTS) ----------------
+  # 4-cell crosstab: who has EPIC only, ALLSCRIPTS only, both, neither.
+  # No IDs leave the DB — only the four counts.
+  ln("## M5. EPIC × ALLSCRIPTS Overlap")
+  ln("")
+  ln("Counts of EnterpriseRecords_Ext patients by which legacy/current EHR")
+  ln("system they appear in. Drives expectations for legacy-encounter")
+  ln("filtering in CDW queries.")
+  ln("")
+
+  overlap <- safe_query(sprintf("
+    SELECT
+      SUM(CASE WHEN EPIC_PAT_ID IS NOT NULL
+                AND ALLSCRIPTS_PERSON_ID IS NOT NULL THEN 1 ELSE 0 END) AS both_,
+      SUM(CASE WHEN EPIC_PAT_ID IS NOT NULL
+                AND ALLSCRIPTS_PERSON_ID IS NULL THEN 1 ELSE 0 END) AS epic_only,
+      SUM(CASE WHEN EPIC_PAT_ID IS NULL
+                AND ALLSCRIPTS_PERSON_ID IS NOT NULL THEN 1 ELSE 0 END) AS allscripts_only,
+      SUM(CASE WHEN EPIC_PAT_ID IS NULL
+                AND ALLSCRIPTS_PERSON_ID IS NULL THEN 1 ELSE 0 END) AS neither
+    FROM %s.EnterpriseRecords_Ext
+  ", schema_name), "EPIC/ALLSCRIPTS overlap")
+
+  if (nrow(overlap) > 0) {
+    ln("| Category | Patients |")
+    ln("|----------|----------|")
+    ln("| Has EPIC and ALLSCRIPTS  | ", sup(overlap$both_[1]), " |")
+    ln("| Has EPIC only            | ", sup(overlap$epic_only[1]), " |")
+    ln("| Has ALLSCRIPTS only      | ", sup(overlap$allscripts_only[1]), " |")
+    ln("| Has neither              | ", sup(overlap$neither[1]), " |")
+    ln("")
+  }
+
+  # ---------------- M6. Deceased flag distribution ----------------
+  # Only the boolean/categorical deceased flag is queried — no death dates.
+  deceased <- safe_query(sprintf("
+    SELECT ISNULL(CAST(Deceased AS varchar(20)), '(NULL)') AS deceased_val,
+           COUNT(*) AS n
+    FROM %s.EnterpriseRecords_Ext
+    GROUP BY Deceased
+    ORDER BY n DESC
+  ", schema_name), "Deceased dist")
+
+  if (nrow(deceased) > 0) {
+    ln("## M6. Deceased Flag Distribution")
+    ln("")
+    ln("| Deceased | Patients |")
+    ln("|----------|----------|")
+    for (i in seq_len(nrow(deceased))) {
+      ln("| ", deceased$deceased_val[i], " | ", sup(deceased$n[i]), " |")
+    }
+    ln("")
+  }
+
+  # Append (do not overwrite) so the CDW profile written earlier is preserved.
+  profile_text <- paste(out, collapse = "\n")
+  cat(profile_text, file = output_file, append = TRUE)
+  message("MPI profile appended to: ", output_file)
+  invisible(profile_text)
+}
+```
+
+## Run everything
+
+One unified run section. Each artifact opens its own short-lived connection
+through `with_db_connection()` so a failure in any step still closes its
+ODBC handle. Re-connecting between steps is cheap relative to the multi-hour
+profile queries.
+
+```{r run-cdw-schema}
+#| code-fold: true
+with_db_connection(cfg$connection$r_code, function(con) {
+  extract_schema_for_claude(con,
+                            schema_name = cdw_schema_name,
+                            output_file = paths$schema)
+})
+```
+
+```{r run-cdw-profile}
+#| code-fold: true
+with_db_connection(cfg$connection$r_code, function(con) {
+  profile_cdw_for_autoTTE(con,
+                          schema_name = cdw_schema_name,
+                          output_file = paths$data_profile)
+})
+```
+
+```{r run-mpi-schema}
+#| code-fold: true
+with_db_connection(cfg$mpi_connection$r_code, function(con) {
+  extract_schema_for_claude(con,
+                            schema_name = "dbo",
+                            output_file = paths$mpi_schema)
+})
+```
+
+```{r run-mpi-profile}
+#| code-fold: true
+with_db_connection(cfg$mpi_connection$r_code, function(con) {
+  profile_mpi_for_autoTTE(con,
+                          schema_name = "dbo",
+                          output_file = paths$data_profile)
+})
+```
+
+```{r done-banner}
+#| echo: false
+message("==============================================================")
+message("CDW schema written to:   ", paths$schema)
+message("CDW data profile written to: ", paths$data_profile)
+message("  (MPI section appended to the same file)")
+message("MPI schema written to:   ", paths$mpi_schema)
+message("==============================================================")
 ```

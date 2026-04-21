@@ -1,0 +1,593 @@
+---
+title: "OMOP CDM Data Profiler"
+format: html
+editor: visual
+params:
+  db_config: "databases/omop_test.yaml"
+---
+
+# OMOP CDM Data Profiler
+
+Generic profiler for any database conforming to the [OMOP Common Data
+Model](https://ohdsi.github.io/CommonDataModel/). Produces a schema dump and
+a PHI-safe data profile at the paths declared in the YAML config pointed to
+by the `db_config` param.
+
+**Default test DB:** `databases/omop_test.yaml` → the GiBleed Eunomia
+dataset, materialized via OMOPSynth. Run
+`source("databases/data/setup_omop.R"); setup_omop_test()` once to
+download it (~6 MB).
+
+**SQL dialect:** queries assume **DuckDB** (matches the OMOPSynth /
+Eunomia / CDMConnector test/demo workflow). For OMOP on **PostgreSQL**:
+swap `strftime(date,'%Y-%m')` → `to_char(date,'YYYY-MM')`. For **MS SQL
+Server**: `LIMIT N` → `TOP N`, `EXTRACT(year FROM x)` → `YEAR(x)`,
+`strftime` → `FORMAT(date,'yyyy-MM')`.
+
+**CDM version:** written for OMOP CDM v5.4; queries reference v5.x-stable
+tables (person, observation_period, visit_occurrence, condition_occurrence,
+drug_exposure, procedure_occurrence, measurement, death). Absent tables are
+skipped gracefully via `safe_query`.
+
+```{r load-libraries}
+library(tidyverse)
+library(DBI)
+library(yaml)
+library(here)
+options(encoding = "UTF-8")
+```
+
+## Load configuration and shared scaffolding
+
+```{r load-config}
+#| code-fold: true
+source(here::here("profilers/_helpers.R"))
+
+db_config_path <- if (exists("params") && !is.null(params$db_config)) {
+  params$db_config
+} else {
+  "databases/my_omop_db.yaml"
+}
+
+config <- load_profiler_config(db_config_path)
+cfg     <- config$cfg
+paths   <- config$paths
+schema  <- schema_name_from_cfg(cfg, default = "public")
+suppress_threshold <- 11
+sup     <- make_suppress(suppress_threshold)
+```
+
+## Preflight
+
+```{r preflight}
+preflight_check(cfg$connection$r_code, label = cfg$id %||% "db")
+```
+
+## Schema extraction (Postgres dialect)
+
+```{r fn-extract-schema}
+#| code-fold: true
+
+extract_schema_omop <- function(con,
+                                schema_name = "public",
+                                output_file = "schema.txt") {
+  tables <- DBI::dbGetQuery(con, sprintf("
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = '%s' AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+  ", schema_name))
+
+  out <- c(
+    paste0("# OMOP CDM Schema (", cfg$id %||% "db", ")"),
+    paste0("# Generated: ", Sys.time()),
+    paste0("# Schema: ", schema_name),
+    ""
+  )
+
+  for (table_name in tables$table_name) {
+    columns <- DBI::dbGetQuery(con, sprintf("
+      SELECT column_name, data_type, character_maximum_length, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = '%s' AND table_name = '%s'
+      ORDER BY ordinal_position
+    ", schema_name, table_name))
+
+    pks <- DBI::dbGetQuery(con, sprintf("
+      SELECT kcu.column_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+       AND tc.table_schema   = kcu.table_schema
+      WHERE tc.table_schema = '%s' AND tc.table_name = '%s'
+        AND tc.constraint_type = 'PRIMARY KEY'
+    ", schema_name, table_name))
+
+    fks <- DBI::dbGetQuery(con, sprintf("
+      SELECT kcu.column_name,
+             ccu.table_name  AS references_table,
+             ccu.column_name AS references_column
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+      JOIN information_schema.constraint_column_usage ccu
+        ON ccu.constraint_name = tc.constraint_name
+      WHERE tc.table_schema = '%s' AND tc.table_name = '%s'
+        AND tc.constraint_type = 'FOREIGN KEY'
+    ", schema_name, table_name))
+
+    out <- c(out, paste0("## Table: ", table_name), "", "### Columns:")
+    for (i in seq_len(nrow(columns))) {
+      col <- columns[i, ]
+      type_info <- col$data_type
+      if (!is.na(col$character_maximum_length))
+        type_info <- paste0(type_info, "(", col$character_maximum_length, ")")
+      nullable  <- ifelse(col$is_nullable == "YES", "NULL", "NOT NULL")
+      pk_marker <- ifelse(col$column_name %in% pks$column_name, " [PRIMARY KEY]", "")
+      fk_info <- ""
+      if (col$column_name %in% fks$column_name) {
+        fk_row <- fks[fks$column_name == col$column_name, ]
+        fk_info <- paste0(" [FK -> ", fk_row$references_table, ".",
+                          fk_row$references_column, "]")
+      }
+      out <- c(out, paste0("- ", col$column_name, ": ", type_info,
+                           " (", nullable, ")", pk_marker, fk_info))
+    }
+    out <- c(out, "")
+  }
+  out <- c(out, "---", "## Summary", paste0("Total tables: ", nrow(tables)))
+  writeLines(out, output_file)
+  message("Schema written to: ", output_file)
+}
+```
+
+## Data profile
+
+```{r fn-profile-omop}
+#| code-fold: true
+
+profile_omop <- function(con,
+                         schema_name = "public",
+                         output_file,
+                         suppress_threshold = 11) {
+
+  safe_query <- make_safe_query(con)
+  sup <- make_suppress(suppress_threshold)
+
+  out <- character()
+  ln  <- function(...) out <<- c(out, paste0(...))
+  q   <- function(tbl) paste0(schema_name, ".", tbl)
+
+  ln("# OMOP CDM Data Profile")
+  ln("# Generated: ", Sys.time())
+  ln("# Schema: ", schema_name)
+  ln("# This file contains ONLY aggregate counts and de-identified")
+  ln("# distributions. Counts < ", suppress_threshold, " are suppressed.")
+  ln("# Ages \u2265 90 are top-coded per HIPAA Safe Harbor.")
+  ln("")
+
+  # ---------------------------------------------------------------
+  # 1. Overall size and temporal coverage
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 1. Overall Size and Temporal Coverage")
+  ln("")
+  total_pts <- safe_query(sprintf(
+    "SELECT COUNT(DISTINCT person_id) AS n FROM %s", q("person")),
+    "person")
+  if (nrow(total_pts) > 0) {
+    ln("Total distinct persons: ", sup(total_pts$n[1]))
+    ln("")
+  }
+
+  table_dates <- list(
+    list(tbl = "observation_period",    date_col = "observation_period_start_date"),
+    list(tbl = "visit_occurrence",      date_col = "visit_start_date"),
+    list(tbl = "condition_occurrence",  date_col = "condition_start_date"),
+    list(tbl = "drug_exposure",         date_col = "drug_exposure_start_date"),
+    list(tbl = "procedure_occurrence",  date_col = "procedure_date"),
+    list(tbl = "measurement",           date_col = "measurement_date"),
+    list(tbl = "observation",           date_col = "observation_date"),
+    list(tbl = "death",                 date_col = "death_date"),
+    list(tbl = "device_exposure",       date_col = "device_exposure_start_date"),
+    list(tbl = "note",                  date_col = "note_date")
+  )
+
+  ln("| Table | Distinct Persons | Rows | Earliest (YYYY-MM) | Latest (YYYY-MM) |")
+  ln("|-------|------------------|------|---------------------|-------------------|")
+  for (td in table_dates) {
+    res <- safe_query(sprintf("
+      SELECT COUNT(DISTINCT person_id) AS n_persons,
+             COUNT(*)                  AS n_rows,
+             strftime(MIN(%s), '%%Y-%%m') AS earliest,
+             strftime(MAX(%s), '%%Y-%%m') AS latest
+      FROM %s
+    ", td$date_col, td$date_col, q(td$tbl)), td$tbl)
+    if (nrow(res) > 0 && !is.na(res$n_persons[1]) && res$n_persons[1] > 0) {
+      ln("| ", td$tbl, " | ", sup(res$n_persons[1]), " | ",
+         format(res$n_rows[1], big.mark = ","), " | ",
+         res$earliest[1] %||% "—", " | ",
+         res$latest[1]   %||% "—", " |")
+    }
+  }
+  ln("")
+
+  # ---------------------------------------------------------------
+  # 2. Year-by-year visit volume
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 2. Year-by-Year Person Volume (visit_occurrence)")
+  ln("")
+  yearly <- safe_query(sprintf("
+    SELECT CAST(EXTRACT(year FROM visit_start_date) AS INTEGER) AS yr,
+           COUNT(DISTINCT person_id) AS n_persons,
+           COUNT(*) AS n_visits
+    FROM %s
+    WHERE visit_start_date IS NOT NULL
+    GROUP BY EXTRACT(year FROM visit_start_date)
+    ORDER BY yr
+  ", q("visit_occurrence")), "yearly visits")
+  if (nrow(yearly) > 0) {
+    ln("| Year | Distinct Persons | Visits |")
+    ln("|------|------------------|--------|")
+    for (i in seq_len(nrow(yearly))) {
+      ln("| ", yearly$yr[i], " | ", sup(yearly$n_persons[i]), " | ",
+         format(yearly$n_visits[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 3. Age distributions (PHI-safe)
+  # ---------------------------------------------------------------
+  # person.year_of_birth is already year-only in OMOP (safer than DOB).
+  # Ages ≥ 90 are top-coded.
+  ln("---")
+  ln("## 3. Age Distributions")
+  ln("")
+  ln("Derived from `person.year_of_birth` (already year-only in OMOP) and")
+  ln("`month_of_birth` / `day_of_birth` when needed. Ages \u2265 90 are top-coded.")
+  ln("")
+
+  ln("### 3a. Birth Decade Histogram")
+  ln("")
+  bd <- safe_query(sprintf("
+    SELECT (year_of_birth / 10) * 10 AS birth_decade,
+           COUNT(DISTINCT person_id) AS n
+    FROM %s
+    WHERE year_of_birth IS NOT NULL
+    GROUP BY (year_of_birth / 10) * 10
+    ORDER BY birth_decade
+  ", q("person")), "birth decade")
+  if (nrow(bd) > 0) {
+    ln("| Birth Decade | Persons |")
+    ln("|--------------|---------|")
+    for (i in seq_len(nrow(bd))) {
+      ln("| ", bd$birth_decade[i], "s | ", sup(bd$n[i]), " |")
+    }
+    ln("")
+  }
+
+  ln("### 3b. Current Age Distribution")
+  ln("")
+  age_now <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT person_id) AS n
+    FROM (
+      SELECT person_id,
+        CASE
+          WHEN (CAST(EXTRACT(year FROM CURRENT_DATE) AS INTEGER) - year_of_birth) < 18 THEN '0-17'
+          WHEN (CAST(EXTRACT(year FROM CURRENT_DATE) AS INTEGER) - year_of_birth) < 45 THEN '18-44'
+          WHEN (CAST(EXTRACT(year FROM CURRENT_DATE) AS INTEGER) - year_of_birth) < 65 THEN '45-64'
+          WHEN (CAST(EXTRACT(year FROM CURRENT_DATE) AS INTEGER) - year_of_birth) < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s
+      WHERE year_of_birth IS NOT NULL
+    ) t
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", q("person")), "age now")
+  if (nrow(age_now) > 0) {
+    ln("| Age Bin | Persons |")
+    ln("|---------|---------|")
+    for (i in seq_len(nrow(age_now))) {
+      ln("| ", age_now$age_bin[i], " | ", sup(age_now$n[i]), " |")
+    }
+    ln("")
+  }
+
+  ln("### 3c. Age at First Visit")
+  ln("")
+  age_first <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT person_id) AS n
+    FROM (
+      SELECT p.person_id,
+        CASE
+          WHEN (CAST(EXTRACT(year FROM f.first_visit) AS INTEGER) - p.year_of_birth) < 18 THEN '0-17'
+          WHEN (CAST(EXTRACT(year FROM f.first_visit) AS INTEGER) - p.year_of_birth) < 45 THEN '18-44'
+          WHEN (CAST(EXTRACT(year FROM f.first_visit) AS INTEGER) - p.year_of_birth) < 65 THEN '45-64'
+          WHEN (CAST(EXTRACT(year FROM f.first_visit) AS INTEGER) - p.year_of_birth) < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s p
+      INNER JOIN (
+        SELECT person_id, MIN(visit_start_date) AS first_visit
+        FROM %s
+        WHERE visit_start_date IS NOT NULL
+        GROUP BY person_id
+      ) f ON p.person_id = f.person_id
+      WHERE p.year_of_birth IS NOT NULL
+    ) t
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", q("person"), q("visit_occurrence")), "age at first visit")
+  if (nrow(age_first) > 0) {
+    ln("| Age Bin | Persons |")
+    ln("|---------|---------|")
+    for (i in seq_len(nrow(age_first))) {
+      ln("| ", age_first$age_bin[i], " | ", sup(age_first$n[i]), " |")
+    }
+    ln("")
+  }
+
+  ln("### 3d. Age at Death")
+  ln("")
+  age_death <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT p.person_id) AS n
+    FROM (
+      SELECT p.person_id,
+        CASE
+          WHEN (CAST(EXTRACT(year FROM d.death_date) AS INTEGER) - p.year_of_birth) < 18 THEN '0-17'
+          WHEN (CAST(EXTRACT(year FROM d.death_date) AS INTEGER) - p.year_of_birth) < 45 THEN '18-44'
+          WHEN (CAST(EXTRACT(year FROM d.death_date) AS INTEGER) - p.year_of_birth) < 65 THEN '45-64'
+          WHEN (CAST(EXTRACT(year FROM d.death_date) AS INTEGER) - p.year_of_birth) < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s p
+      INNER JOIN %s d ON p.person_id = d.person_id
+      WHERE p.year_of_birth IS NOT NULL AND d.death_date IS NOT NULL
+    ) p
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", q("person"), q("death")), "age at death")
+  if (nrow(age_death) > 0) {
+    ln("| Age Bin | Persons |")
+    ln("|---------|---------|")
+    for (i in seq_len(nrow(age_death))) {
+      ln("| ", age_death$age_bin[i], " | ", sup(age_death$n[i]), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 4. Vocabulary / type_concept distributions
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 4. Source Vocabulary Distributions")
+  ln("")
+  ln("Joining to the `concept` table (if available) enriches type codes with")
+  ln("human-readable names. Skips gracefully if `concept` is absent.")
+  ln("")
+
+  vocab_tables <- list(
+    list(tbl = "condition_occurrence", type_col = "condition_type_concept_id"),
+    list(tbl = "drug_exposure",        type_col = "drug_type_concept_id"),
+    list(tbl = "procedure_occurrence", type_col = "procedure_type_concept_id"),
+    list(tbl = "measurement",          type_col = "measurement_type_concept_id")
+  )
+  for (vt in vocab_tables) {
+    ln("### ", vt$tbl, " — ", vt$type_col)
+    ln("")
+    r <- safe_query(sprintf("
+      SELECT t.%s AS type_id,
+             c.concept_name AS type_name,
+             COUNT(DISTINCT t.person_id) AS n_persons,
+             COUNT(*) AS n_rows
+      FROM %s t
+      LEFT JOIN %s c ON t.%s = c.concept_id
+      GROUP BY t.%s, c.concept_name
+      ORDER BY n_rows DESC
+      LIMIT 10
+    ", vt$type_col, q(vt$tbl), q("concept"),
+       vt$type_col, vt$type_col), paste0(vt$tbl, " types"))
+    if (nrow(r) > 0) {
+      ln("| Type Concept ID | Name | Persons | Rows |")
+      ln("|-----------------|------|---------|------|")
+      for (i in seq_len(nrow(r))) {
+        ln("| ", r$type_id[i], " | ", r$type_name[i] %||% "—", " | ",
+           sup(r$n_persons[i]), " | ",
+           format(r$n_rows[i], big.mark = ","), " |")
+      }
+      ln("")
+    }
+  }
+
+  # ---------------------------------------------------------------
+  # 5. Top conditions, drugs, measurements by person count
+  # ---------------------------------------------------------------
+  top_by <- function(title, tbl, code_col) {
+    ln("## ", title)
+    ln("")
+    r <- safe_query(sprintf("
+      SELECT t.%s AS concept_id,
+             c.concept_name AS concept_name,
+             COUNT(DISTINCT t.person_id) AS n_persons,
+             COUNT(*) AS n_rows
+      FROM %s t
+      LEFT JOIN %s c ON t.%s = c.concept_id
+      WHERE t.%s IS NOT NULL AND t.%s <> 0
+      GROUP BY t.%s, c.concept_name
+      ORDER BY n_persons DESC
+      LIMIT 30
+    ", code_col, q(tbl), q("concept"),
+       code_col, code_col, code_col, code_col),
+      paste0("top ", tbl))
+    if (nrow(r) > 0) {
+      ln("| Concept ID | Name | Persons | Rows |")
+      ln("|------------|------|---------|------|")
+      for (i in seq_len(nrow(r))) {
+        ln("| ", r$concept_id[i], " | ", r$concept_name[i] %||% "—", " | ",
+           sup(r$n_persons[i]), " | ",
+           format(r$n_rows[i], big.mark = ","), " |")
+      }
+      ln("")
+    }
+  }
+
+  ln("---")
+  top_by("5. Top 30 Conditions (condition_occurrence.condition_concept_id)",
+         "condition_occurrence", "condition_concept_id")
+  ln("---")
+  top_by("6. Top 30 Drugs (drug_exposure.drug_concept_id)",
+         "drug_exposure", "drug_concept_id")
+  ln("---")
+  top_by("7. Top 30 Measurements (measurement.measurement_concept_id)",
+         "measurement", "measurement_concept_id")
+
+  # ---------------------------------------------------------------
+  # 8. Demographic distributions (from person + concept join)
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 8. Demographic Distributions")
+  ln("")
+  demo_cols <- c("gender_concept_id", "race_concept_id",
+                 "ethnicity_concept_id")
+  for (col in demo_cols) {
+    r <- safe_query(sprintf("
+      SELECT p.%s AS concept_id,
+             c.concept_name AS concept_name,
+             COUNT(DISTINCT p.person_id) AS n
+      FROM %s p
+      LEFT JOIN %s c ON p.%s = c.concept_id
+      GROUP BY p.%s, c.concept_name
+      ORDER BY n DESC
+    ", col, q("person"), q("concept"), col, col),
+      paste0("person.", col))
+    if (nrow(r) > 0) {
+      ln("### ", col)
+      ln("")
+      ln("| Concept ID | Name | Persons |")
+      ln("|------------|------|---------|")
+      for (i in seq_len(nrow(r))) {
+        ln("| ", r$concept_id[i] %||% "(NULL)", " | ",
+           r$concept_name[i] %||% "—", " | ",
+           sup(r$n[i]), " |")
+      }
+      ln("")
+    }
+  }
+
+  # ---------------------------------------------------------------
+  # 9. Death records
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 9. Death Records")
+  ln("")
+  dr <- safe_query(sprintf("
+    SELECT COUNT(DISTINCT person_id) AS n_persons, COUNT(*) AS n_rows
+    FROM %s
+  ", q("death")), "death count")
+  if (nrow(dr) > 0) {
+    ln("Distinct persons with death records: ", sup(dr$n_persons[1]))
+    ln("Total rows: ", format(dr$n_rows[1], big.mark = ","))
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 10. Observation period characteristics
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 10. Observation Period Coverage")
+  ln("")
+  op <- safe_query(sprintf("
+    SELECT COUNT(DISTINCT person_id) AS n_persons,
+           COUNT(*) AS n_periods,
+           ROUND(AVG(DATE_DIFF('day', observation_period_start_date,
+                                       observation_period_end_date)), 1)
+             AS mean_days,
+           strftime(MIN(observation_period_start_date), '%%Y-%%m') AS earliest,
+           strftime(MAX(observation_period_end_date),   '%%Y-%%m') AS latest
+    FROM %s
+  ", q("observation_period")), "observation_period")
+  if (nrow(op) > 0) {
+    ln("Persons with an observation period: ", sup(op$n_persons[1]))
+    ln("Total periods: ", format(op$n_periods[1], big.mark = ","))
+    ln("Mean period length (days): ", op$mean_days[1] %||% "—")
+    ln("Earliest start: ", op$earliest[1] %||% "—")
+    ln("Latest end:     ", op$latest[1]   %||% "—")
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 11. Column completeness
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 11. Column Completeness — Key Tables")
+  ln("")
+  completeness <- list(
+    list(tbl = "person", cols = c("year_of_birth", "gender_concept_id",
+                                   "race_concept_id", "ethnicity_concept_id")),
+    list(tbl = "drug_exposure", cols = c("drug_concept_id",
+                                          "drug_exposure_start_date",
+                                          "quantity", "days_supply")),
+    list(tbl = "condition_occurrence", cols = c("condition_concept_id",
+                                                 "condition_start_date",
+                                                 "condition_source_value")),
+    list(tbl = "measurement", cols = c("measurement_concept_id", "value_as_number",
+                                        "value_as_concept_id", "measurement_date",
+                                        "unit_concept_id"))
+  )
+  for (ct in completeness) {
+    total <- safe_query(sprintf("SELECT COUNT(*) AS n FROM %s", q(ct$tbl)),
+                        paste0(ct$tbl, " total"))
+    if (nrow(total) == 0 || total$n[1] == 0) next
+    ln("### ", ct$tbl, " (", format(total$n[1], big.mark = ","), " rows)")
+    ln("")
+    ln("| Column | % Non-NULL |")
+    ln("|--------|-----------|")
+    for (col in ct$cols) {
+      r <- safe_query(sprintf("
+        SELECT COUNT(*) AS n FROM %s WHERE %s IS NOT NULL
+      ", q(ct$tbl), col), paste0(ct$tbl, ".", col))
+      if (nrow(r) > 0) {
+        pct <- round(100 * r$n[1] / total$n[1], 1)
+        ln("| ", col, " | ", pct, "% |")
+      }
+    }
+    ln("")
+  }
+
+  writeLines(out, output_file)
+  message("Data profile written to: ", output_file)
+  invisible(out)
+}
+```
+
+## Run everything
+
+```{r run-schema}
+#| code-fold: true
+with_db_connection(cfg$connection$r_code, function(con) {
+  extract_schema_omop(con, schema_name = schema, output_file = paths$schema)
+})
+```
+
+```{r run-profile}
+#| code-fold: true
+with_db_connection(cfg$connection$r_code, function(con) {
+  profile_omop(con, schema_name = schema, output_file = paths$data_profile,
+               suppress_threshold = suppress_threshold)
+})
+```
+
+```{r done-banner}
+#| echo: false
+done_banner(`schema  ` = paths$schema,
+            `profile ` = paths$data_profile)
+```

@@ -1,0 +1,625 @@
+---
+title: "MIMIC-IV Data Profiler"
+format: html
+editor: visual
+params:
+  db_config: "databases/mimic_iv.yaml"
+---
+
+# MIMIC-IV Data Profiler
+
+Profiler for the [MIMIC-IV critical care
+dataset](https://physionet.org/content/mimiciv/) loaded into DuckDB.
+Produces a schema dump and a PHI-safe data profile at the paths declared in
+the YAML config pointed to by the `db_config` param.
+
+**SQL dialect:** DuckDB (`LIMIT`, `EXTRACT(year FROM …)`,
+`strftime(date,'%Y-%m')`).
+
+**MIMIC-IV de-id notes baked in:**
+- `anchor_age` is already top-coded at 91 for ages > 89 — we still emit
+  90+ buckets to keep parity with the other CDM profilers.
+- Calendar dates are shifted by per-patient random offsets; intervals are
+  preserved. Year-by-year breakdowns reflect shifted years, not real time.
+
+```{r load-libraries}
+library(tidyverse)
+library(DBI)
+library(duckdb)
+library(yaml)
+library(here)
+options(encoding = "UTF-8")
+```
+
+## Load configuration and shared scaffolding
+
+```{r load-config}
+#| code-fold: true
+source(here::here("profilers/_helpers.R"))
+
+db_config_path <- if (exists("params") && !is.null(params$db_config)) {
+  params$db_config
+} else {
+  "databases/mimic_iv.yaml"
+}
+
+config <- load_profiler_config(db_config_path)
+cfg     <- config$cfg
+paths   <- config$paths
+
+# MIMIC-IV is typically loaded in DuckDB at the root namespace (no schema)
+# OR under mimiciv_hosp / mimiciv_icu. Build a qualifier helper that handles
+# both: if schema_prefix is empty, table names are bare; otherwise prefixed.
+qualify <- function(tbl) {
+  if (is.null(cfg$schema_prefix) || !nzchar(cfg$schema_prefix)) tbl
+  else paste0(cfg$schema_prefix, ".", tbl)
+}
+
+suppress_threshold <- 11
+sup <- make_suppress(suppress_threshold)
+```
+
+## Preflight
+
+```{r preflight}
+preflight_check(cfg$connection$r_code, label = cfg$id %||% "db")
+```
+
+## Schema extraction (DuckDB dialect)
+
+```{r fn-extract-schema}
+#| code-fold: true
+
+extract_schema_mimic <- function(con, output_file = "schema.txt") {
+  # DuckDB exposes information_schema. List both base tables and views.
+  tables <- DBI::dbGetQuery(con, "
+    SELECT table_schema, table_name, table_type
+    FROM information_schema.tables
+    WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+    ORDER BY table_schema, table_name
+  ")
+
+  out <- c(
+    paste0("# MIMIC-IV Schema (", cfg$id %||% "db", ")"),
+    paste0("# Generated: ", Sys.time()),
+    ""
+  )
+
+  current_schema <- ""
+  for (i in seq_len(nrow(tables))) {
+    row <- tables[i, ]
+    if (row$table_schema != current_schema) {
+      out <- c(out, paste0("## Schema: ", row$table_schema), "")
+      current_schema <- row$table_schema
+    }
+
+    columns <- DBI::dbGetQuery(con, sprintf("
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = '%s' AND table_name = '%s'
+      ORDER BY ordinal_position
+    ", row$table_schema, row$table_name))
+
+    out <- c(out,
+             paste0("### Table: ", row$table_name, " (", row$table_type, ")"),
+             "")
+    for (j in seq_len(nrow(columns))) {
+      col <- columns[j, ]
+      nullable <- ifelse(col$is_nullable == "YES", "NULL", "NOT NULL")
+      out <- c(out, paste0("- ", col$column_name, ": ",
+                           col$data_type, " (", nullable, ")"))
+    }
+    out <- c(out, "")
+  }
+  out <- c(out, "---", "## Summary",
+           paste0("Total tables/views: ", nrow(tables)))
+  writeLines(out, output_file)
+  message("Schema written to: ", output_file)
+}
+```
+
+## Data profile
+
+```{r fn-profile-mimic}
+#| code-fold: true
+
+profile_mimic <- function(con,
+                          output_file,
+                          suppress_threshold = 11) {
+
+  safe_query <- make_safe_query(con)
+  sup <- make_suppress(suppress_threshold)
+
+  out <- character()
+  ln  <- function(...) out <<- c(out, paste0(...))
+
+  ln("# MIMIC-IV Data Profile")
+  ln("# Generated: ", Sys.time())
+  ln("# This file contains ONLY aggregate counts and de-identified")
+  ln("# distributions. Counts < ", suppress_threshold, " are suppressed.")
+  ln("# Ages \u2265 90 are top-coded per HIPAA Safe Harbor.")
+  ln("# (MIMIC-IV's `anchor_age` already top-codes >89 to 91.)")
+  ln("")
+
+  # ---------------------------------------------------------------
+  # 1. Overall size
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 1. Overall Size")
+  ln("")
+  pts <- safe_query(sprintf("
+    SELECT COUNT(DISTINCT subject_id) AS n FROM %s
+  ", qualify("patients")), "patients")
+  if (nrow(pts) > 0) ln("Distinct patients (hosp): ", sup(pts$n[1]))
+
+  adm <- safe_query(sprintf("
+    SELECT COUNT(DISTINCT subject_id) AS n_pat,
+           COUNT(*) AS n_adm
+    FROM %s
+  ", qualify("admissions")), "admissions")
+  if (nrow(adm) > 0) {
+    ln("Distinct patients with admissions: ", sup(adm$n_pat[1]))
+    ln("Total admissions: ", format(adm$n_adm[1], big.mark = ","))
+  }
+
+  icu <- safe_query(sprintf("
+    SELECT COUNT(DISTINCT subject_id) AS n_pat,
+           COUNT(*) AS n_stays
+    FROM %s
+  ", qualify("icustays")), "icustays")
+  if (nrow(icu) > 0) {
+    ln("Distinct patients with ICU stays: ", sup(icu$n_pat[1]))
+    ln("Total ICU stays: ", format(icu$n_stays[1], big.mark = ","))
+  }
+  ln("")
+
+  # ---------------------------------------------------------------
+  # 2. Year-by-year admission volume (shifted years)
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 2. Year-by-Year Admission Volume (shifted years)")
+  ln("")
+  ln("MIMIC-IV dates are randomly shifted per patient — these years do not")
+  ln("correspond to real calendar time. Use `anchor_year_group` for the")
+  ln("real-world era an anchor maps to.")
+  ln("")
+  yearly <- safe_query(sprintf("
+    SELECT EXTRACT(year FROM admittime)::int AS yr,
+           COUNT(DISTINCT subject_id) AS n_patients,
+           COUNT(*) AS n_admissions
+    FROM %s
+    WHERE admittime IS NOT NULL
+    GROUP BY EXTRACT(year FROM admittime)
+    ORDER BY yr
+  ", qualify("admissions")), "yearly admissions")
+  if (nrow(yearly) > 0) {
+    ln("| Year (shifted) | Distinct Patients | Admissions |")
+    ln("|----------------|-------------------|------------|")
+    for (i in seq_len(nrow(yearly))) {
+      ln("| ", yearly$yr[i], " | ", sup(yearly$n_patients[i]), " | ",
+         format(yearly$n_admissions[i], big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  ln("### `anchor_year_group` Distribution (real-world era)")
+  ln("")
+  ayg <- safe_query(sprintf("
+    SELECT anchor_year_group, COUNT(DISTINCT subject_id) AS n
+    FROM %s
+    GROUP BY anchor_year_group
+    ORDER BY anchor_year_group
+  ", qualify("patients")), "anchor_year_group")
+  if (nrow(ayg) > 0) {
+    ln("| Era | Patients |")
+    ln("|-----|----------|")
+    for (i in seq_len(nrow(ayg))) {
+      ln("| ", ayg$anchor_year_group[i], " | ", sup(ayg$n[i]), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 3. Age distributions
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 3. Age Distributions")
+  ln("")
+  ln("`anchor_age` is age at the patient's anchor year. MIMIC-IV already")
+  ln("top-codes ages > 89 to 91. We bucket into the same bins used by")
+  ln("the PCORnet/OMOP profilers for cross-CDM comparability.")
+  ln("")
+
+  ln("### 3a. Anchor Age Distribution")
+  ln("")
+  age_anchor <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT subject_id) AS n
+    FROM (
+      SELECT subject_id,
+        CASE
+          WHEN anchor_age < 18 THEN '0-17'
+          WHEN anchor_age < 45 THEN '18-44'
+          WHEN anchor_age < 65 THEN '45-64'
+          WHEN anchor_age < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s
+      WHERE anchor_age IS NOT NULL
+    ) t
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", qualify("patients")), "anchor age")
+  if (nrow(age_anchor) > 0) {
+    ln("| Age Bin | Patients |")
+    ln("|---------|----------|")
+    for (i in seq_len(nrow(age_anchor))) {
+      ln("| ", age_anchor$age_bin[i], " | ", sup(age_anchor$n[i]), " |")
+    }
+    ln("")
+  }
+
+  ln("### 3b. Age at First Admission")
+  ln("")
+  ln("Approximated as `anchor_age + (admit_year - anchor_year)` for each")
+  ln("patient's earliest admission.")
+  ln("")
+  age_first <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT subject_id) AS n
+    FROM (
+      SELECT p.subject_id,
+        CASE
+          WHEN (p.anchor_age +
+                (EXTRACT(year FROM f.first_admit)::int - p.anchor_year)) < 18 THEN '0-17'
+          WHEN (p.anchor_age +
+                (EXTRACT(year FROM f.first_admit)::int - p.anchor_year)) < 45 THEN '18-44'
+          WHEN (p.anchor_age +
+                (EXTRACT(year FROM f.first_admit)::int - p.anchor_year)) < 65 THEN '45-64'
+          WHEN (p.anchor_age +
+                (EXTRACT(year FROM f.first_admit)::int - p.anchor_year)) < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s p
+      INNER JOIN (
+        SELECT subject_id, MIN(admittime) AS first_admit
+        FROM %s
+        WHERE admittime IS NOT NULL
+        GROUP BY subject_id
+      ) f ON p.subject_id = f.subject_id
+      WHERE p.anchor_age IS NOT NULL
+    ) t
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", qualify("patients"), qualify("admissions")), "age at first admit")
+  if (nrow(age_first) > 0) {
+    ln("| Age Bin | Patients |")
+    ln("|---------|----------|")
+    for (i in seq_len(nrow(age_first))) {
+      ln("| ", age_first$age_bin[i], " | ", sup(age_first$n[i]), " |")
+    }
+    ln("")
+  }
+
+  ln("### 3c. Age at Death (in-hospital)")
+  ln("")
+  ln("Among admissions where `hospital_expire_flag = 1`.")
+  ln("")
+  age_death <- safe_query(sprintf("
+    SELECT age_bin, COUNT(DISTINCT subject_id) AS n
+    FROM (
+      SELECT p.subject_id,
+        CASE
+          WHEN (p.anchor_age +
+                (EXTRACT(year FROM a.deathtime)::int - p.anchor_year)) < 18 THEN '0-17'
+          WHEN (p.anchor_age +
+                (EXTRACT(year FROM a.deathtime)::int - p.anchor_year)) < 45 THEN '18-44'
+          WHEN (p.anchor_age +
+                (EXTRACT(year FROM a.deathtime)::int - p.anchor_year)) < 65 THEN '45-64'
+          WHEN (p.anchor_age +
+                (EXTRACT(year FROM a.deathtime)::int - p.anchor_year)) < 90 THEN '65-89'
+          ELSE '90+'
+        END AS age_bin
+      FROM %s p
+      INNER JOIN %s a ON p.subject_id = a.subject_id
+      WHERE p.anchor_age IS NOT NULL
+        AND a.hospital_expire_flag = 1
+        AND a.deathtime IS NOT NULL
+    ) t
+    GROUP BY age_bin
+    ORDER BY CASE age_bin WHEN '0-17' THEN 1 WHEN '18-44' THEN 2
+                          WHEN '45-64' THEN 3 WHEN '65-89' THEN 4
+                          ELSE 5 END
+  ", qualify("patients"), qualify("admissions")), "age at death")
+  if (nrow(age_death) > 0) {
+    ln("| Age Bin | Patients |")
+    ln("|---------|----------|")
+    for (i in seq_len(nrow(age_death))) {
+      ln("| ", age_death$age_bin[i], " | ", sup(age_death$n[i]), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 4. Demographics (admissions table — race / insurance / language)
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 4. Demographic Distributions")
+  ln("")
+  for (col in c("gender")) {
+    r <- safe_query(sprintf("
+      SELECT COALESCE(%s, '(NULL)') AS val, COUNT(DISTINCT subject_id) AS n
+      FROM %s
+      GROUP BY %s
+      ORDER BY n DESC
+    ", col, qualify("patients"), col), paste0("patients.", col))
+    if (nrow(r) > 0) {
+      ln("### patients.", col)
+      ln("")
+      ln("| Value | Patients |")
+      ln("|-------|----------|")
+      for (i in seq_len(nrow(r))) {
+        ln("| ", r$val[i], " | ", sup(r$n[i]), " |")
+      }
+      ln("")
+    }
+  }
+
+  for (col in c("race", "insurance", "marital_status", "language")) {
+    r <- safe_query(sprintf("
+      SELECT COALESCE(%s, '(NULL)') AS val, COUNT(DISTINCT subject_id) AS n
+      FROM %s
+      GROUP BY %s
+      ORDER BY n DESC
+      LIMIT 30
+    ", col, qualify("admissions"), col), paste0("admissions.", col))
+    if (nrow(r) > 0) {
+      ln("### admissions.", col)
+      ln("")
+      ln("| Value | Patients |")
+      ln("|-------|----------|")
+      for (i in seq_len(nrow(r))) {
+        ln("| ", r$val[i], " | ", sup(r$n[i]), " |")
+      }
+      ln("")
+    }
+  }
+
+  # ---------------------------------------------------------------
+  # 5. Admission types and dispositions
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 5. Admission Type and Discharge Disposition")
+  ln("")
+  for (col in c("admission_type", "admission_location", "discharge_location")) {
+    r <- safe_query(sprintf("
+      SELECT COALESCE(%s, '(NULL)') AS val, COUNT(*) AS n
+      FROM %s
+      GROUP BY %s
+      ORDER BY n DESC
+    ", col, qualify("admissions"), col), paste0("admissions.", col))
+    if (nrow(r) > 0) {
+      ln("### admissions.", col)
+      ln("")
+      ln("| Value | Admissions |")
+      ln("|-------|------------|")
+      for (i in seq_len(nrow(r))) {
+        ln("| ", r$val[i], " | ", sup(r$n[i]), " |")
+      }
+      ln("")
+    }
+  }
+
+  # ---------------------------------------------------------------
+  # 6. ICU stay characteristics
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 6. ICU Stay Characteristics")
+  ln("")
+  cu <- safe_query(sprintf("
+    SELECT first_careunit, COUNT(*) AS n_stays,
+           COUNT(DISTINCT subject_id) AS n_patients,
+           ROUND(AVG(los)::numeric, 2) AS mean_los_days
+    FROM %s
+    GROUP BY first_careunit
+    ORDER BY n_stays DESC
+  ", qualify("icustays")), "ICU careunit")
+  if (nrow(cu) > 0) {
+    ln("| First Care Unit | Stays | Patients | Mean LOS (days) |")
+    ln("|------------------|-------|----------|-----------------|")
+    for (i in seq_len(nrow(cu))) {
+      ln("| ", cu$first_careunit[i], " | ",
+         sup(cu$n_stays[i]), " | ", sup(cu$n_patients[i]), " | ",
+         cu$mean_los_days[i], " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 7. Top diagnoses (ICD)
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 7. Top 30 Diagnoses (ICD)")
+  ln("")
+  ln("Joined to `d_icd_diagnoses` for human-readable titles where possible.")
+  ln("")
+  top_dx <- safe_query(sprintf("
+    SELECT d.icd_code,
+           d.icd_version,
+           dd.long_title,
+           COUNT(DISTINCT d.subject_id) AS n_patients,
+           COUNT(*) AS n_rows
+    FROM %s d
+    LEFT JOIN %s dd
+      ON d.icd_code = dd.icd_code AND d.icd_version = dd.icd_version
+    GROUP BY d.icd_code, d.icd_version, dd.long_title
+    ORDER BY n_patients DESC
+    LIMIT 30
+  ", qualify("diagnoses_icd"), qualify("d_icd_diagnoses")), "top diagnoses")
+  if (nrow(top_dx) > 0) {
+    ln("| ICD Code | Version | Title | Patients | Rows |")
+    ln("|----------|---------|-------|----------|------|")
+    for (i in seq_len(nrow(top_dx))) {
+      r <- top_dx[i, ]
+      ln("| ", r$icd_code, " | ", r$icd_version, " | ",
+         r$long_title %||% "—", " | ",
+         sup(r$n_patients), " | ",
+         format(r$n_rows, big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 8. Top labs (with d_labitems lookup)
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 8. Top 50 Lab Items by Patient Count")
+  ln("")
+  top_labs <- safe_query(sprintf("
+    SELECT le.itemid,
+           dl.label,
+           dl.category,
+           COUNT(DISTINCT le.subject_id) AS n_patients,
+           COUNT(*) AS n_results
+    FROM %s le
+    LEFT JOIN %s dl ON le.itemid = dl.itemid
+    GROUP BY le.itemid, dl.label, dl.category
+    ORDER BY n_patients DESC
+    LIMIT 50
+  ", qualify("labevents"), qualify("d_labitems")), "top labs")
+  if (nrow(top_labs) > 0) {
+    ln("| ItemID | Label | Category | Patients | Results |")
+    ln("|--------|-------|----------|----------|---------|")
+    for (i in seq_len(nrow(top_labs))) {
+      r <- top_labs[i, ]
+      ln("| ", r$itemid, " | ", r$label %||% "—", " | ",
+         r$category %||% "—", " | ",
+         sup(r$n_patients), " | ",
+         format(r$n_results, big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 9. Top medications
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 9. Top 30 Medications by Patient Count")
+  ln("")
+  top_rx <- safe_query(sprintf("
+    SELECT drug,
+           COUNT(DISTINCT subject_id) AS n_patients,
+           COUNT(*) AS n_rx
+    FROM %s
+    WHERE drug IS NOT NULL
+    GROUP BY drug
+    ORDER BY n_patients DESC
+    LIMIT 30
+  ", qualify("prescriptions")), "top prescriptions")
+  if (nrow(top_rx) > 0) {
+    ln("| Drug | Patients | Prescriptions |")
+    ln("|------|----------|---------------|")
+    for (i in seq_len(nrow(top_rx))) {
+      r <- top_rx[i, ]
+      ln("| ", r$drug, " | ", sup(r$n_patients), " | ",
+         format(r$n_rx, big.mark = ","), " |")
+    }
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 10. Mortality summary
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 10. Mortality Summary")
+  ln("")
+  m <- safe_query(sprintf("
+    SELECT
+      COUNT(DISTINCT subject_id) AS n_total_pts,
+      COUNT(DISTINCT CASE WHEN dod IS NOT NULL THEN subject_id END) AS n_with_dod
+    FROM %s
+  ", qualify("patients")), "mortality")
+  if (nrow(m) > 0) {
+    ln("Patients with any recorded date of death (`dod`): ",
+       sup(m$n_with_dod[1]), " of ", sup(m$n_total_pts[1]))
+  }
+  in_hosp <- safe_query(sprintf("
+    SELECT
+      COUNT(*) AS n_admissions,
+      SUM(hospital_expire_flag) AS n_in_hosp_deaths
+    FROM %s
+  ", qualify("admissions")), "in-hospital deaths")
+  if (nrow(in_hosp) > 0) {
+    ln("In-hospital deaths (admissions with hospital_expire_flag=1): ",
+       sup(in_hosp$n_in_hosp_deaths[1]), " of ",
+       format(in_hosp$n_admissions[1], big.mark = ","), " admissions")
+    ln("")
+  }
+
+  # ---------------------------------------------------------------
+  # 11. Column completeness
+  # ---------------------------------------------------------------
+  ln("---")
+  ln("## 11. Column Completeness — Key Tables")
+  ln("")
+  completeness <- list(
+    list(tbl = "admissions", cols = c("admittime", "dischtime", "deathtime",
+                                       "admission_type", "race", "insurance")),
+    list(tbl = "labevents",  cols = c("charttime", "valuenum", "valueuom",
+                                       "ref_range_lower", "ref_range_upper")),
+    list(tbl = "prescriptions", cols = c("starttime", "stoptime", "drug",
+                                          "dose_val_rx", "ndc")),
+    list(tbl = "icustays",   cols = c("intime", "outtime", "los",
+                                       "first_careunit", "last_careunit"))
+  )
+  for (ct in completeness) {
+    total <- safe_query(sprintf("SELECT COUNT(*) AS n FROM %s",
+                                qualify(ct$tbl)),
+                        paste0(ct$tbl, " total"))
+    if (nrow(total) == 0 || total$n[1] == 0) next
+    ln("### ", ct$tbl, " (", format(total$n[1], big.mark = ","), " rows)")
+    ln("")
+    ln("| Column | % Non-NULL |")
+    ln("|--------|-----------|")
+    for (col in ct$cols) {
+      r <- safe_query(sprintf("
+        SELECT COUNT(*) AS n FROM %s WHERE %s IS NOT NULL
+      ", qualify(ct$tbl), col), paste0(ct$tbl, ".", col))
+      if (nrow(r) > 0) {
+        pct <- round(100 * r$n[1] / total$n[1], 1)
+        ln("| ", col, " | ", pct, "% |")
+      }
+    }
+    ln("")
+  }
+
+  writeLines(out, output_file)
+  message("Data profile written to: ", output_file)
+  invisible(out)
+}
+```
+
+## Run everything
+
+```{r run-schema}
+#| code-fold: true
+with_db_connection(cfg$connection$r_code, function(con) {
+  extract_schema_mimic(con, output_file = paths$schema)
+})
+```
+
+```{r run-profile}
+#| code-fold: true
+with_db_connection(cfg$connection$r_code, function(con) {
+  profile_mimic(con, output_file = paths$data_profile,
+                suppress_threshold = suppress_threshold)
+})
+```
+
+```{r done-banner}
+#| echo: false
+done_banner(`schema  ` = paths$schema,
+            `profile ` = paths$data_profile)
+```

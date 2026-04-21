@@ -4,21 +4,29 @@ results/*
 __pycache__/
 *.pyc
 .DS_Store
-databases/schemas/
-databases/profiles/
-databases/conventions/
-databases/data/
-databases/data
+databases/schemas/*
+databases/profiles/*
+databases/conventions/*
+databases/data/*
 .mcp-session.json
 .worktrees/
 !databases/schemas/secure_pcornet_cdw_schema.txt
 !databases/schemas/secure_pcornet_cdw_mpi_schema.txt
 !databases/schemas/nhanes_schema.txt
 !databases/schemas/mimic_iv_schema.txt
+!databases/schemas/omop_test_schema.txt
+!databases/schemas/omop_demo_schema.txt
 !databases/profiles/secure_pcornet_cdw_profile.md
 !databases/profiles/nhanes_profile.md
 !databases/profiles/mimic_iv_profile.md
+!databases/profiles/omop_test_profile.md
+!databases/profiles/omop_demo_profile.md
 !databases/conventions/secure_pcornet_cdw_conventions.md
 !databases/conventions/nhanes_conventions.md
 !databases/conventions/mimic_iv_conventions.md
+!databases/conventions/omop_test_conventions.md
+!databases/conventions/omop_demo_conventions.md
+# OMOP test/demo databases are downloaded on-demand via OMOPSynth — keep
+# the setup script committed but exclude the materialized .duckdb files.
+!databases/data/setup_omop.R
 Rplots.pdf
