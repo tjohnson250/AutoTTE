@@ -271,6 +271,15 @@ save_results <- function(results_list, protocol_id, output_dir = ".") {
 # For non-survey public datasets, use tbl_summary().
 save_table1 <- function(data_or_design, treatment_var, confounders,
                         protocol_id, output_dir, survey = FALSE) {
+  # add_difference("smd") requires exactly 2 levels in `by`. For >=3 arms,
+  # use add_p() here; pairwise SMDs are reported separately in the love plot.
+  if (survey) {
+    tvec <- data_or_design$variables[[treatment_var]]
+  } else {
+    tvec <- data_or_design[[treatment_var]]
+  }
+  n_lvls <- length(unique(stats::na.omit(tvec)))
+  add_balance <- if (n_lvls == 2) add_difference else add_p
   if (survey) {
     tbl <- tbl_svysummary(data_or_design, by = all_of(treatment_var),
              include = all_of(confounders),
@@ -278,7 +287,7 @@ save_table1 <- function(data_or_design, treatment_var, confounders,
                               all_categorical() ~ "{n_unweighted} ({p}%)"),
              missing = "ifany") |>
       add_overall() |>
-      add_difference() |>
+      add_balance() |>
       bold_labels()
   } else {
     tbl <- data_or_design |>
@@ -288,7 +297,7 @@ save_table1 <- function(data_or_design, treatment_var, confounders,
                                    all_categorical() ~ "{n} ({p}%)"),
                   missing = "ifany") |>
       add_overall() |>
-      add_difference() |>
+      add_balance() |>
       bold_labels()
   }
   tbl <- tbl |>

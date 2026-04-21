@@ -561,9 +561,17 @@ for it too. The report embedding expects `protocol_NN_consort.png` to exist.
 - For NHANES survey data: use `gtsummary::tbl_svysummary()` on a
   `survey::svydesign` object
 - For CDW / non-survey data: use `gtsummary::tbl_summary()`
-- Always include `add_difference()` for the SMD column
+- For a **2-arm** `by` column: include `add_difference()` for the SMD column.
+  `add_difference("smd")` REQUIRES exactly 2 levels — it errors otherwise.
+  Call `droplevels()` on the `by` factor first so a post-trim empty arm
+  doesn't leave a phantom level.
+- For a **3+ arm** `by` column: use `add_p()` instead of `add_difference()`.
+  Pairwise SMDs are already reported in the love plot via `cobalt`, so Table 1
+  carries the omnibus test and the love plot carries balance.
 - Always include `add_overall()` for a combined column
 - Save with `gt::gtsave(tbl, "protocol_NN_table1.html")`
+- The provided `save_table1()` helper in `analysis_plan_template*.R` already
+  branches on `nlevels(by)` — prefer calling it over inlining the block.
 
 **Love plot:**
 - MUST show both pre-weighting AND post-weighting SMDs

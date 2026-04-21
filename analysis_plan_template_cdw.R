@@ -669,6 +669,10 @@ run_sensitivity <- function(results, config) {
 # wrapped in tryCatch() so failures do not prevent JSON results from saving.
 
 save_table1 <- function(cohort, treatment_var, confounders, protocol_id, output_dir) {
+  # add_difference("smd") requires exactly 2 levels in `by`. For >=3 arms,
+  # use add_p() here; pairwise SMDs are reported separately in the love plot.
+  n_lvls <- length(unique(stats::na.omit(cohort[[treatment_var]])))
+  add_balance <- if (n_lvls == 2) add_difference else add_p
   tbl <- cohort |>
     select(all_of(c(treatment_var, confounders))) |>
     tbl_summary(by = all_of(treatment_var),
@@ -676,7 +680,7 @@ save_table1 <- function(cohort, treatment_var, confounders, protocol_id, output_
                                  all_categorical() ~ "{n} ({p}%)"),
                 missing = "ifany") |>
     add_overall() |>
-    add_difference() |>
+    add_balance() |>
     bold_labels() |>
     as_gt() |>
     tab_header(title = paste("Table 1: Baseline Characteristics"))
