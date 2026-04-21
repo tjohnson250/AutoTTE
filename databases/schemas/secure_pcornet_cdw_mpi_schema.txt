@@ -1,5 +1,5 @@
 # Database Schema Information
-# Generated: 2025-11-27 13:45:59.024617
+# Generated: 2026-04-21 06:04:24.70614
 # Schema: dbo
 
 ## Table: datavant_mrn_map
@@ -349,6 +349,29 @@
 - BIRTH_DATE: varchar(-1) (NULL)
 - CDM_RACE: varchar(-1) (NULL)
 - IsDeceased: varchar(-1) (NULL)
+
+## Table: extract_MHH_CLARITY
+
+### Columns:
+- LANGUAGE: varchar(-1) (NULL)
+- Email: varchar(-1) (NULL)
+- Lid: varchar(128) (NOT NULL) [PRIMARY KEY]
+- HISPANIC: varchar(-1) (NULL)
+- MARITAL_STATUS: varchar(-1) (NULL)
+- SEX: varchar(-1) (NULL)
+- GENDER_IDENTITY: varchar(-1) (NULL)
+- MRN: varchar(-1) (NULL)
+- PAT_ID: varchar(-1) (NULL)
+- STATE: varchar(-1) (NULL)
+- LastEditedDTTM: varchar(-1) (NULL)
+- CITY: varchar(-1) (NULL)
+- IS_VALID: varchar(-1) (NULL)
+- RACE: varchar(-1) (NULL)
+- SEXUAL_ORIENTATION: varchar(-1) (NULL)
+- BIRTH_DATE: varchar(-1) (NULL)
+- RECORD_STATE: varchar(-1) (NULL)
+- IsDeceased: varchar(-1) (NULL)
+- COUNTY: varchar(-1) (NULL)
 
 ## Table: extract_MHH_COVID
 
@@ -1213,10 +1236,10 @@
 
 ---
 ## Summary
-Total tables: 88
+Total tables: 89
 
 # Database Schema Information
-# Generated: 2025-11-27 13:45:59.024617
+# Generated: 2026-04-21 06:04:24.70614
 # Schema: dbo
 
 ## Table: datavant_mrn_map
@@ -1566,6 +1589,29 @@ Total tables: 88
 - BIRTH_DATE: varchar(-1) (NULL)
 - CDM_RACE: varchar(-1) (NULL)
 - IsDeceased: varchar(-1) (NULL)
+
+## Table: extract_MHH_CLARITY
+
+### Columns:
+- LANGUAGE: varchar(-1) (NULL)
+- Email: varchar(-1) (NULL)
+- Lid: varchar(128) (NOT NULL) [PRIMARY KEY]
+- HISPANIC: varchar(-1) (NULL)
+- MARITAL_STATUS: varchar(-1) (NULL)
+- SEX: varchar(-1) (NULL)
+- GENDER_IDENTITY: varchar(-1) (NULL)
+- MRN: varchar(-1) (NULL)
+- PAT_ID: varchar(-1) (NULL)
+- STATE: varchar(-1) (NULL)
+- LastEditedDTTM: varchar(-1) (NULL)
+- CITY: varchar(-1) (NULL)
+- IS_VALID: varchar(-1) (NULL)
+- RACE: varchar(-1) (NULL)
+- SEXUAL_ORIENTATION: varchar(-1) (NULL)
+- BIRTH_DATE: varchar(-1) (NULL)
+- RECORD_STATE: varchar(-1) (NULL)
+- IsDeceased: varchar(-1) (NULL)
+- COUNTY: varchar(-1) (NULL)
 
 ## Table: extract_MHH_COVID
 
@@ -2430,10 +2476,10 @@ Total tables: 88
 
 ---
 ## Summary
-Total tables: 88
+Total tables: 89
 
 # Database Schema Information
-# Generated: 2025-11-27 13:45:59.024617
+# Generated: 2026-04-21 06:04:24.70614
 # Schema: dbo
 
 ## Table: datavant_mrn_map
@@ -2783,6 +2829,29 @@ Total tables: 88
 - BIRTH_DATE: varchar(-1) (NULL)
 - CDM_RACE: varchar(-1) (NULL)
 - IsDeceased: varchar(-1) (NULL)
+
+## Table: extract_MHH_CLARITY
+
+### Columns:
+- LANGUAGE: varchar(-1) (NULL)
+- Email: varchar(-1) (NULL)
+- Lid: varchar(128) (NOT NULL) [PRIMARY KEY]
+- HISPANIC: varchar(-1) (NULL)
+- MARITAL_STATUS: varchar(-1) (NULL)
+- SEX: varchar(-1) (NULL)
+- GENDER_IDENTITY: varchar(-1) (NULL)
+- MRN: varchar(-1) (NULL)
+- PAT_ID: varchar(-1) (NULL)
+- STATE: varchar(-1) (NULL)
+- LastEditedDTTM: varchar(-1) (NULL)
+- CITY: varchar(-1) (NULL)
+- IS_VALID: varchar(-1) (NULL)
+- RACE: varchar(-1) (NULL)
+- SEXUAL_ORIENTATION: varchar(-1) (NULL)
+- BIRTH_DATE: varchar(-1) (NULL)
+- RECORD_STATE: varchar(-1) (NULL)
+- IsDeceased: varchar(-1) (NULL)
+- COUNTY: varchar(-1) (NULL)
 
 ## Table: extract_MHH_COVID
 
@@ -3647,5 +3716,5 @@ Total tables: 88
 
 ---
 ## Summary
-Total tables: 88
+Total tables: 89
 

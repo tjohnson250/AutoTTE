@@ -1,6 +1,14 @@
 # Database Schema Information
-# Generated: 2025-11-27 13:43:37.854131
+# Generated: 2026-04-20 22:22:29.960091
 # Schema: dbo
+
+## Table: ACCESSION
+
+### Columns:
+- CDW_ACCESSION_ID: varchar(37) (NULL)
+- LAB_RESULT_CM_ID: varchar(700) (NULL)
+- PROCEDURESID: varchar(700) (NULL)
+- ACCESSION_NUM: varchar(255) (NULL)
 
 ## Table: APPOINTMENT
 
@@ -21,6 +29,12 @@
 - APPT_ID: varchar(64) (NOT NULL) [PRIMARY KEY]
 - CDW_UpdatedDTTM: datetime (NULL)
 
+## Table: c3_patients
+
+### Columns:
+- PATID: varchar(255) (NULL)
+- t0: date (NULL)
+
 ## Table: CDW_COLUMN_MAP
 
 ### Columns:
@@ -32,6 +46,11 @@
 - CDMColumn: varchar(32) (NULL)
 - CDMName: varchar(255) (NULL)
 - CDMValue: varchar(25) (NULL)
+
+## Table: cohort_pat
+
+### Columns:
+- PATID: varchar(255) (NULL)
 
 ## Table: CONDITION
 
@@ -65,6 +84,18 @@
 ### Columns:
 - FIPScode: varchar(50) (NULL)
 - name: varchar(75) (NULL)
+
+## Table: cp1_patients
+
+### Columns:
+- PATID: varchar(255) (NULL)
+- t0: date (NULL)
+
+## Table: cp2_patients
+
+### Columns:
+- PATID: varchar(255) (NULL)
+- t0: date (NULL)
 
 ## Table: DEATH
 
@@ -606,20 +637,6 @@
 - TOKEN_39: varchar(-1) (NULL)
 - record_id: varchar(40) (NULL)
 
-## Table: hashtokenstaging
-
-### Columns:
-- PATID: varchar(700) (NOT NULL)
-- FIRSTNAME: varchar(50) (NULL)
-- LASTNAME: varchar(50) (NULL)
-- SSN: varchar(8000) (NULL)
-- DOB: varchar(30) (NULL)
-- SEX: varchar(2) (NULL)
-- ZIPCODE: varchar(10) (NULL)
-- ADDRESS: varchar(8000) (NULL)
-- PHONE: varchar(13) (NULL)
-- EMAIL: varchar(80) (NULL)
-
 ## Table: IMMUNIZATION
 
 ### Columns:
@@ -864,6 +881,11 @@
 - CDW_UpdatedDTTM: datetime (NULL)
 - CDW_RunID: bigint (NULL)
 - CDW_i2b2_UploadID: numeric (NULL)
+
+## Table: missing_hashtoken_pat
+
+### Columns:
+- PATID: varchar(50) (NULL)
 
 ## Table: OBS_CLIN
 
@@ -1308,6 +1330,13 @@
 - version: int (NULL)
 - definition: varbinary(-1) (NULL)
 
+## Table: T2DM_patient_cohort
+
+### Columns:
+- PATID: varchar(255) (NULL)
+- t0: date (NULL)
+- cp: varchar(255) (NULL)
+
 ## Table: tokenization_output_UTH
 
 ### Columns:
@@ -1390,5 +1419,5 @@
 
 ---
 ## Summary
-Total tables: 59
+Total tables: 65
 
