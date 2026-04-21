@@ -317,18 +317,28 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
    - List all protocol analysis scripts that need to be run, with exact
      `Rscript results/{ta}/{db_id}/protocols/protocol_NN_analysis.R`
      commands.
-   - Explain that each script saves `protocol_NN_results.json` plus
-     figure `.pdf`/`.png` pairs and a `protocol_NN_table1.html` sibling.
-   - Tell the user to copy the results files back into the same per-DB
-     `{db_id}/protocols/` folder before running the resume command.
-   - **PHI boundary (REQUIRED):** explicitly warn the user that
-     `protocol_NN_state.rds` files contain patient-level rows (the
-     analytic `df` is serialized to the checkpoint so
-     `AUTOTTE_PUBONLY=1` fast-resume works) and **MUST NOT** be copied
-     off the secure host. The AutoTTE pipeline does not read `.rds`
-     files — only the `.json`, `.html`, `.pdf`, and `.png` outputs need
-     to return. State this as an explicit bullet in the copy-back
-     section, not as an afterthought.
+   - Explain the on-secure-host layout the scripts produce. Per
+     `WORKER.md`, each script creates two sibling subdirectories under
+     the folder containing the script:
+     - `protocols/return/` — aggregate artifacts safe to copy off the
+       secure host: `protocol_NN_results.json`, the
+       `protocol_NN_results_status.json` sidecar,
+       `protocol_NN_table{1,2}.html`, and every `protocol_NN_*.pdf` /
+       `.png` figure.
+     - `protocols/checkpoint/` — the `protocol_NN_state.rds` fast-
+       resume checkpoint. Contains patient-level rows and MUST NOT
+       leave the secure host.
+   - Tell the user to (a) `ls` the `return/` directory on the secure
+     host to review what is leaving, then (b) copy the CONTENTS of
+     `return/` (flat; not the `return/` wrapper) into the matching
+     `results/{ta}/{db_id}/protocols/` folder in the AutoTTE worktree
+     before running the resume command. Emphasize: **never copy the
+     parent `protocols/` directory wholesale** — that sweeps in
+     `checkpoint/`.
+   - **PHI boundary (REQUIRED):** state explicitly that the AutoTTE
+     pipeline does not read `.rds` files and that `protocol_NN_state.rds`
+     must remain on the secure host. This must be a standalone bullet
+     in the copy-back section, not a parenthetical aside.
 
 4. Write a separate `RUN_INSTRUCTIONS.md` inside the per-DB `protocols/`
    folder. This file travels with the analysis scripts to the secure
@@ -341,25 +351,45 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
      `setwd()` + `source()` from interactive R / RStudio. Tell the user
      to restart R between protocols so stale `con` / `results` do not
      leak between scripts.
-   - What files appear next to each script on success.
-   - Where to copy results back in the AutoTTE worktree.
+   - **What files appear after a run (REQUIRED).** Each script creates
+     two sibling subdirectories under its own folder and writes into
+     them — nothing lands loose in the script directory:
+     - `return/` — aggregate artifacts safe to copy off the secure
+       host: `protocol_NN_results.json`, the
+       `protocol_NN_results_status.json` sidecar, `table{1,2}.html`,
+       and every figure `.pdf` / `.png` pair.
+     - `checkpoint/` — the `protocol_NN_state.rds` fast-resume
+       checkpoint. Contains patient-level rows. Stays on the secure
+       host.
+     Document the `AUTOTTE_PUBONLY=1` fast-resume path explicitly as:
+     "re-running the script with `AUTOTTE_PUBONLY=1` reads from
+     `checkpoint/` and writes regenerated publication outputs to
+     `return/`."
+   - **Where to copy results back (REQUIRED).** The operator should
+     (a) `ls protocols/return/` on the secure host to review what is
+     leaving, (b) copy the CONTENTS of `return/` flat into the
+     matching `results/{ta}/{db_id}/protocols/` folder in the AutoTTE
+     worktree. The `return/` wrapper does not get recreated on the
+     AutoTTE side — it exists only to stage and review the copy-back
+     set on the secure host.
    - **PHI boundary (REQUIRED):** a dedicated "Security / data
      handling" section that states the rule in unambiguous terms:
      `protocol_NN_state.rds` contains patient-level rows (the analytic
      data frame `df` is serialized so `AUTOTTE_PUBONLY=1` fast-resume
-     can skip SQL + fit). This file stays on the secure host. **Do NOT
+     can skip SQL + fit). That file stays on the secure host. **Do NOT
      copy any `*.rds` file back to the AutoTTE worktree or off the
-     secure host by any channel.** Copy back only `.json`, `.html`,
-     `.pdf`, and `.png` outputs. The same section should name the
-     `protocol_NN_results.json` as the sole PHI-free deliverable and
+     secure host by any channel.** Call out the two natural mistakes
+     the layout prevents: (i) copying the whole `protocols/` directory
+     would sweep in `checkpoint/` — always copy `return/`'s CONTENTS
+     instead; (ii) any glob like `protocols/*` in `tar` or `scp` has
+     the same problem — use explicit paths rooted at `return/`.
+     Name `protocol_NN_results.json` as the PHI-free deliverable and
      tell the user to eyeball it once (aggregate counts / HRs, no
-     PATID, no dates) before transferring out. If the instructions
-     describe a `tar` or `scp` copy-back, the file-list must be an
-     explicit allowlist (`*.json *.html *.pdf *.png`) and must NOT use
-     a glob that would sweep in `*.rds`.
+     PATID, no dates) before transferring out.
    - A short troubleshooting section for the common failures:
      missing DSN, `library(odbc)` not loaded, `smd` missing, stale
      `shutdown = TRUE` copy.
+
 2. Set `current_phase` to `"awaiting_results"` in agent_state.json.
 3. Log this in coordinator_log.md and stop the pipeline.
 

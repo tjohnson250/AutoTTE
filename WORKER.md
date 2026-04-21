@@ -622,6 +622,12 @@ from any working directory, AND via `source()` from an R session regardless of
 `getwd()`. The script must be a single `.R` file that can be copied to a secure
 server with no external dependencies beyond R packages.
 
+**ASCII only.** Use only printable ASCII (0x20-0x7E) plus newlines in `.R`
+files — no em dashes, en dashes, section signs, arrows, or other Unicode.
+R's `source()` on Windows chokes on non-ASCII bytes and silently truncates
+the read, producing a misleading "unexpected end of input" parse error.
+Use `--` for dashes, `->` for arrows, and `S` or `section` for `§`.
+
 ### Script shape: sectioned, not monolithic
 
 Model the script on the old Quarto `.qmd` templates, translated to a plain
@@ -667,13 +673,12 @@ Call `get_datasource_details(db_id)` from the datasource MCP server.
 Copy the returned `connection.r_code` into `connect_db()` verbatim —
 same function calls, same arguments, same variable name (always `con`).
 
-### Working directory & `out_dir`
+### Working directory & `out_dir` / `return_dir` / `checkpoint_dir`
 
-The script runs wherever it is placed. `main()` computes `out_dir` as:
+The script runs wherever it is placed. `main()` computes three paths:
 
 ```r
-# out_dir = the directory containing this script, so outputs land
-# next to the script regardless of the caller's working directory.
+# out_dir = the directory containing this script.
 script_dir <- function() {
   m <- grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
   if (length(m) > 0) return(dirname(normalizePath(sub("--file=", "", m[1]))))
@@ -683,7 +688,34 @@ script_dir <- function() {
   }
   getwd()
 }
+
+# Inside main():
+# out_dir        <- script_dir()
+# return_dir     <- file.path(out_dir, "return")      # copy THIS back
+# checkpoint_dir <- file.path(out_dir, "checkpoint")  # stays on secure host
 ```
+
+**PHI boundary — the two-subdir layout.** The script writes to two
+sibling subdirectories beneath the script's folder:
+
+- `return/` — every aggregate artifact the AutoTTE pipeline needs
+  (the `protocol_NN_results.json`, status sidecar, `table*.html`,
+  `*.pdf`, `*.png`). The operator `ls return/` to review what will
+  leave the secure host, then copies the CONTENTS of `return/` back
+  into the AutoTTE worktree's matching `protocols/` folder (flat; the
+  `return/` wrapper is just the review/staging directory on the
+  secure side).
+- `checkpoint/` — the `.rds` fast-resume checkpoint only. Contains
+  the analytic data frame (patient-level rows) and MUST NOT leave the
+  secure host. Never copy the `checkpoint/` directory, and never copy
+  the parent `protocols/` directory wholesale — that would sweep in
+  `checkpoint/`.
+
+`save_outputs()` receives `return_dir` as its `out_dir` argument;
+`saveRDS()` writes to `file.path(checkpoint_dir, "protocol_NN_state.rds")`;
+the final `jsonlite::write_json()` of `protocol_NN_results.json` goes
+to `return_dir`. `AUTOTTE_PUBONLY=1` reads from `checkpoint_dir` and
+writes regenerated publication outputs to `return_dir`.
 
 No project-root `.mcp.json` hunting, no `setwd()`, no `.project_root`
 variable. If the YAML connection code uses project-root-relative paths
@@ -865,19 +897,26 @@ script_dir <- function() {
 }
 
 main <- function() {
-  out_dir <- script_dir()
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  # PHI boundary: return/ holds aggregate artifacts safe to copy off the
+  # secure host (JSON, HTML, PDF, PNG); checkpoint/ holds the .rds fast-
+  # resume state (patient-level rows) and must stay on the secure host.
+  # The operator reviews return/ then copies its contents back to AutoTTE.
+  out_dir        <- script_dir()
+  return_dir     <- file.path(out_dir, "return")
+  checkpoint_dir <- file.path(out_dir, "checkpoint")
+  dir.create(return_dir,     recursive = TRUE, showWarnings = FALSE)
+  dir.create(checkpoint_dir, recursive = TRUE, showWarnings = FALSE)
 
   # Fast-resume hook: if AUTOTTE_PUBONLY=1 and we have a checkpoint from a
   # previous run, skip the expensive SQL + fit and just regenerate
   # publication outputs. Use this to recover from figure/table failures
   # (e.g. interactive package prompts) without paying the hours-long
   # cohort-build + model-fit cost again.
-  state_path <- file.path(out_dir, "protocol_NN_state.rds")
+  state_path <- file.path(checkpoint_dir, "protocol_NN_state.rds")
   if (nzchar(Sys.getenv("AUTOTTE_PUBONLY")) && file.exists(state_path)) {
-    message(sprintf("AUTOTTE_PUBONLY=1 — loading state from %s", state_path))
+    message(sprintf("AUTOTTE_PUBONLY=1 -- loading state from %s", state_path))
     state <- readRDS(state_path)
-    save_outputs(state$fit, state$df, out_dir)
+    save_outputs(state$fit, state$df, return_dir)
     message(sprintf("=== protocol_NN publication outputs regenerated (%s) ===", Sys.time()))
     return(invisible())
   }
@@ -930,7 +969,7 @@ main <- function() {
       results$dc_probe    <- fit$dc_probe
       message(sprintf("Cohort-viability gate failed: %s", reason))
     } else {
-      save_outputs(fit, df, out_dir)
+      save_outputs(fit, df, return_dir)
       results$execution_status <- "success"
     }
   }, error = function(e) {
@@ -940,10 +979,10 @@ main <- function() {
   })
 
   jsonlite::write_json(
-    results, file.path(out_dir, "protocol_NN_results.json"),
+    results, file.path(return_dir, "protocol_NN_results.json"),
     pretty = TRUE, auto_unbox = TRUE
   )
-  message(sprintf("Results saved to: %s", file.path(out_dir, "protocol_NN_results.json")))
+  message(sprintf("Results saved to: %s", file.path(return_dir, "protocol_NN_results.json")))
 }
 
 main()
@@ -954,8 +993,17 @@ main()
 1. One file per protocol, self-contained (besides R packages).
 2. Connection lives inside `main()`; `on.exit(try(dbDisconnect))` there.
 3. SQL via `glue::glue_sql()`, not `sprintf`.
-4. `out_dir = script_dir()`. No `.mcp.json` lookup, no setwd().
-5. **Checkpoint after `fit_model()` via `saveRDS(list(fit, df, config), state_path)`**, and honor `AUTOTTE_PUBONLY=1` at the top of `main()` to skip SQL+fit and rerun only `save_outputs()` from the checkpoint. Saves hours when publication output fails.
+4. `out_dir = script_dir()`, with `return_dir = out_dir/return` and
+   `checkpoint_dir = out_dir/checkpoint`. All returnable artifacts
+   (`protocol_NN_results.json`, `*.html`, `*.pdf`, `*.png`) are written
+   to `return_dir`; the `.rds` checkpoint is written to
+   `checkpoint_dir`. No `.mcp.json` lookup, no setwd().
+5. **Checkpoint after `fit_model()` via
+   `saveRDS(list(fit, df, config), file.path(checkpoint_dir, "protocol_NN_state.rds"))`**,
+   and honor `AUTOTTE_PUBONLY=1` at the top of `main()` to skip SQL+fit
+   and rerun only `save_outputs()` from the checkpoint (reading from
+   `checkpoint_dir`, writing regenerated outputs to `return_dir`).
+   Saves hours when publication output fails.
 5. `save_fig()` is inline (stays in the script).
 6. Error handling inside `main()`. No mega-tryCatch wrapping the whole file.
 7. **Gate-failed paths MUST carry CONSORT forward.** `build_cohort` always
