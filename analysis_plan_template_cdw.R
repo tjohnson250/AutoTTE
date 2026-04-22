@@ -671,8 +671,14 @@ run_sensitivity <- function(results, config) {
 save_table1 <- function(cohort, treatment_var, confounders, protocol_id, output_dir) {
   # add_difference("smd") requires exactly 2 levels in `by`. For >=3 arms,
   # use add_p() here; pairwise SMDs are reported separately in the love plot.
+  # Force chisq.test for categorical — add_p()'s default Fisher's exact blows
+  # the FEXACT workspace on large cohorts with multi-level categoricals.
   n_lvls <- length(unique(stats::na.omit(cohort[[treatment_var]])))
-  add_balance <- if (n_lvls == 2) add_difference else add_p
+  add_balance <- if (n_lvls == 2) {
+    function(x) add_difference(x)
+  } else {
+    function(x) add_p(x, test = list(all_categorical() ~ "chisq.test"))
+  }
   tbl <- cohort |>
     select(all_of(c(treatment_var, confounders))) |>
     tbl_summary(by = all_of(treatment_var),

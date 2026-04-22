@@ -273,13 +273,19 @@ save_table1 <- function(data_or_design, treatment_var, confounders,
                         protocol_id, output_dir, survey = FALSE) {
   # add_difference("smd") requires exactly 2 levels in `by`. For >=3 arms,
   # use add_p() here; pairwise SMDs are reported separately in the love plot.
+  # Force chisq.test for categorical — add_p()'s default Fisher's exact blows
+  # the FEXACT workspace on large cohorts with multi-level categoricals.
   if (survey) {
     tvec <- data_or_design$variables[[treatment_var]]
   } else {
     tvec <- data_or_design[[treatment_var]]
   }
   n_lvls <- length(unique(stats::na.omit(tvec)))
-  add_balance <- if (n_lvls == 2) add_difference else add_p
+  add_balance <- if (n_lvls == 2) {
+    function(x) add_difference(x)
+  } else {
+    function(x) add_p(x, test = list(all_categorical() ~ "chisq.test"))
+  }
   if (survey) {
     tbl <- tbl_svysummary(data_or_design, by = all_of(treatment_var),
              include = all_of(confounders),

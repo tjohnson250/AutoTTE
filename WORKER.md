@@ -568,6 +568,9 @@ for it too. The report embedding expects `protocol_NN_consort.png` to exist.
 - For a **3+ arm** `by` column: use `add_p()` instead of `add_difference()`.
   Pairwise SMDs are already reported in the love plot via `cobalt`, so Table 1
   carries the omnibus test and the love plot carries balance.
+  Pass `test = list(all_categorical() ~ "chisq.test")` — `add_p()`'s default
+  Fisher's exact blows the FEXACT workspace ("LDKEY too small") on large
+  cohorts with multi-level categoricals like `race_cat`.
 - Always include `add_overall()` for a combined column
 - Save with `gt::gtsave(tbl, "protocol_NN_table1.html")`
 - The provided `save_table1()` helper in `analysis_plan_template*.R` already
