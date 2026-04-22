@@ -41,9 +41,21 @@ load_profiler_config <- function(db_config_path) {
     mpi_schema   = resolve(cfg$mpi_schema_dump),
     data_profile = resolve(cfg$data_profile)
   )
-  for (p in paths) {
-    if (!is.null(p)) dir.create(dirname(p), recursive = TRUE, showWarnings = FALSE)
+  # Optional: cfg$staging_schema_dumps is a list of entries, each with its own
+  # connection.r_code, schema_name, and schema_dump path. Resolve each path.
+  staging <- cfg$staging_schema_dumps %||% list()
+  for (i in seq_along(staging)) {
+    staging[[i]]$schema_dump_resolved <- resolve(staging[[i]]$schema_dump)
   }
+  paths$staging_schema_dumps <- vapply(staging,
+    function(s) s$schema_dump_resolved %||% NA_character_, character(1))
+  for (p in c(paths$schema, paths$mpi_schema, paths$data_profile,
+              paths$staging_schema_dumps)) {
+    if (!is.null(p) && !is.na(p)) {
+      dir.create(dirname(p), recursive = TRUE, showWarnings = FALSE)
+    }
+  }
+  cfg$staging_schema_dumps <- staging
   list(cfg = cfg, paths = paths)
 }
 

@@ -337,6 +337,31 @@ async def get_schema(id: str) -> str:  # noqa: A002
         mpi_content = read_file_content(str(mpi_resolved))
         content = content + "\n\n--- MPI Schema ---\n\n" + mpi_content
 
+    # Append any staging-database schema dumps (optional). These exist for
+    # sites whose analyses need cross-database joins (e.g. the secure
+    # PCORnet CDW's GECBI / Allscripts staging tables used by duplicate-
+    # records studies). Missing files are skipped with a marker so the
+    # worker can tell the dump was intended but isn't available yet.
+    staging_list = src.get("staging_schema_dumps") or []
+    for entry in staging_list:
+        label = entry.get("label") or "(unlabeled staging)"
+        schema_name = entry.get("schema_name") or "dbo"
+        staging_path = entry.get("schema_dump")
+        if not staging_path:
+            continue
+        staging_resolved = Path(staging_path)
+        if not staging_resolved.is_absolute():
+            staging_resolved = PROJECT_ROOT / staging_resolved
+        header = f"\n\n--- Staging Schema: {label} (schema={schema_name}) ---\n\n"
+        if staging_resolved.exists():
+            content = content + header + read_file_content(str(staging_resolved))
+        else:
+            content = (
+                content + header
+                + f"[staging dump not yet generated: {staging_path}]\n"
+                + "Run CDW_DB_Profiler.qmd on the secure host to produce it.\n"
+            )
+
     return content
 
 

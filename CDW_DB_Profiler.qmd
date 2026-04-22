@@ -105,13 +105,17 @@ extract_schema_for_claude <- function(con,
   library(DBI)
   library(dplyr)
   
-  # Get list of tables
+  # Get list of tables AND views. Workers need both: duplicate-records
+  # studies, for example, rely on curated views (e.g.
+  # MasterPatientIndex.dbo.vSourceRecordsUID) that don't appear in
+  # INFORMATION_SCHEMA.TABLES when TABLE_TYPE is restricted to 'BASE TABLE'.
   tables <- dbGetQuery(con, sprintf("
-    SELECT TABLE_NAME
+    SELECT TABLE_NAME,
+           TABLE_TYPE
     FROM INFORMATION_SCHEMA.TABLES
     WHERE TABLE_SCHEMA = '%s'
-      AND TABLE_TYPE = 'BASE TABLE'
-    ORDER BY TABLE_NAME
+      AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
+    ORDER BY TABLE_TYPE, TABLE_NAME
   ", schema_name))
   
   schema_text <- paste0(
@@ -120,11 +124,14 @@ extract_schema_for_claude <- function(con,
     "# Schema: ", schema_name, "\n\n"
   )
   
-  for (table_name in tables$TABLE_NAME) {
-    
+  for (i_row in seq_len(nrow(tables))) {
+    table_name <- tables$TABLE_NAME[i_row]
+    table_type <- tables$TABLE_TYPE[i_row]
+    header_kind <- if (table_type == "VIEW") "View" else "Table"
+
     # Get column information
     columns <- dbGetQuery(con, sprintf("
-      SELECT 
+      SELECT
         COLUMN_NAME,
         DATA_TYPE,
         CHARACTER_MAXIMUM_LENGTH,
@@ -160,8 +167,9 @@ extract_schema_for_claude <- function(con,
         AND fk.TABLE_NAME = '%s'
     ", schema_name, table_name))
     
-    # Build table section
-    schema_text <- paste0(schema_text, "## Table: ", table_name, "\n\n")
+    # Build table / view section.
+    schema_text <- paste0(schema_text, "## ", header_kind, ": ",
+                          table_name, "\n\n")
     
     # Add columns
     schema_text <- paste0(schema_text, "### Columns:\n")
@@ -1556,6 +1564,45 @@ with_db_connection(cfg$mpi_connection$r_code, function(con) {
                             schema_name = "dbo",
                             output_file = paths$mpi_schema)
 })
+```
+
+```{r run-staging-schemas}
+#| code-fold: true
+# Staging-database schema dumps (optional). For secure_pcornet_cdw this
+# covers cdwstaging.gecbi, cdwstaging.allscripts, and CDWStaging.allscripts
+# — the tables the duplicate-records pattern joins on MRN == mpi.lid.
+# Each entry opens its own short-lived connection via its own USE <db>
+# block so a DSN/permission problem on one staging DB doesn't abort the
+# others. Entries whose DB / schema is unreachable are skipped with a
+# [SKIP] log line and the downstream get_schema() call still works — the
+# missing dumps are just absent from the concatenated result.
+staging_entries <- cfg$staging_schema_dumps %||% list()
+for (entry in staging_entries) {
+  label   <- entry$label %||% "(unlabeled staging)"
+  sn      <- entry$schema_name %||% "dbo"
+  outpath <- entry$schema_dump_resolved
+  r_code  <- entry$connection$r_code
+  if (is.null(outpath) || !nzchar(outpath)) {
+    message("[SKIP] staging dump ", label, ": no schema_dump path")
+    next
+  }
+  if (is.null(r_code) || !nzchar(r_code)) {
+    message("[SKIP] staging dump ", label, ": no connection.r_code")
+    next
+  }
+  tryCatch(
+    with_db_connection(r_code, function(con) {
+      extract_schema_for_claude(con,
+                                schema_name = sn,
+                                output_file = outpath)
+      message("Staging schema written [", label, " / ", sn, "] -> ", outpath)
+    }),
+    error = function(e) {
+      message("[SKIP] staging dump ", label, " / ", sn, ": ",
+              conditionMessage(e))
+    }
+  )
+}
 ```
 
 ```{r run-mpi-profile}
