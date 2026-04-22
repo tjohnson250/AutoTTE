@@ -63,18 +63,22 @@ flowchart TB
 
     REVIEWER["<b>Reviewer Agents</b> · <i>claude -p</i><br/><br/>REVIEW.md<br/>Verify PMIDs · Check methods<br/>Check SQL/R · Conventions<br/>Write critiques"]:::agent
 
+    SECREVIEWER["<b>Security Reviewers</b> · <i>claude -p</i><br/><br/>REVIEW.md (Phase 3.5)<br/>PHI/disclosure gate · SQL injection<br/>Supply-chain scan<br/>Reduced toolset · <i>no MCP access</i>"]:::agent
+
     REPORTER["<b>Report Writers</b> · <i>claude -p</i><br/><br/>REPORT_WRITER.md<br/>Read results JSON<br/>Write per-protocol reports"]:::agent
 
     MCP["<b>MCP Servers</b><br/><br/>PubMed · Datasource Registry<br/>RxNorm · Clinical Codes (LOINC / HCPCS / ICD-10)<br/>R Executor <i>(online mode only)</i>"]:::mcp
 
-    FILES[("<b>Shared output files</b><br/>literature_scan · evidence_gaps<br/>feasibility · protocols/*<br/>coordinator_log · agent_state")]:::files
+    FILES[("<b>Shared output files</b><br/>literature_scan · evidence_gaps<br/>feasibility · protocols/*<br/>protocol_NN_security_review.md<br/>coordinator_log · agent_state")]:::files
 
     COORD -->|spawns| WORKER
     COORD -->|spawns| REVIEWER
+    COORD -->|spawns| SECREVIEWER
     COORD -->|spawns| REPORTER
 
     WORKER -->|writes| FILES
     REVIEWER -->|writes| FILES
+    SECREVIEWER -->|writes| FILES
     REPORTER -->|writes| FILES
     FILES -->|reads| COORD
 
@@ -125,6 +129,17 @@ live database to validate feasibility assumptions.
 Worker writes full target trial emulation protocols with runnable R analysis
 scripts. Reviewer checks methods, code correctness, database conventions
 compliance, and statistical pitfalls.
+
+**Phase 3.5 -- Security & Disclosure Review**
+One security-reviewer sub-agent per accepted protocol runs in parallel with
+a reduced toolset (`Read, Write, Edit, Bash` only — no MCP, no database
+access). Each enforces three gates: the PHI/disclosure check (every output
+DataFrame must flow through `disclosure_check()` with a small-cell `k`
+threshold before rendering or saving), SQL-injection review (parameterized
+queries only; no string-concatenated user input), and supply-chain scan (no
+`install.packages` / `remotes` / `devtools` / `pak` / `renv` calls in the
+script). Findings are written to `protocol_NN_security_review.md`; an
+r0 → r1 revision loop allows a single fix pass before the protocol advances.
 
 **Phase 4 -- Execution & Reporting**
 In online mode, the coordinator runs R analysis scripts against the live
