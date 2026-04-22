@@ -4,7 +4,7 @@ bibliography: references.bib
 format: html
 editor: visual
 params:
-  db_config: "databases/secure_pcornet_cdw.yaml"
+  db_config: "databases/local/secure_pcornet_cdw.yaml"
   save_temp_tables: false
 ---
 
@@ -43,7 +43,7 @@ source(here::here("profilers/_helpers.R"))
 db_config_path <- if (exists("params") && !is.null(params$db_config)) {
   params$db_config
 } else {
-  "databases/secure_pcornet_cdw.yaml"
+  "databases/local/secure_pcornet_cdw.yaml"
 }
 
 config <- load_profiler_config(db_config_path)

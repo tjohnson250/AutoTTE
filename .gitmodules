@@ -1,0 +1,3 @@
+[submodule "databases/local"]
+	path = databases/local
+	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-local.git

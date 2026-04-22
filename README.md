@@ -342,7 +342,8 @@ per-protocol reports branch per DB.
 # ID                  NAME                    CDM      ENGINE  DEFAULT  SCHEMA  PROFILE  CONVENTIONS
 # mimic_iv            MIMIC-IV v3.1           mimic    duckdb  online   yes     yes      yes
 # nhanes              NHANES                  nhanes   duckdb  online   yes     yes      yes
-# secure_pcornet_cdw  Secure PCORnet CDW      pcornet  mssql   offline  yes     yes      yes
+# omop_demo           OMOP Demo (Synthea 10k) omop     duckdb  online   yes     yes      yes
+# omop_test           OMOP Test (GiBleed)     omop     duckdb  online   yes     yes      yes
 # synthetic_pcornet   PCORnet Synthetic CDW   pcornet  duckdb  online   no      no       no
 
 ./run.sh --show-db nhanes
@@ -451,7 +452,7 @@ to inspect the resolved paths.
 ./run.sh "atrial fibrillation" --db-config databases/synthetic_pcornet.yaml
 
 # Offline mode — agents work from schema dump + data profile
-./run.sh "atrial fibrillation" --db-config databases/secure_pcornet_cdw.yaml --db-mode offline
+./run.sh "atrial fibrillation" --db-config databases/omop_demo.yaml --db-mode offline
 ```
 
 ## Online vs Offline Mode
@@ -491,7 +492,7 @@ When the database is not directly accessible:
 
 ```bash
 ./run.sh "atrial fibrillation" \
-  --db-config databases/secure_pcornet_cdw.yaml \
+  --db-config databases/omop_demo.yaml \
   --resume-reports
 ```
 
@@ -682,7 +683,7 @@ Examples:
 
   # Study description to focus the pipeline on a specific design
   ./run.sh "type 2 diabetes" --study-desc "Parallel group cohort comparing canagliflozin to DPP-4 inhibitors for 3P-MACE"
-  ./run.sh "type 2 diabetes" --study-desc-file studies/canagliflozin_vs_dpp4i.txt --dbs secure_pcornet_cdw
+  ./run.sh "type 2 diabetes" --study-desc-file studies/canagliflozin_vs_dpp4i.txt --dbs omop_demo
 
   # Resume reports across every per-DB folder
   ./run.sh "atrial fibrillation" --dbs all --resume-reports
@@ -708,14 +709,14 @@ AutoTTE/
 ├── databases/
 │   ├── mimic_iv.yaml                  # Config: MIMIC-IV via DuckDB
 │   ├── nhanes.yaml                    # Config: NHANES via nhanesA + DuckDB
-│   ├── secure_pcornet_cdw.yaml        # Config: institutional PCORnet CDW
 │   ├── synthetic_pcornet.yaml         # Config: synthetic DuckDB for testing
 │   ├── omop_test.yaml                 # Config: OMOP GiBleed (small, via OMOPSynth)
 │   ├── omop_demo.yaml                 # Config: OMOP synthea-heart-10k (cardiac demos)
 │   ├── schemas/                       # Schema dumps (auto-generated or manual)
 │   ├── profiles/                      # Data profiles (auto-generated or manual)
 │   ├── conventions/                   # Per-database conventions (markdown)
-│   └── data/                          # Database files (gitignored)
+│   ├── data/                          # Database files (gitignored)
+│   └── local/                         # (Optional) private submodule for institution-specific configs
 │       └── setup_omop.R               # On-demand fetch for OMOP test/demo DBs
 ├── profilers/                         # Per-CDM Quarto profile templates
 │   ├── _helpers.R                     # Shared scaffolding (connection, suppression)
