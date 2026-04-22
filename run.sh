@@ -41,6 +41,18 @@ case "${1:-}" in
     ;;
 esac
 
+# Preflight: the Python that `.mcp.json` invokes via bare "python" must have
+# the MCP server deps. If not, the servers crash silently on startup and
+# workers run without mcp__* tools (documented as "not surfaced").
+if ! python -c "import mcp, httpx, lxml, yaml" 2>/dev/null; then
+  PY_PATH="$(command -v python 2>/dev/null || echo '<python not on PATH>')"
+  echo "Error: MCP server dependencies missing from $PY_PATH" >&2
+  echo "Install with:" >&2
+  echo "  $PY_PATH -m pip install mcp httpx lxml pyyaml" >&2
+  echo "(.mcp.json launches MCP servers via bare 'python' — that interpreter needs the deps.)" >&2
+  exit 1
+fi
+
 THERAPEUTIC_AREA="${1:?Usage: ./run.sh \"therapeutic area\" [--dbs <id,id,...>|all] [--db-config <path>] [--db-mode online|offline] [--resume-reports|--resume-protocols|--resume-security-review] [max_turns]}"
 shift
 
