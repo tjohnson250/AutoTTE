@@ -555,6 +555,61 @@ executive summary.
 ./run.sh "therapeutic area" --db-config databases/my_database.yaml
 ```
 
+### Local / private DB configs (via submodule)
+
+Institution-specific DB configs (real CDW connections, schema dumps with
+production table lists, profiles with site-specific counts, legacy-data
+conventions) often should not live in a public repo. AutoTTE supports a
+**private git submodule** mounted at `databases/local/` for this.
+
+Anything placed under `databases/local/` — YAML configs, schemas,
+profiles, conventions — is discovered exactly like top-level `databases/`
+entries. A public clone without access to your private submodule works
+normally; the private DBs simply don't appear in `--list-dbs`.
+
+**Layout inside the private repo:**
+
+```
+<your-private-repo>/
+├── my_cdw.yaml                            # paths inside point to
+├── schemas/                               #   databases/local/schemas/...
+│   └── my_cdw_schema.txt                  #   databases/local/profiles/...
+├── profiles/                              #   databases/local/conventions/...
+│   └── my_cdw_profile.md
+└── conventions/
+    └── my_cdw_conventions.md
+```
+
+**One-time setup:**
+
+```bash
+# In the public AutoTTE checkout
+git submodule add git@github.com:<org>/<private-repo>.git databases/local
+git commit -m "Add local DB configs submodule"
+```
+
+**Cloning an existing AutoTTE that uses a submodule:**
+
+```bash
+git clone --recursive <autotte-url>
+# or, for an already-cloned repo:
+git submodule update --init
+```
+
+**Updating when the private repo changes:**
+
+```bash
+cd databases/local && git pull && cd -
+git add databases/local && git commit -m "Bump local submodule"
+```
+
+**Hosts that can't reach private GitHub directly (e.g., an air-gapped
+analytics server):** options in preference order — (a) SSH deploy key or
+PAT on that host, (b) mirror to institutional GitLab/Bitbucket and
+rewrite the submodule URL per-host with
+`git config --local submodule.databases/local.url <alt-url>`, (c)
+sneakernet via `git bundle create local.bundle --all`.
+
 ## run.sh Reference
 
 ```

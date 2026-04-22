@@ -72,6 +72,21 @@ def test_discover_dbs_skips_yaml_without_id(databases_dir):
     assert ids == ["alpha", "beta"]
 
 
+def test_discover_dbs_includes_local_submodule_dir(databases_dir):
+    local = databases_dir / "local"
+    local.mkdir()
+    _write_yaml(local / "gamma.yaml", {
+        "id": "gamma", "name": "Gamma Private DB", "cdm": "pcornet",
+        "engine": "mssql", "online": False,
+        "connection": {"r_code": "con <- NULL"},
+    })
+    dbs = discover_dbs(str(databases_dir))
+    ids = sorted(db["id"] for db in dbs)
+    assert ids == ["alpha", "beta", "gamma"]
+    gamma = next(db for db in dbs if db["id"] == "gamma")
+    assert gamma["yaml_path"].endswith("local/gamma.yaml")
+
+
 from tools.db_triage import triage_one
 
 

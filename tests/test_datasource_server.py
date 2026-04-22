@@ -86,6 +86,21 @@ def test_load_db_configs_missing_dir(tmp_path):
     assert configs == []
 
 
+def test_load_db_configs_includes_local_submodule_dir(sample_db_dir):
+    local = sample_db_dir / "local"
+    local.mkdir()
+    (local / "private_cdw.yaml").write_text(
+        "id: private_cdw\n"
+        "name: Private CDW\n"
+        "cdm: pcornet\n"
+        "engine: mssql\n"
+        "online: false\n"
+    )
+    configs = load_db_configs(str(sample_db_dir))
+    ids = {c["id"] for c in configs}
+    assert ids == {"test_db", "test_omop", "private_cdw"}
+
+
 # ---------------------------------------------------------------------------
 # filter_datasources
 # ---------------------------------------------------------------------------

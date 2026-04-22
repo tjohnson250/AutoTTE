@@ -22,29 +22,37 @@ import yaml
 
 def discover_dbs(databases_dir: str) -> list[dict[str, Any]]:
     """Return a list of {id, yaml_path, config} for every valid YAML
-    under *databases_dir*.
+    under *databases_dir* and *databases_dir*/local/.
 
-    Entries missing an `id` key are silently skipped. Nested subdirectories
-    (schemas/, profiles/, conventions/) are not traversed.
+    The `local/` subdir is a conventional mount point for a private git
+    submodule holding institution-specific DB configs; when absent, only
+    top-level YAMLs are discovered. Entries missing an `id` key are
+    silently skipped. Other nested subdirectories (schemas/, profiles/,
+    conventions/) are not traversed.
     """
     root = Path(databases_dir)
     if not root.is_dir():
         return []
+    scan_dirs = [root]
+    local_dir = root / "local"
+    if local_dir.is_dir():
+        scan_dirs.append(local_dir)
     results: list[dict[str, Any]] = []
-    for yaml_path in sorted(root.glob("*.yaml")):
-        try:
-            with open(yaml_path, "r", encoding="utf-8") as fh:
-                config = yaml.safe_load(fh) or {}
-        except Exception:
-            continue
-        db_id = config.get("id")
-        if not db_id:
-            continue
-        results.append({
-            "id": db_id,
-            "yaml_path": str(yaml_path),
-            "config": config,
-        })
+    for scan_dir in scan_dirs:
+        for yaml_path in sorted(scan_dir.glob("*.yaml")):
+            try:
+                with open(yaml_path, "r", encoding="utf-8") as fh:
+                    config = yaml.safe_load(fh) or {}
+            except Exception:
+                continue
+            db_id = config.get("id")
+            if not db_id:
+                continue
+            results.append({
+                "id": db_id,
+                "yaml_path": str(yaml_path),
+                "config": config,
+            })
     return results
 
 

@@ -142,27 +142,35 @@ PUBLIC_DATASETS: list[dict[str, Any]] = [
 
 
 def load_db_configs(databases_dir: str) -> list[dict]:
-    """Load all *.yaml database config files from *databases_dir*.
+    """Load all *.yaml database config files from *databases_dir* and
+    *databases_dir*/local/.
 
-    Returns an empty list if the directory does not exist or contains no
-    YAML files.  Each returned dict is the raw parsed YAML with ``type``
-    set to ``"database"``.
+    The `local/` subdir is a conventional mount point for a private git
+    submodule holding institution-specific DB configs. Returns an empty
+    list if neither directory exists. Each returned dict is the raw
+    parsed YAML with ``type`` set to ``"database"``.
     """
     dir_path = Path(databases_dir)
     if not dir_path.is_dir():
         return []
 
+    scan_dirs = [dir_path]
+    local_dir = dir_path / "local"
+    if local_dir.is_dir():
+        scan_dirs.append(local_dir)
+
     configs: list[dict] = []
-    for yaml_file in sorted(dir_path.glob("*.yaml")):
-        try:
-            with open(yaml_file, "r", encoding="utf-8") as fh:
-                cfg = yaml.safe_load(fh)
-            if isinstance(cfg, dict):
-                cfg.setdefault("type", "database")
-                configs.append(cfg)
-        except Exception:
-            # Skip malformed files rather than aborting.
-            continue
+    for scan_dir in scan_dirs:
+        for yaml_file in sorted(scan_dir.glob("*.yaml")):
+            try:
+                with open(yaml_file, "r", encoding="utf-8") as fh:
+                    cfg = yaml.safe_load(fh)
+                if isinstance(cfg, dict):
+                    cfg.setdefault("type", "database")
+                    configs.append(cfg)
+            except Exception:
+                # Skip malformed files rather than aborting.
+                continue
 
     return configs
 
