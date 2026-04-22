@@ -781,6 +781,84 @@ Use `glue::glue_sql()` (or DBI parameterized queries) for every SQL
 statement. It quotes safely, supports `{`var`}` for identifiers, and is
 readable. Load `library(glue)` in the libraries block.
 
+### SQL perf: no per-row correlated subqueries against big CDM tables
+
+CDM tables like `ENCOUNTER`, `DIAGNOSIS`, `LAB_RESULT_CM`, `VITAL`, and
+`PROCEDURES` routinely hold tens to hundreds of millions of rows in
+production warehouses. Do NOT write SQL that makes SQL Server scan or
+seek them once per row of an outer table. The Phase 3 performance
+reviewer will flag this and send the protocol back for revision.
+
+**Anti-pattern — per-row OUTER / CROSS APPLY against a CDM table:**
+
+```sql
+-- BAD: for each row of #dup_event_raw, re-query ENCOUNTER.
+FROM #dup_event_raw de
+OUTER APPLY (
+  SELECT MIN(e.ADMIT_DATE) AS first_gecbi_date
+  FROM CDW.dbo.ENCOUNTER e
+  WHERE e.UID = de.UID AND e.CDW_Source = 'GECBI'
+) gecbi;
+```
+
+**Fix — set-based pre-aggregate, INNER JOIN prunes the CDM table to
+the outer UID set before the GROUP BY:**
+
+```sql
+-- GOOD: ENCOUNTER scanned once, filtered to dup-event UIDs.
+SELECT e.UID, MIN(e.ADMIT_DATE) AS first_gecbi_date
+INTO #gecbi_first
+FROM CDW.dbo.ENCOUNTER e
+INNER JOIN #dup_event_raw de ON e.UID = de.UID
+WHERE e.CDW_Source = 'GECBI'
+GROUP BY e.UID;
+CREATE INDEX ix_gecbi_first_uid ON #gecbi_first (UID);
+
+-- Downstream: LEFT JOIN #gecbi_first (semantics match OUTER APPLY —
+-- no match yields NULL, identical to MIN() over empty set).
+```
+
+**When you genuinely need a per-row TOP 1 ORDER BY (e.g., "latest BMI
+within lookback window"):** the lookback depends on `c.t_zero` per row,
+so a single pre-aggregate is not enough. Instead, pre-prune the CDM
+table to the cohort UID set once, and keep the OUTER APPLY but point it
+at the small pool:
+
+```sql
+-- Pool: VITAL filtered to cohort UIDs and plausible BMI / SBP ranges.
+SELECT v.UID, v.MEASURE_DATE, v.ORIGINAL_BMI, v.SYSTOLIC
+INTO #vital_pool
+FROM CDW.dbo.VITAL v
+INNER JOIN (SELECT DISTINCT UID FROM #cohort) cu ON v.UID = cu.UID
+WHERE (v.ORIGINAL_BMI IS NOT NULL OR v.SYSTOLIC IS NOT NULL);
+CREATE INDEX ix_vital_pool_uid_date ON #vital_pool (UID, MEASURE_DATE);
+
+-- Per-row OUTER APPLY now runs against #vital_pool, not CDW.dbo.VITAL.
+FROM #cohort c
+OUTER APPLY (
+  SELECT TOP 1 v.ORIGINAL_BMI FROM #vital_pool v
+  WHERE v.UID = c.UID AND v.ORIGINAL_BMI BETWEEN 10 AND 100
+    AND v.MEASURE_DATE BETWEEN DATEADD(DAY, -{lookback_days}, c.t_zero) AND c.t_zero
+  ORDER BY v.MEASURE_DATE DESC
+) bmi
+```
+
+**Semantic preservation when introducing pools.** If different call
+sites for the same CDM table have different filter predicates (e.g.,
+one query restricts by `MPI_SRC`, another doesn't), EITHER:
+- Build separate pools per distinct filter set, or
+- Build a permissive pool that includes all rows any call site could
+  need, and re-apply the site-specific filter at the OUTER APPLY level.
+
+Do NOT collapse the stricter predicate into the pool and assume all
+call sites want that narrowing — the Phase 3 perf reviewer will catch
+this and you will revise.
+
+**Index every temp table used as a join build side.** `CREATE INDEX
+ix_X_uid ON #X (UID)` immediately after the `SELECT … INTO #X`, before
+the first downstream join. Same rule for `(UID, DATE_COL)` when the
+downstream query range-scans on date.
+
 Example:
 
 ```r

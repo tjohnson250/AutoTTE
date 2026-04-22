@@ -150,7 +150,10 @@ phases in this order:
    Protocol numbering restarts at 01 inside each DB's `protocols/` folder.
    When the same PICO question is feasible on multiple DBs, each DB's
    worker produces a protocol tailored to its own CDM and conventions
-   (peer protocols, not copies). Launch one reviewer per DB.
+   (peer protocols, not copies). For each protocol, launch the
+   methodology reviewer first; only on methodology ACCEPT launch the
+   performance reviewer. Both must return ACCEPT before the protocol
+   enters Phase 3.5.
 5. **Phase 3.5 (per-protocol, gating):** For each ACCEPTed protocol,
    launch a security-reviewer sub-agent that audits
    `protocol_NN_analysis.R` for PHI / disclosure / supply-chain risk
@@ -255,6 +258,29 @@ This phase is skipped entirely for public-datasets-only runs (no `db_triage.json
 - **Goal:** Write target trial emulation protocols with R analysis plans
 - **Worker reads:** WORKER.md + feasibility results from Phase 2
 - **Worker produces:** `protocols/protocol_NN.md`, `protocols/protocol_NN_analysis.R`
+
+Phase 3 has three reviewer sub-steps that run in order. A protocol advances to
+Phase 3.5 only after ALL three return ACCEPT:
+
+1. **Methodology review** — the existing TTE-checklist review (see REVIEW.md
+   "For Protocol Reviews"). Verdict written to
+   `protocols/protocol_NN_review.md`.
+2. **Performance review (NEW)** — launched only after methodology review
+   returns ACCEPT. A SQL-perf reviewer audits `protocol_NN_analysis.R`
+   for correlated-subquery / per-row-APPLY hotspots against large CDM
+   tables (see REVIEW.md "For Performance Reviews"). Verdict written to
+   `protocols/protocol_NN_perf_review.md`. On REVISE, route back to the
+   protocol worker with the perf findings only — do NOT re-run the
+   methodology review on perf-only revisions unless the worker's rewrite
+   materially changed the analytic design. REJECT is not a valid perf
+   verdict: all SQL perf issues are fixable in-script.
+3. **Phase 3.5 Security Review** — unchanged; runs after perf ACCEPT.
+
+Revision-guardrail accounting: methodology and perf revisions count against
+the same Phase 3 revision budget (max 3 per DB per phase). A protocol that
+has had 2 methodology revisions and 2 perf revisions has exceeded the
+budget and should be accepted with documented caveats per the general
+guardrail rule.
 
 ### Phase 3.5: Security Review (per-DB, per-protocol, gating)
 
@@ -742,6 +768,35 @@ consider it a credible starting point.
 **Red flags requiring re-review:**
 - No mention of time zero or immortal time bias
 - Review is generic rather than specific to the protocol
+
+### Performance Review Acceptance Criteria
+
+The performance reviewer runs after methodology ACCEPT and audits
+`protocol_NN_analysis.R` for SQL patterns that scale poorly against
+large CDM tables (ENCOUNTER, DIAGNOSIS, LAB_RESULT_CM, VITAL,
+PROCEDURES, etc.). Verdicts are ACCEPT or REVISE — never REJECT.
+
+- [ ] Every per-row `OUTER APPLY` / `CROSS APPLY` against a CDM table is
+      flagged unless the outer table is guaranteed small (< ~10k rows)
+- [ ] Correlated subqueries (`EXISTS`, `IN (SELECT …)`) against a CDM
+      table inside a SELECT list on a large cohort are flagged
+- [ ] Temp tables used as the build side of a join have an index on the
+      join key (`CREATE INDEX ix_X_uid ON #X (UID)`)
+- [ ] Each flagged pattern has a concrete rewrite: either a set-based
+      pre-aggregate (`INNER JOIN #cohort` → `GROUP BY`) or a cohort-
+      pruned pool (`SELECT … INTO #pool FROM CDW_table INNER JOIN
+      #cohort`)
+- [ ] The rewrite preserves semantics exactly — any filter applied at
+      the original per-row APPLY must be re-applied against the pool
+      (verified by predicate-level comparison, not just table name)
+
+**Red flags requiring revision:**
+- Per-row `OUTER APPLY (SELECT MIN/MAX/TOP 1 … FROM CDW.dbo.X WHERE
+  X.UID = outer.UID …)` — always rewritable as a pre-aggregate
+- A pool is introduced but silently narrows semantics (e.g., adds a
+  filter the original per-row APPLY didn't have)
+- Temp table used in the build side of a join without an index on the
+  join key
 
 ### Report Acceptance Criteria
 - [ ] All numeric values in the report match the results JSON exactly

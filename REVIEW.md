@@ -223,6 +223,119 @@ awareness of the conventions in their code, this is an automatic REVISE.
 - **REVISE** — Fixable issues, list specific changes needed
 - **REJECT** — Fatal methodological flaw, explain why
 
+### For Performance Reviews (Phase 3, after methodology ACCEPT)
+
+Phase 3 methodology review is followed by a performance sub-step that
+audits `protocol_NN_analysis.R` for SQL patterns that scale poorly
+against large CDM tables (ENCOUNTER, DIAGNOSIS, LAB_RESULT_CM, VITAL,
+PROCEDURES, ENROLLMENT). The goal is to catch per-row correlated
+subqueries and missing indexes BEFORE the script runs for hours on the
+secure host.
+
+You read two files only: `protocol_NN.md` and `protocol_NN_analysis.R`.
+Do **not** re-review methodology — that pass already succeeded. Write
+your verdict to `protocol_NN_perf_review.md` in the same
+`{db_id}/protocols/` folder as the other reviews.
+
+**Verdicts:**
+- **ACCEPT** — No unresolved perf smells; the script should execute in
+  a reasonable time window.
+- **REVISE** — One or more fixable perf smells. List each one with a
+  concrete rewrite the worker can apply.
+
+REJECT is not a valid verdict here. SQL perf issues are always fixable
+in-script; if a pattern is the only way to express the analysis, record
+that judgment in the ACCEPT rationale rather than rejecting.
+
+**Checklist — hotspot patterns:**
+
+1. **Per-row `OUTER APPLY` / `CROSS APPLY` against a CDM table.**
+   The classic form is:
+   ```sql
+   FROM #small_outer_table o
+   OUTER APPLY (
+     SELECT MIN(x.DATE_COL) FROM CDW.dbo.BIG_TABLE x
+     WHERE x.UID = o.UID AND <filter>
+   ) a
+   ```
+   For every row of the outer table, SQL Server re-seeks (or worse,
+   re-scans) the big table. Flag as REVISE and recommend a set-based
+   pre-aggregate:
+   ```sql
+   SELECT x.UID, MIN(x.DATE_COL) AS first_dt
+   INTO #big_agg
+   FROM CDW.dbo.BIG_TABLE x
+   INNER JOIN #small_outer_table o ON x.UID = o.UID
+   WHERE <filter>
+   GROUP BY x.UID;
+   CREATE INDEX ix_big_agg_uid ON #big_agg (UID);
+   -- then LEFT JOIN #big_agg in the downstream SELECT.
+   ```
+   Exception: the outer table is guaranteed small (< ~10k rows) AND
+   the APPLY subquery's WHERE is index-sargable — record this in the
+   ACCEPT rationale.
+
+2. **Correlated `EXISTS` / `IN (SELECT …)` against a CDM table inside a
+   SELECT list over a large cohort.** For every cohort row the engine
+   evaluates the inner query. When the pattern is repeated N times
+   (e.g., 10 comorbidity flags × N cohort rows) the scaling is
+   catastrophic. Recommended rewrite: pre-prune the CDM table to cohort
+   UIDs once:
+   ```sql
+   SELECT dx.UID, dx.ADMIT_DATE, dx.DX, dx.DX_TYPE
+   INTO #dx_pool
+   FROM CDW.dbo.DIAGNOSIS dx
+   INNER JOIN (SELECT DISTINCT UID FROM #cohort) cu ON dx.UID = cu.UID
+   WHERE dx.DX_TYPE IN ('09','10');
+   CREATE INDEX ix_dx_pool_uid_date ON #dx_pool (UID, ADMIT_DATE);
+   -- downstream EXISTS clauses query #dx_pool instead of CDW.dbo.DIAGNOSIS
+   ```
+   The per-row EXISTS still exists but runs against a table orders of
+   magnitude smaller.
+
+3. **Temp table used as the build side of a join without a covering
+   index on the join key.** Every `SELECT … INTO #X` followed by a
+   later `JOIN … ON #X.UID = …` should have a matching
+   `CREATE INDEX ix_X_uid ON #X (UID)` before the first join.
+
+4. **Pool creation that silently narrows semantics.** When a rewrite
+   introduces a pre-pruned temp table (`#enc_pool`, `#dx_pool`), every
+   filter the original per-row APPLY had MUST appear either in the
+   pool-build WHERE or in the downstream query. A pool that carries
+   `e.MPI_SRC = 'ALLSCRIPTS'` inherited from one call site will
+   silently narrow a different call site whose original query did NOT
+   have that filter. Verify predicate-by-predicate, not just by table
+   name.
+
+5. **Missing clustered / non-clustered index on dup-event / cohort
+   temp tables.** `#dup_event_raw`, `#cohort`, `#death_ded` etc. are
+   the build side of many joins; each needs at least a
+   `(UID)` index. Flag any temp table used in three or more
+   downstream joins that lacks one.
+
+**Checklist — severity grading when you list findings:**
+
+| Severity | When to use |
+|---|---|
+| **Critical** | Per-row OUTER/CROSS APPLY against a CDM table with no size guarantee. Script is unlikely to finish in reasonable time. |
+| **Major** | Correlated EXISTS repeated across many per-row iterations; missing index on a temp table used as join build side. |
+| **Minor** | A pool-build is correct but its WHERE could be tightened to reduce scanned rows; an index has a suboptimal column order. |
+
+A review with any Critical finding must be REVISE. Major findings
+should generally be REVISE but may be ACCEPT with a documented
+rationale if the cohort is small enough that per-row correlation is
+cheap (note the threshold explicitly). Minor findings are informational.
+
+**Review file format.** `protocol_NN_perf_review.md` should follow the
+existing review file structure: verdict at top, then a **Findings** list
+(each item: pattern quoted with line numbers, severity, concrete
+rewrite), then **What was done well** acknowledging any set-based
+patterns the worker already used.
+
+**Typical length.** Perf reviews are short and mechanical — usually
+under a page. Do not generalize to style commentary; this sub-step is
+strictly about query-plan smells.
+
 ### For Security Reviews (Phase 3.5)
 
 Phase 3.5 is a dedicated security / disclosure / supply-chain pass that
