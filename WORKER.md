@@ -859,6 +859,207 @@ ix_X_uid ON #X (UID)` immediately after the `SELECT … INTO #X`, before
 the first downstream join. Same rule for `(UID, DATE_COL)` when the
 downstream query range-scans on date.
 
+### SQL perf: covering indexes for `CROSS APPLY` + `TOP K`
+
+Whenever a query uses `CROSS APPLY (SELECT TOP K ... FROM #t WHERE ...
+ORDER BY ...)` against a temp table large enough that the optimizer
+might consider a hash join, **the supporting index MUST be a covering
+index** — i.e., it must `INCLUDE` every column the inner SELECT reads.
+Without `INCLUDE`, each match in the seek requires a key lookup back
+into the heap, the optimizer prices that as expensive at the inner
+table's row count, and switches to a hash plan that scans the entire
+inner table once per outer batch (catastrophic at scale).
+
+**Bad (key-only index, optimizer falls back to hash):**
+
+```sql
+CREATE INDEX ix_pool_qrn ON #pool (quarter_start, rn_in_q);
+-- ...
+FROM #outer o
+CROSS APPLY (
+  SELECT TOP (10) p.PATID, p.UID, p.BIRTH_DATE, p.SEX, p.RACE, ...
+  FROM #pool p
+  WHERE p.quarter_start = o.quarter_start
+    AND p.rn_in_q BETWEEN ... AND ...
+) cp;
+```
+
+**Good (covering index, true nested-loop seek):**
+
+```sql
+CREATE INDEX ix_pool_qrn ON #pool (quarter_start, rn_in_q)
+  INCLUDE (PATID, UID, BIRTH_DATE, SEX, RACE,
+           HISPANIC, RACE_ETH_AI_AN, RACE_ETH_ASIAN, RACE_ETH_BLACK,
+           RACE_ETH_HISPANIC, RACE_ETH_ME_NA, RACE_ETH_NH_PI,
+           RACE_ETH_WHITE);
+```
+
+The included columns must exactly match what the inner SELECT projects.
+If a column is referenced but missing from `INCLUDE`, the lookup
+penalty per match returns and the plan can flip back to hash.
+
+For very young temp tables where statistics may be missing or
+misleading, add `WITH (INDEX(ix_pool_qrn))` on the inner table
+reference inside the CROSS APPLY — this is belt-and-suspenders and
+forces the plan even if the optimizer disagrees with our cost
+estimate.
+
+### SQL perf: don't drive `CROSS APPLY` from an inline CTE
+
+Inline CTEs in the outer side of a `CROSS APPLY` confuse the
+optimizer — it can decide to recompute the CTE inline, or to push
+filters into the inner table in suboptimal ways, or to flip the join
+order. **Materialize the CTE as a temp table with its own index
+before the CROSS APPLY**:
+
+```sql
+-- BAD: inline CTE driving CROSS APPLY at scale.
+WITH outer_positioned AS (
+  SELECT t.PATID, ROW_NUMBER() OVER (PARTITION BY ... ORDER BY NEWID()) AS idx
+  FROM #treated t
+)
+SELECT ... FROM outer_positioned op CROSS APPLY (...) ...;
+
+-- GOOD: materialize first, index, then CROSS APPLY.
+SELECT t.PATID, ROW_NUMBER() OVER (PARTITION BY ... ORDER BY NEWID()) AS idx
+INTO #outer_positioned
+FROM #treated t;
+CREATE INDEX ix_op ON #outer_positioned (partition_col, idx);
+
+SELECT ... FROM #outer_positioned op CROSS APPLY (...) ...;
+```
+
+Cost of materializing 60K-100K rows is negligible; cost of letting
+the optimizer pick the wrong plan at scale is hours.
+
+### SQL perf: risk-set sampling — never `CROSS APPLY` per treated × full pool
+
+The naïve sequential-TTE risk-set sampling pattern looks innocuous:
+
+```sql
+-- BAD: O(N_treated x |#comp_pool|) per-pair filter evaluations.
+FROM #treated t
+CROSS APPLY (
+  SELECT TOP (K) cp2.*
+  FROM #comp_pool cp2
+  WHERE cp2.cohort_entry_date <= t.t_zero
+    AND ...
+    AND EXISTS (encounter in lookback per cp2)
+  ORDER BY NEWID()
+) cp;
+```
+
+For every treated row this scans the entire `#comp_pool`, evaluates
+the eligibility filter (often including an `EXISTS` against a CDM
+table), generates `NEWID()` per filter-passing row, and sorts before
+taking TOP K. At even modest scale (say 60K treated × 3M pool) this
+is 10⁸–10¹¹ filter evaluations — **never finishes in production**.
+
+**The correct pattern: bucket-by-time + materialize eligible-pairs +
+per-treated offset selection.** All treateds in the same trial
+window (calendar quarter, day, whatever your sequential-trial unit
+is) share the same per-comparator eligibility filter. Evaluate it
+**once per (window, comparator) pair**, not once per (treated,
+comparator) pair:
+
+1. Build `#window_list` = distinct trial-start dates from `#treated`.
+2. Build `#comp_per_window` once: range-join `#comp_pool` to
+   `#window_list` with the per-window eligibility filter, then
+   `ROW_NUMBER() OVER (PARTITION BY window_start ORDER BY NEWID())
+   AS rn_in_w`. This evaluates the heavy `EXISTS` once per
+   `(window, comparator)`, not once per `(treated, comparator)`.
+3. Materialize `#t_positioned` = `#treated` with a within-window
+   random index `t_idx_in_w = ROW_NUMBER() OVER (PARTITION BY
+   window ORDER BY NEWID())`.
+4. CROSS APPLY each treated to its window's pre-ranked comparators
+   via deterministic offset:
+   ```
+   c.window_start = tp.window_start
+   AND c.rn_in_w BETWEEN ((tp.t_idx_in_w - 1) * K) + 1
+                     AND tp.t_idx_in_w * K
+   ```
+   This is a covered index seek — O(K) per treated, not O(|pool|).
+
+The statistical change: this is **stratified sampling without
+replacement per window** (each comparator goes to at most one
+treated in that window). The naïve version was with replacement
+across treateds. For typical K (~10) and window pool sizes in the
+10⁵+ range the difference is negligible, and without-replacement-
+per-window is arguably more principled for sequential TTE with
+absorbing exposure. Document the sampling design explicitly in the
+protocol limitations.
+
+### SQL perf: pre-filter the comparator pool by recency
+
+When `#comp_pool` is large (millions of patients), include a
+recency-pre-filter step that drops members with no relevant
+activity (no encounter, lab, etc. in the union of all trial
+windows' lookback ranges). Patients with no qualifying activity
+*anywhere* in the study window can never satisfy any
+window-specific lookback filter and are pure overhead in the
+window-bucketed expansion above.
+
+```sql
+DECLARE @earliest_need date = (
+  SELECT DATEADD(DAY, -@lookback, MIN(t_zero)) FROM #treated
+);
+DECLARE @latest_need date = (SELECT MAX(t_zero) FROM #treated);
+
+DELETE cp FROM #comp_pool cp
+WHERE NOT EXISTS (
+  SELECT 1 FROM #enc_eligibility_pool e
+  WHERE e.PATID = cp.PATID
+    AND e.event_date BETWEEN @earliest_need AND @latest_need
+);
+```
+
+Even when this only drops 5–20% of the pool, it's effectively free
+(one `EXISTS` per pool member against an indexed pool) and the
+downstream window expansion work is proportional to pool size.
+
+### SQL perf: log timing + tempdb between sub-queries
+
+For any cohort-build script that does more than a handful of
+`SELECT INTO #temp` operations, add per-sub-step diagnostic logging.
+Without it, a multi-hour stall is opaque — you can't tell whether
+the range-join is slow, the hash aggregate is spilling, the
+`ROW_NUMBER` sort is spilling, or the final CROSS APPLY plan flipped
+to hash. With it, the next iteration knows exactly which operator
+to optimize.
+
+```r
+step_t0 <- Sys.time()
+step_log <- function(label) {
+  secs <- as.integer(as.numeric(difftime(Sys.time(), step_t0, units = "secs")))
+  message(sprintf("  [+%ds %s] %s", secs, format(Sys.time(), "%H:%M:%S"), label))
+}
+# ... after each sub-query:
+step_log(sprintf("#temp_x built: %s rows", format(n_x, big.mark = ",")))
+```
+
+If the connecting login has `VIEW SERVER STATE` (MSSQL) or
+equivalent, also query `sys.dm_db_session_space_usage` (MSSQL) /
+`pg_stat_activity` (PostgreSQL) inside the logger to surface tempdb
+spill signatures (large `internal_objects_alloc` growth → hash
+aggregate or sort spill on the operator that just finished).
+
+### Engine portability of these perf rules
+
+The patterns above are **conceptually universal**; only the syntax
+differs across engines:
+
+| Pattern | MSSQL | PostgreSQL | DuckDB |
+|---------|-------|------------|--------|
+| Per-row APPLY | `OUTER APPLY` / `CROSS APPLY` | `LATERAL JOIN` | `LATERAL JOIN` |
+| Covering index | `CREATE INDEX ... INCLUDE (...)` | `CREATE INDEX ... INCLUDE (...)` | columnar (auto) |
+| Index hint | `WITH (INDEX(...))` | comment-style hints (e.g., pg_hint_plan) | none needed |
+| Tempdb DMV | `sys.dm_db_session_space_usage` | `pg_stat_activity` | `pragma_database_size()` |
+
+The structural advice — set-based pre-aggregates, cohort-pruned
+pools, materialize CTEs that drive APPLY/LATERAL, covering indexes
+on temp tables, recency pre-filter, window-bucketed risk-set
+sampling, sub-step logging — applies regardless of engine.
+
 Example:
 
 ```r

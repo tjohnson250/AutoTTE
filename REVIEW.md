@@ -313,6 +313,75 @@ that judgment in the ACCEPT rationale rather than rejecting.
    `(UID)` index. Flag any temp table used in three or more
    downstream joins that lacks one.
 
+6. **Non-covering index supporting `CROSS APPLY` / `LATERAL JOIN`
+   with `TOP K` and a wide SELECT.** When a CROSS APPLY's inner
+   SELECT projects multiple columns and the supporting index does
+   NOT `INCLUDE` them, every match becomes a key lookup back into
+   the heap. At any meaningful inner-table size the optimizer
+   prices the lookups as expensive and switches the plan to a hash
+   join over the entire inner table. The fix is to make the index
+   covering:
+   ```sql
+   -- BAD (key-only, lookups force hash plan at scale):
+   CREATE INDEX ix_pool_qrn ON #pool (quarter_start, rn_in_q);
+
+   -- GOOD (covering -- optimizer keeps the seek):
+   CREATE INDEX ix_pool_qrn ON #pool (quarter_start, rn_in_q)
+     INCLUDE (PATID, UID, BIRTH_DATE, SEX, RACE, /* etc. */);
+   ```
+   Flag as **Critical** when the inner table is >5M rows; Major
+   otherwise. Also recommend adding `WITH (INDEX(ix_pool_qrn))` on
+   the inner reference for freshly-built temp tables where stats
+   may be missing.
+
+7. **Inline CTE driving `CROSS APPLY` / `LATERAL JOIN`.** When the
+   outer side of a CROSS APPLY is a CTE rather than a materialized
+   temp table with its own index, the optimizer can flip the join
+   order, recompute the CTE inline, or push filters in suboptimal
+   ways. For any CROSS APPLY against an inner table of >1M rows
+   the outer should be a temp table:
+   ```sql
+   -- BAD: inline CTE drives CROSS APPLY at scale.
+   WITH t_positioned AS (...)
+   SELECT ... FROM t_positioned tp CROSS APPLY (...);
+
+   -- GOOD: materialize first.
+   SELECT ... INTO #t_positioned FROM ...;
+   CREATE INDEX ix_t_pos ON #t_positioned (...);
+   SELECT ... FROM #t_positioned tp CROSS APPLY (...);
+   ```
+   Flag as **Major** unless inner table size is already <100K rows.
+
+8. **Risk-set sampling via per-treated CROSS APPLY over an
+   unbucketed comparator pool.** The naïve sequential-TTE pattern
+   `FROM #treated t CROSS APPLY (SELECT TOP K cp2.* FROM #comp_pool
+   cp2 WHERE <per-treated-eligibility> ORDER BY NEWID())` is
+   `O(N_treated × |#comp_pool|)`. For typical observational scales
+   (10⁴+ treateds × 10⁵+ pool) it does not finish. Required
+   rewrite is documented in WORKER.md: bucket treateds by
+   trial-window (e.g. quarter), build a pre-ranked
+   `#comp_per_window` once per (window, comparator) pair, then
+   per-treated draw via deterministic `t_idx_in_w` × K offset.
+   Flag as **Critical** whenever the protocol uses risk-set
+   sampling and either `N_treated > 10K` or `|#comp_pool| > 100K`.
+
+9. **No recency pre-filter on `#comp_pool`.** When the candidate
+   pool is millions of rows and the analysis needs an "active in
+   the last N days" filter per trial, dropping pool members with
+   no qualifying activity ANYWHERE in the union of trial windows'
+   lookback ranges is essentially free (one EXISTS per pool
+   member against an indexed event pool) and typically cuts
+   downstream window-bucketed expansion work by 5-30%. Flag as
+   **Minor** if absent on protocols with `|#comp_pool| > 1M`.
+
+10. **No per-sub-step diagnostic logging in cohort-build scripts
+    with > 5 `SELECT INTO #temp` statements.** Without it, multi-
+    hour stalls are opaque and the next debugging iteration has
+    no signal to act on. Recommend the `step_log()` pattern from
+    WORKER.md ("SQL perf: log timing + tempdb between sub-queries").
+    Flag as **Minor** -- the script will work, but failure
+    diagnosis takes orders of magnitude longer without it.
+
 **Checklist — severity grading when you list findings:**
 
 | Severity | When to use |
