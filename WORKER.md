@@ -1299,12 +1299,23 @@ script_dir <- function() {
   getwd()
 }
 
-main <- function() {
+# script_path: optional explicit path to this .R file. Pass it whenever
+# R's working directory might not match the script's directory --
+# script_dir() falls back to getwd() once source() has returned, and a
+# wrong cwd silently writes return/checkpoint to the wrong place AND
+# defeats AUTOTTE_PUBONLY=1 (because file.exists(state_path) is FALSE
+# for the resolved-but-wrong path). The operator can always force the
+# right resolution with main(script_path = "/path/to/protocol_NN_analysis.R").
+main <- function(script_path = NULL) {
   # PHI boundary: return/ holds aggregate artifacts safe to copy off the
   # secure host (JSON, HTML, PDF, PNG); checkpoint/ holds the .rds fast-
   # resume state (patient-level rows) and must stay on the secure host.
   # The operator reviews return/ then copies its contents back to AutoTTE.
-  out_dir        <- script_dir()
+  out_dir <- if (!is.null(script_path)) {
+    dirname(normalizePath(script_path, mustWork = TRUE))
+  } else {
+    script_dir()
+  }
   return_dir     <- file.path(out_dir, "return")
   checkpoint_dir <- file.path(out_dir, "checkpoint")
   dir.create(return_dir,     recursive = TRUE, showWarnings = FALSE)
@@ -1316,8 +1327,25 @@ main <- function() {
   # (e.g. interactive package prompts) without paying the hours-long
   # cohort-build + model-fit cost again.
   state_path <- file.path(checkpoint_dir, "protocol_NN_state.rds")
-  if (nzchar(Sys.getenv("AUTOTTE_PUBONLY")) && file.exists(state_path)) {
-    message(sprintf("AUTOTTE_PUBONLY=1 -- loading state from %s", state_path))
+
+  # Diagnostic banner: surface exactly which paths main() resolved to and
+  # whether the checkpoint is reachable. Without this, AUTOTTE_PUBONLY=1
+  # falls through silently when script_dir() returns the wrong directory
+  # (operator sees the full Step 1-9 pipeline run and assumes the env var
+  # was ignored, with no signal that the checkpoint path was wrong).
+  pubonly <- nzchar(Sys.getenv("AUTOTTE_PUBONLY"))
+  ckpt_ok <- file.exists(state_path)
+  message(sprintf("[main] out_dir       = %s", out_dir))
+  message(sprintf("[main] return_dir    = %s", return_dir))
+  message(sprintf("[main] checkpoint    = %s%s", state_path,
+                  if (ckpt_ok) " [present]" else " [MISSING]"))
+  message(sprintf("[main] AUTOTTE_PUBONLY=%s  -> %s",
+                  Sys.getenv("AUTOTTE_PUBONLY", unset = "<unset>"),
+                  if (pubonly && ckpt_ok)   "FAST-RESUME (skip SQL+fit)"
+                  else if (pubonly)          "FALLING BACK to full pipeline (checkpoint MISSING at the path above)"
+                  else                       "full pipeline (env var not set)"))
+
+  if (pubonly && ckpt_ok) {
     state <- readRDS(state_path)
     save_outputs(state$fit, state$df, return_dir)
     message(sprintf("=== protocol_NN publication outputs regenerated (%s) ===", Sys.time()))
