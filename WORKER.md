@@ -1238,6 +1238,21 @@ disclosure_check <- function(df, k = 11, label = "") {
 disclosure_check_json <- function(x, k = 11, path = "results") {
   forbidden <- c("PATID", "PATIENTID", "PATIENT_ID", "MRN", "SUBJECT_ID",
                  "DOB", "BIRTH_DATE", "DEATH_DATE", "ENCOUNTERID")
+  # Subtree names that carry protocol-design parameters or model metadata
+  # (window sizes, tuning knobs, k thresholds, sensitivity-analysis design
+  # parameters, gate-failure metadata) -- NOT cell counts. Integer values
+  # 0 < n < k inside these are EXPECTED (e.g., induction_days=2,
+  # k_comparators=10, disclosure_k=11, gate$n_arms=1, qba assumed_
+  # ascertainment=1.0 [stored as 1.0 but R treats 1.0 == floor(1.0)]).
+  # Direct-identifier name checks still run inside these subtrees; only
+  # the small-integer cell-count test is skipped when the current path
+  # traverses any of these keys.
+  metadata_keys <- c("design", "config", "parameters", "meta", "metadata",
+                     "database", "study_window", "protocol_id", "gate",
+                     "sensitivity_analyses")
+  path_segments <- strsplit(path, "$", fixed = TRUE)[[1]]
+  in_metadata <- any(tolower(path_segments) %in% metadata_keys)
+
   if (!is.null(names(x))) {
     hit <- intersect(toupper(names(x)), forbidden)
     if (length(hit)) stop(sprintf(
@@ -1249,7 +1264,7 @@ disclosure_check_json <- function(x, k = 11, path = "results") {
       disclosure_check_json(x[[nm]], k = k,
                             path = paste0(path, "$", nm))
     }
-  } else if (is.numeric(x) && length(x) > 0 &&
+  } else if (!in_metadata && is.numeric(x) && length(x) > 0 &&
              all(is.na(x) | (x >= 0 & x == floor(x)))) {
     small <- !is.na(x) & x > 0 & x < k
     if (any(small)) stop(sprintf(
