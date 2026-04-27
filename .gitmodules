@@ -7,3 +7,6 @@
 [submodule "results/colonoscopy"]
 	path = results/colonoscopy
 	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-colonoscopy.git
+[submodule "results/leader"]
+	path = results/leader
+	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-leader.git
