@@ -10,3 +10,6 @@
 [submodule "results/leader"]
 	path = results/leader
 	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-leader.git
+[submodule "results/duplicate_medical_records"]
+	path = results/duplicate_medical_records
+	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-duplicate-mrn.git
