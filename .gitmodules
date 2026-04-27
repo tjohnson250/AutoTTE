@@ -4,3 +4,6 @@
 [submodule "results/uric-acid"]
 	path = results/uric-acid
 	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-uric-acid.git
+[submodule "results/colonoscopy"]
+	path = results/colonoscopy
+	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-colonoscopy.git
