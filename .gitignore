@@ -31,3 +31,12 @@ Rplots.pdf
 # They are local checkpoints for AUTOTTE_PUBONLY=1 fast-resume on the
 # secure host — the AutoTTE pipeline does not read them.
 *.rds
+
+# Belt-and-suspenders: refuse any file with the institution-private
+# Secure PCORnet CDW name in the public parent repo, regardless of
+# which directory it lives in. Catches the rare hand-edit-in-wrong-
+# folder mistake (e.g. dragging the profile into results/ or tools/).
+# Files inside databases/local/ are unaffected -- that path is a git
+# submodule and is not subject to the parent repo's .gitignore matching.
+*secure_pcornet_cdw*
+*secure*pcornet*
