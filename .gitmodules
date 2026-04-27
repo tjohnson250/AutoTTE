@@ -1,3 +1,6 @@
 [submodule "databases/local"]
 	path = databases/local
 	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-local.git
+[submodule "results/uric-acid"]
+	path = results/uric-acid
+	url = git@gitpapl1.uth.tmc.edu:big-arc/research/autotte-uric-acid.git
