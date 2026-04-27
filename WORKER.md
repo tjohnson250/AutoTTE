@@ -416,6 +416,81 @@ if (nrow(cohort) == 0) {
 
 Before `weightit()`, verify the treatment variable has >= 2 values.
 
+### Degenerate factor / modifier guard
+
+Any factor referenced by a model formula that has fewer than 2 *observed*
+levels in the analytic cohort will trip
+`contrasts can be applied only to factors with 2 or more levels` inside
+`model.matrix()` — the error fires from `coxph()`, `glm()`, `weightit()`,
+or anything else that builds a design matrix. Cohort-level data
+properties make this a runtime issue: e.g., 76% of duplicate-MRN UIDs
+have `cmb_score = 0`, so a quartile-based comorbidity modifier
+collapses to a single "Q1" level and the interaction Cox dies. The
+script must keep running and complete the analyses that ARE estimable.
+
+**For any subgroup-CATE / interaction-Cox / sensitivity-fit script,
+detect once at the start of the model-fit function and gate every
+formula construction on the result.** Do NOT just rely on `tryCatch()`
+around the fit — that loses the partial result you could have produced
+with the other modifiers.
+
+```r
+is_estimable_factor <- function(x) {
+  if (is.factor(x) || is.character(x) || is.logical(x)) {
+    length(unique(stats::na.omit(x))) >= 2L
+  } else {
+    isTRUE(stats::sd(x, na.rm = TRUE) > 0)
+  }
+}
+modifier_vars <- c("race_cat", "age_band", "cmb_quartile", "hispanic_cat",
+                   "calendar_year")  # every factor any formula references
+estimable <- vapply(
+  modifier_vars,
+  function(v) v %in% names(df_fit) && is_estimable_factor(df_fit[[v]]),
+  logical(1)
+)
+names(estimable) <- modifier_vars
+degenerate <- modifier_vars[!estimable]
+if (length(degenerate) > 0L) {
+  message(sprintf(
+    "[fit] degenerate modifier(s) -- single observed level on this cohort, terms referencing them will be dropped from formulas: %s",
+    paste(degenerate, collapse = ", ")))
+}
+
+# Build a formula from a character vector of RHS terms, dropping any
+# term that references a degenerate variable. Use this for EVERY
+# formula in the function -- primary fit and each sensitivity.
+build_formula <- function(lhs, terms) {
+  keep <- character(0)
+  for (term in terms) {
+    vars_in_term <- all.vars(parse(text = term)[[1]])
+    if (!any(vars_in_term %in% degenerate)) keep <- c(keep, term)
+  }
+  if (length(keep) == 0L) {
+    stop(sprintf(
+      "All terms dropped from formula '%s ~ ...' due to degenerate modifiers (%s).",
+      lhs, paste(degenerate, collapse = ", ")), call. = FALSE)
+  }
+  stats::as.formula(paste(lhs, "~", paste(keep, collapse = " + ")))
+}
+
+# Then for every formula:
+form_full <- build_formula(
+  "survival::Surv(followup_days, event)",
+  c("treated * race_cat", "treated * cmb_quartile",
+    "sex_cat", "factor(calendar_year)")
+)
+```
+
+Also gate per-modifier downstream loops on `estimable[modifier]` so
+positivity-cell tables, CATE extraction, and sensitivity sub-fits all
+skip the degenerate ones cleanly. Record the list in the result JSON
+(`degenerate_modifiers = degenerate`) so the report-writer can
+explicitly note which CATEs / sensitivities were not estimable on this
+cohort. The full pattern in context lives in
+`results/duplicate_medical_records/secure_pcornet_cdw/protocols/protocol_02_analysis.R`
+(see `fit_q2()`).
+
 ### Figure and Table File Generation
 
 Analysis scripts run standalone via `Rscript`. Use `ggsave()` for ggplot
@@ -445,6 +520,146 @@ evalue_result <- tryCatch({
 results$evalue <- if (!is.null(evalue_result)) evalue_result else
   list(point = 1, ci = 1, note = "CI crosses the null; E-value is 1 by definition.")
 ```
+
+### IPCW for loss-to-follow-up (default for any TTE)
+
+In any target trial emulation built on EHR data, **loss to follow-up
+is almost always informative**. The dual-purpose-of-encounters problem
+makes this central: encounters are simultaneously the data-generating
+mechanism (no encounter -> patient invisible) AND a proxy for outcome
+events. A patient with no encounter for 6 months might be event-free,
+dead at home, system-switched, or moved -- the data can't tell which.
+Treating "no encounter" as "event-free" biases the effect estimate
+when the censoring mechanism (system disengagement) depends on the
+exposure or the outcome.
+
+**The exposure plausibly causing differential disengagement is a
+particularly strong indication.** Examples: an MRN tangle motivating
+care elsewhere; a serious diagnosis triggering a specialty-center
+referral; a treatment prompting pharmacy-network change; loss of
+insurance correlated with treatment discontinuation. Any TTE on
+observational EHR data should *assume* informative censoring unless
+the protocol document explicitly defends non-informativeness
+conditional on baseline covariates.
+
+**Default protocol behavior**: implement IPCW on top of IPTW. Reference:
+Robins & Finkelstein 2000; Hernán et al. 2005 *Epidemiology*
+16(5):592-599; Hernán & Robins 2020 *Causal Inference: What If* §17.
+
+#### Operational steps
+
+1. **Define the censoring event empirically from encounter activity,
+   not from the ENROLLMENT table.** `ENROLLMENT.ENR_END_DATE` is
+   notoriously unreliable in CDM data. The defensible operationalization
+   is "no `ENC_TYPE IN ('IP','ED','AV','OA','EI')` encounter in a
+   rolling X-day window," with X = 90, 180, or per-protocol. Evaluate
+   at discrete time slices (typically monthly). Death is NOT a
+   censoring event when it's part of the composite outcome; it IS
+   censoring for non-mortality components in a competing-risk
+   decomposition.
+
+2. **Model the censoring hazard with the exposure as a predictor.**
+   Discrete-time pooled logistic on `at_risk_t ~ A + L + factor(month)`
+   where `L` is the same baseline-covariate vector used in the IPTW
+   model and `A` is exposure. The exposure-as-predictor is critical:
+   omit it and you can't detect that exposed patients drop out at a
+   different rate.
+
+3. **Compute stabilized IPCW** with marginal-by-exposure numerators:
+   `sw_c(t) = ∏_{k≤t} (1 - h_num(k)) / ∏_{k≤t} (1 - h_full(k))`.
+   Stabilization keeps the weight distribution well-behaved; truncate
+   at the 99th percentile per arm if tails remain heavy.
+
+4. **Multiply with IPTW** to form the combined time-varying weight:
+   `final_weight(t) = sw_iptw * sw_c(t)`. Expand to long format with
+   one row per `(patid, time slice)` via `survival::tmerge()` or a
+   manual long pivot.
+
+5. **Refit the primary outcome model** with the combined weight,
+   `Surv(tstart, tstop, event)`, `cluster = patid` for sandwich
+   variance.
+
+6. **Report unadjusted vs IPCW-adjusted HRs side-by-side** as the
+   primary diagnostic. Within ~10% of each other -> differential LTFU
+   is not biasing much. Diverging -> the IPCW-adjusted estimate is
+   the formally identified ITT effect; the unadjusted is reported only
+   as a "naive" comparator.
+
+#### Reference R skeleton
+
+```r
+# 1. SQL: build #enc_followup with rows = (row_id, days_since_t_zero)
+#    for each in-network ENC_TYPE encounter in (t_zero, t_zero + followup_days].
+#    Pull into R as `enc_fu`.
+
+# 2. Long format: one row per (row_id, month) for m = 1..n_months.
+#    `at_risk_t` = (days since most recent encounter <= grace_window).
+#    `event_t`  = (event occurred in [m-1, m] window).
+#    `C_t`      = (1 - at_risk_t).  -- censored AT month m.
+long_df <- build_at_risk_long(df, enc_fu, n_months = 12, grace_days = 180)
+
+# 3. Stabilized IPCW via two pooled logistic models.
+fit_full <- glm(C_t ~ treated + age_at_tzero + sex_cat + race_cat +
+                       hispanic_cat + cmb_t2d + cmb_ckd + cmb_hf +
+                       cmb_copd + cmb_htn + cmb_cad + cmb_af +
+                       cmb_stroke + cmb_dementia + cmb_obesity +
+                       log_enc_count_365d + factor(month),
+                data = long_df, family = binomial())
+fit_num  <- glm(C_t ~ treated + factor(month),
+                data = long_df, family = binomial())
+long_df$h_full <- predict(fit_full, type = "response")
+long_df$h_num  <- predict(fit_num,  type = "response")
+long_df <- long_df %>%
+  arrange(row_id, month) %>%
+  group_by(row_id) %>%
+  mutate(sw_c = cumprod(1 - h_num) / cumprod(1 - h_full)) %>%
+  ungroup()
+
+# 4. Truncate at 99th pct per arm; combine with IPTW.
+q99 <- with(long_df, tapply(sw_c, treated,
+                            function(x) quantile(x, 0.99, na.rm = TRUE)))
+long_df$sw_c <- pmin(long_df$sw_c, q99[as.character(long_df$treated)])
+long_df$weights_combined <- long_df$weights_ate * long_df$sw_c
+
+# 5. Time-varying Cox on combined weight.
+fit_ipcw <- survival::coxph(
+  Surv(tstart, tstop, event_t) ~ treated + ...,  # same RHS as primary
+  data = long_df, weights = weights_combined,
+  robust = TRUE, cluster = patid
+)
+
+# 6. Diagnostic: weight summary by arm + naive vs IPCW-adjusted contrast.
+message(sprintf("IPCW weight summary by arm: %s",
+                paste(capture.output(by(long_df$sw_c, long_df$treated, summary)),
+                      collapse = "\n")))
+results$primary_ipcw_adjusted <- list(hr = exp(coef(fit_ipcw)["treated"]), ...)
+results$primary_unadjusted    <- list(hr = exp(coef(fit_naive)["treated"]), ...)
+```
+
+#### Required diagnostics + sensitivities
+
+- **Censoring-model balance**: stabilized weights should have mean ≈ 1
+  per arm; SD < ~3; max < ~20 after truncation. Print these to the
+  console and include in the results JSON.
+- **Cumulative incidence of censoring** by exposure arm at month 6 and
+  month 12, with disclosure-gated counts. If the curves diverge, that
+  IS the differential-LTFU signal.
+- **Sensitivity over grace window**: re-run with X = 90, 180, 270 days.
+  Point estimates should be roughly stable across X if the model is
+  well-specified.
+- **Naive vs IPCW-adjusted contrast** is the primary diagnostic and
+  belongs in the protocol's main result table, not buried in a
+  sensitivity appendix.
+
+#### When non-informative censoring CAN be defended
+
+Rare in EHR work, but possible if (a) the cohort is restricted to a
+fully-captured subpopulation (e.g., closed-system enrollees with
+verified ENROLLMENT coverage AND a cross-system claims linkage), or
+(b) the outcome is one whose ascertainment doesn't depend on
+in-network encounters (e.g., death linked from a state vital records
+file). Document the defense explicitly in protocol §3 (Censoring) and
+expect Phase 3 review to challenge it.
 
 ## Publication-Quality Figures and Tables (required)
 
@@ -1060,6 +1275,95 @@ pools, materialize CTEs that drive APPLY/LATERAL, covering indexes
 on temp tables, recency pre-filter, window-bucketed risk-set
 sampling, sub-step logging — applies regardless of engine.
 
+### Reference: bucketed risk-set sampling — full MSSQL skeleton
+
+All five rules above tied into one drop-in pipeline. Substitute
+`window_start` with the protocol's trial-window unit (day / month /
+quarter), `{{COLS}}` with the study's eligibility / demographic
+column list (must be the same list in every spot), and `@lookback`
+with the lookback days. Call `step5_log()` (defined above) after
+each numbered step.
+
+```sql
+-- 0. Recency pre-filter: drop pool members with no qualifying activity
+--    anywhere in the union of all trial windows' lookback ranges.
+DECLARE @earliest_need date = (SELECT DATEADD(DAY, -@lookback, MIN(t_zero)) FROM #treated);
+DECLARE @latest_need   date = (SELECT MAX(t_zero) FROM #treated);
+DELETE cp FROM #comp_pool cp
+WHERE NOT EXISTS (
+  SELECT 1 FROM #enc_eligibility_pool e
+  WHERE e.PATID = cp.PATID
+    AND e.event_date BETWEEN @earliest_need AND @latest_need
+);
+
+-- 1. Distinct trial windows.
+SELECT DISTINCT DATEFROMPARTS(YEAR(t_zero), ((MONTH(t_zero) - 1) / 3) * 3 + 1, 1) AS window_start
+INTO #window_list FROM #treated;
+CREATE INDEX ix_window_list ON #window_list (window_start);
+
+-- 2. (PATID, window) pairs that pass the per-window lookback EXISTS.
+--    Hash-build on #comp_pool, hash-probe #enc_eligibility_pool early.
+SELECT cp.PATID, w.window_start
+INTO #active_pw
+FROM #enc_eligibility_pool e
+INNER JOIN #comp_pool  cp ON cp.PATID = e.PATID
+INNER JOIN #window_list w
+  ON e.event_date BETWEEN DATEADD(DAY, -@lookback, w.window_start) AND w.window_start
+GROUP BY cp.PATID, w.window_start;
+CREATE INDEX ix_active_pw ON #active_pw (window_start, PATID);
+
+-- 3. Per-window eligible comparators with NEWID-randomized rank.
+--    Apply remaining per-comparator filters here. The covering INCLUDE
+--    is REQUIRED — without it the optimizer flips to a hash plan and
+--    Step 5 sits silently for hours.
+WITH eligible AS (
+  SELECT pw.window_start, cp2.{{COLS}}
+  FROM #active_pw pw
+  INNER JOIN #comp_pool cp2 ON cp2.PATID = pw.PATID
+  LEFT  JOIN #death_ded dd2 ON cp2.PATID = dd2.PATID
+  WHERE cp2.cohort_entry_date <= pw.window_start
+    AND DATEDIFF(YEAR, cp2.BIRTH_DATE, pw.window_start) >= 18
+    AND (dd2.DEATH_DATE IS NULL OR dd2.DEATH_DATE > pw.window_start)
+)
+SELECT window_start, {{COLS}},
+       ROW_NUMBER() OVER (PARTITION BY window_start ORDER BY NEWID()) AS rn_in_w
+INTO #comp_per_w FROM eligible;
+CREATE INDEX ix_comp_per_w_qrn ON #comp_per_w (window_start, rn_in_w)
+  INCLUDE ({{COLS}});  -- must list EVERY column the next step reads.
+
+-- 4. Materialize positioned-treated as its OWN table (don't inline as
+--    a CTE driver — the optimizer flips to hash and the seek is lost).
+SELECT t.PATID, t.UID, t.t_zero,
+       DATEFROMPARTS(YEAR(t.t_zero), ((MONTH(t.t_zero) - 1) / 3) * 3 + 1, 1) AS window_start,
+       ROW_NUMBER() OVER (
+         PARTITION BY DATEFROMPARTS(YEAR(t.t_zero), ((MONTH(t.t_zero) - 1) / 3) * 3 + 1, 1)
+         ORDER BY NEWID()
+       ) AS t_idx_in_w
+INTO #t_positioned FROM #treated t;
+CREATE INDEX ix_t_positioned ON #t_positioned (window_start, t_idx_in_w);
+
+-- 5. Final CROSS APPLY: each treated picks K consecutive ranks from
+--    its window's pre-ranked comparators. WITH (INDEX(...)) is the
+--    belt-and-suspenders that locks in the seek plan we want.
+SELECT 0 AS treated, cp.{{COLS}}, tp.UID AS paired_exposed_uid
+INTO #comparator
+FROM #t_positioned tp
+CROSS APPLY (
+  SELECT TOP (@K) c.{{COLS}}
+  FROM #comp_per_w c WITH (INDEX(ix_comp_per_w_qrn))
+  WHERE c.window_start = tp.window_start
+    AND c.rn_in_w BETWEEN ((tp.t_idx_in_w - 1) * @K) + 1 AND tp.t_idx_in_w * @K
+    AND c.PATID <> tp.PATID
+) cp;
+CREATE INDEX ix_comparator_patid ON #comparator (PATID);
+```
+
+A multi-hour stall in any of the five sub-steps now points at exactly
+which operator is hung. If `step5_log()` shows large
+`internal_objects_alloc` growth between two adjacent sub-steps, the
+operator that just finished is spilling tempdb (hash aggregate or
+sort) and is the one to optimize.
+
 Example:
 
 ```r
@@ -1250,8 +1554,24 @@ disclosure_check_json <- function(x, k = 11, path = "results") {
   metadata_keys <- c("design", "config", "parameters", "meta", "metadata",
                      "database", "study_window", "protocol_id", "gate",
                      "sensitivity_analyses")
+  # Leaf column / element names that are LABELS, not counts. A binary
+  # treatment indicator (`treated` 0/1), a month index (`month` 1-12),
+  # row IDs, time-varying tstart/tstop, etc. all pass the
+  # "non-negative integer-valued" heuristic below but are obviously
+  # not counts. Skipping them here prevents false "0 < n < k" stops
+  # on label columns that happen to be small integers (e.g., the
+  # IPCW cens_curve's `treated` column tripping on the value 1).
+  # Direct-identifier name checks still run; only the small-integer
+  # cell-count test is skipped when the leaf name matches.
+  label_leaves <- c("treated", "month", "row_id", "rowid", "patid", "uid",
+                    "lid", "id", "rn_in_w", "rn_in_q", "t_idx_in_w",
+                    "t_idx_in_q", "tstart", "tstop", "rank", "trial",
+                    "trial_id", "trial_n")
   path_segments <- strsplit(path, "$", fixed = TRUE)[[1]]
-  in_metadata <- any(tolower(path_segments) %in% metadata_keys)
+  in_metadata   <- any(tolower(path_segments) %in% metadata_keys)
+  last_seg      <- if (length(path_segments) > 0L)
+                     tolower(path_segments[length(path_segments)]) else ""
+  is_label_leaf <- last_seg %in% label_leaves
 
   if (!is.null(names(x))) {
     hit <- intersect(toupper(names(x)), forbidden)
@@ -1264,7 +1584,8 @@ disclosure_check_json <- function(x, k = 11, path = "results") {
       disclosure_check_json(x[[nm]], k = k,
                             path = paste0(path, "$", nm))
     }
-  } else if (!in_metadata && is.numeric(x) && length(x) > 0 &&
+  } else if (!in_metadata && !is_label_leaf && is.numeric(x) &&
+             length(x) > 0 &&
              all(is.na(x) | (x >= 0 & x == floor(x)))) {
     small <- !is.na(x) & x > 0 & x < k
     if (any(small)) stop(sprintf(
